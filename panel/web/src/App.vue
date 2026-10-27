@@ -4,7 +4,8 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '0.93',
+  version: '0.94',
+  mihomo_version: '',
   csrf: '',
   login_error: '',
   flash_msg: '',
@@ -22,6 +23,7 @@ const boot = window.__CS_BOOT__ || {
     active: 'active',
     state_txt: '运行中',
     state_cls: 'ok',
+    mihomo_version: '',
     inbound_total: 0,
     inbound_listening: 0,
     outbound_nodes_count: 0,
@@ -44,7 +46,8 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '0.93',
+  version: boot.version || '0.94',
+  mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
   zb_url: boot.zb_url || '',
@@ -60,6 +63,11 @@ const state = reactive({
   all_proxies_yaml: boot.all_proxies_yaml || '',
   proxies: Array.isArray(boot.proxies) ? boot.proxies : [],
   providers: Array.isArray(boot.providers) ? boot.providers : [],
+})
+
+const topbarVersionText = computed(() => {
+  const mv = String(state.mihomo_version || (state.status && state.status.mihomo_version) || '').trim()
+  return mv ? `v${state.version} · mihomo ${mv}` : `v${state.version}`
 })
 
 const VALID_TABS = ['inbounds', 'outbounds', 'readable', 'advanced']
@@ -103,7 +111,7 @@ const PROTOCOLS = [
     value: 'vless-reality',
     label: 'VLESS Reality',
     defaultName: 'VlessReality',
-    desc: '免要证书的新一代协议',
+    desc: '免证书的新一代协议',
     lockedNote: '已锁定安全默认：默认启用 VLESS Encryption (vless-x25519)，SNI 从内置域名池随机抽取',
   },
   {
@@ -239,7 +247,63 @@ const trafficDetail = computed(() => {
 })
 
 async function updateCoreDirect() {
-  await postAction('/action/update-core', {}, '/action/update-core')
+  if (busyKey.value) return
+  busyKey.value = '/action/update-core'
+  const body = new URLSearchParams({ csrf: state.csrf, async: '1' }).toString()
+  try {
+    const startRes = await fetch('/action/update-core', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-Requested-With': 'fetch',
+        Accept: 'application/json',
+      },
+      body,
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+    if (startRes.status === 401) {
+      window.location.href = '/login'
+      return
+    }
+    const startData = await startRes.json().catch(() => null)
+    // If server finished synchronously (e.g. direct response with running === false)
+    if (startData && startData.running === false) {
+      if (startData.state) applyServerState(startData.state)
+      showToast(startData.msg || (startData.ok ? '内核更新成功' : '更新内核失败'), !!startData.ok)
+      return
+    }
+  } catch {
+    // Even if starting the update blips the network, fall through to poll /api/update-core-status
+  }
+
+  const deadline = Date.now() + 180000
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1200))
+    try {
+      const pollRes = await fetch('/api/update-core-status', {
+        headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+      })
+      if (pollRes.status === 401) {
+        window.location.href = '/login'
+        return
+      }
+      if (!pollRes.ok) continue
+      const pollData = await pollRes.json()
+      if (pollData && pollData.running === false) {
+        if (pollData.state) applyServerState(pollData.state)
+        showToast(pollData.msg || (pollData.ok ? '内核更新成功' : '更新内核失败'), !!pollData.ok)
+        busyKey.value = ''
+        return
+      }
+    } catch {
+      // Transient connection drop while mihomo restarts — keep polling
+    }
+  }
+  busyKey.value = ''
+  showToast('更新内核等待超时，请刷新页面查看内核版本状态', false)
 }
 
 async function checkUpdateAndPrompt() {
@@ -266,8 +330,12 @@ async function refreshServerStateSilent() {
     })
     if (res.ok) {
       const data = await res.json()
-      if (data && data.status) {
-        Object.assign(state.status, data.status)
+      if (data) {
+        if (data.mihomo_version) state.mihomo_version = data.mihomo_version
+        if (data.status) {
+          Object.assign(state.status, data.status)
+          if (data.status.mihomo_version) state.mihomo_version = data.status.mihomo_version
+        }
       }
     }
   } catch {}
@@ -275,6 +343,8 @@ async function refreshServerStateSilent() {
 
 function applyServerState(newState) {
   if (!newState) return
+  if (newState.version) state.version = newState.version
+  if (newState.mihomo_version) state.mihomo_version = newState.mihomo_version
   if (newState.csrf) state.csrf = newState.csrf
   if (newState.sub_url !== undefined) state.sub_url = newState.sub_url
   if (newState.zb_url !== undefined) state.zb_url = newState.zb_url
@@ -288,14 +358,26 @@ function applyServerState(newState) {
     state.custom_config_raw = newState.custom_config_raw
     customConfigText.value = newState.custom_config_raw
   }
-  if (newState.status) Object.assign(state.status, newState.status)
+  if (newState.status) {
+    Object.assign(state.status, newState.status)
+    if (newState.status.mihomo_version) state.mihomo_version = newState.status.mihomo_version
+  }
   if (Array.isArray(newState.inbounds)) state.inbounds = newState.inbounds
   if (newState.all_proxies_yaml !== undefined) state.all_proxies_yaml = newState.all_proxies_yaml
   if (Array.isArray(newState.proxies)) state.proxies = newState.proxies
   if (Array.isArray(newState.providers)) state.providers = newState.providers
 }
 
-async function postAction(url, params = {}, key = url, retry = 0) {
+function formatFetchError(err) {
+  const raw = String((err && err.message) || err || '')
+  if (/NetworkError|Failed to fetch|Load failed|network/i.test(raw)) {
+    return '网络连接中断或服务正在重启，请稍后刷新页面查看状态'
+  }
+  return `请求异常：${raw}`
+}
+
+async function postAction(url, params = {}, key = url) {
+  if (busyKey.value) return null
   busyKey.value = key
   const body = new URLSearchParams({ csrf: state.csrf, ...params }).toString()
   const ctrl = window.AbortController ? new AbortController() : null
@@ -339,11 +421,24 @@ async function postAction(url, params = {}, key = url, retry = 0) {
       showToast('请求超时（120s），请稍后刷新查看状态', false)
       return null
     }
-    if (retry < 1) {
-      await new Promise((r) => setTimeout(r, 350))
-      return postAction(url, params, key, retry + 1)
-    }
-    showToast(`网络请求异常：${(err && err.message) || err}`, false)
+    // If reload / restart momentarily dropped proxy connection, re-sync state via GET /api/state
+    try {
+      await new Promise((r) => setTimeout(r, 900))
+      const stRes = await fetch('/api/state', {
+        headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+      })
+      if (stRes.ok) {
+        const stData = await stRes.json()
+        applyServerState(stData)
+        if (url === '/action/reload' || url === '/action/restart') {
+          showToast('已重载配置并更新客户端订阅', true)
+          return { ok: true, state: stData }
+        }
+      }
+    } catch {}
+    showToast(formatFetchError(err), false)
     return null
   } finally {
     busyKey.value = ''
@@ -380,7 +475,13 @@ async function copyRaw(text, key) {
   document.body.removeChild(ta)
 }
 
+let pendingAddReqId = ''
+
 async function submitAddInbound() {
+  if (busyKey.value) return
+  if (!pendingAddReqId) {
+    pendingAddReqId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  }
   const payload = {
     kind: inboundForm.kind,
     name: inboundForm.name.trim() || currentDefaultName.value,
@@ -390,8 +491,10 @@ async function submitAddInbound() {
     mieru_transport: inboundForm.mieru_transport,
     http_tls: inboundForm.http_tls,
     socks_tls: inboundForm.socks_tls,
+    req_id: pendingAddReqId,
   }
   const res = await postAction('/inbounds/add', payload, 'add-inbound')
+  pendingAddReqId = ''
   if (res && res.ok) {
     inboundForm.port = ''
     inboundForm.name = currentDefaultName.value
@@ -631,7 +734,7 @@ onUnmounted(() => {
             <span
               class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80"
             >
-              v{{ state.version }}
+              {{ topbarVersionText }}
             </span>
           </div>
           <p class="text-xs text-slate-500 mt-0.5">服务端管理控制台 · 请登录</p>
@@ -723,7 +826,7 @@ onUnmounted(() => {
           <span
             class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80"
           >
-            v{{ state.version }}
+            {{ topbarVersionText }}
           </span>
         </div>
 
@@ -894,7 +997,7 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- TAB 1 (HOMEPAGE): Zashboard (Fixed on Home) + 客户端订阅 + 入站节点与添加监听器 -->
+      <!-- TAB 1 (HOMEPAGE): Zashboard (Fixed on Home) + 客户端订阅 + 入站节点与添加节点 -->
       <div v-show="activeTab === 'inbounds'" class="space-y-6">
         <!-- Top Fixed Core Cards: Zashboard 控制面板 & 客户端订阅链接 -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1055,7 +1158,7 @@ onUnmounted(() => {
           </section>
         </div>
 
-        <!-- 入站节点列表 & 添加监听器表单 -->
+        <!-- 入站节点列表 & 添加节点表单 -->
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           <!-- Left: Inbound Nodes List -->
           <section class="lg:col-span-7 bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs">
@@ -1081,7 +1184,7 @@ onUnmounted(() => {
             </div>
 
             <div v-if="state.inbounds.length === 0" class="py-12 text-center text-sm text-slate-400">
-              暂无入站节点，请在右侧添加监听器
+              暂无入站节点，请在右侧添加节点
             </div>
 
             <div v-else class="divide-y divide-slate-100 border border-slate-200/75 rounded-2xl overflow-hidden">
@@ -1147,10 +1250,10 @@ onUnmounted(() => {
             </div>
           </section>
 
-          <!-- Right: Locked-Default Add Listener Form -->
+          <!-- Right: Locked-Default Add Node Form -->
           <section class="lg:col-span-5 bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs">
             <div class="flex items-center justify-between gap-2 mb-4">
-              <h2 class="text-base font-bold text-slate-900">添加监听器</h2>
+              <h2 class="text-base font-bold text-slate-900">添加节点</h2>
               <span class="px-2.5 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700">
                 安全默认策略
               </span>
@@ -1526,7 +1629,7 @@ onUnmounted(() => {
                 id="converter-input"
                 v-model="converterInput"
                 rows="14"
-                placeholder='在此粘贴节点配置，例如：&#10;- {"name":"VlessReality|Clash|Reality","type":"vless","server":"1.2.3.4","port":28443,...}'
+                placeholder='在此粘贴节点配置，例如：&#10;- {"name":"VlessReality","type":"vless","server":"1.2.3.4","port":28443,...}'
                 class="w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-900 leading-relaxed focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
               ></textarea>
             </div>

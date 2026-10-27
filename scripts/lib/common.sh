@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # clashgate 公共函数：常量、日志、交互、环境持久化、下载与安装文件
 
-CS_VERSION=0.93
+CS_VERSION=0.94
 REPO_OWNER=${REPO_OWNER:-ClashGate}
 REPO_NAME=${REPO_NAME:-ClashGate}
 REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
@@ -51,7 +51,7 @@ if [[ ${REPO_NAME:-ClashGate} == ClashGateBeat ]]; then
 else
   TLS=${TLS:-production}
 fi
-DOMAIN="" EMAIL="" PANEL_PORT=""                           # 默认 Let's Encrypt 正式证书（production）；面板端口随机选空闲高端口
+DOMAIN="" EMAIL="" PANEL_PORT=""                           # 默认 Let's Encrypt 证书（production）；面板端口随机选空闲高端口
 CONTROLLER_PORT="" MIHOMO_SECRET=""                        # Mihomo external-controller-tls + zashboard 随机空闲高端口与密钥
 PANEL_PASS="" PANEL_HASH="" SUB_TOKEN="" WARNINGS=()
 STEP=0; TOTAL=8
@@ -175,10 +175,13 @@ tls_label() {
     printf '用户自备证书%s' "${iss:+（$iss）}"
     return 0
   fi
+  if [[ ${REPO_NAME:-ClashGate} == ClashGateBeat && $TLS == staging ]]; then
+    printf 'Let'"'"'s Encrypt 测试证书（staging）'
+    return 0
+  fi
   case $TLS in
-    staging)  printf 'Let'"'"'s Encrypt 测试证书（staging）' ;;
     internal) printf '自签证书（仅开发调试）' ;;
-    *)        printf 'Let'"'"'s Encrypt 正式证书' ;;
+    *)        printf 'Let'"'"'s Encrypt 证书' ;;
   esac
 }
 

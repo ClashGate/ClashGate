@@ -254,7 +254,7 @@ render_server() {
 proxy_line() { # name port uuid pub sid sni [enc]
   local enc_part=""
   [[ -n ${7:-} ]] && enc_part=$(printf ',"encryption":"%s"' "$7")
-  printf '{"name":"%s|Clash|Reality","type":"vless","server":"%s","port":%s,"uuid":"%s","tls":true,"flow":"xtls-rprx-vision","client-fingerprint":"safari"%s,"reality-opts":{"public-key":"%s","short-id":"%s"},"network":"tcp","udp":true,"servername":"%s"}' \
+  printf '{"name":"%s","type":"vless","server":"%s","port":%s,"uuid":"%s","tls":true,"flow":"xtls-rprx-vision","client-fingerprint":"safari"%s,"reality-opts":{"public-key":"%s","short-id":"%s"},"network":"tcp","udp":true,"servername":"%s"}' \
     "$1" "$SERVER_IP" "$2" "$3" "$enc_part" "$4" "$5" "$6"
 }
 
@@ -265,14 +265,14 @@ render_client() {
     [[ -n $name ]] || continue
     line=$(proxy_line "$name" "$port" "$uuid" "$pub" "$sid" "$sni" "${enc:-}")
     proxies+="  - $line"$'\n'
-    names+="      - \"$name|Clash|Reality\""$'\n'
+    names+="      - \"$name\""$'\n'
   done < "$STATE"
   if [[ -f $CS_ETC/inbounds.json ]]; then
     while IFS=$'\t' read -r line cname; do
       [[ -n $line ]] || continue
       proxies+="  - $line"$'\n'
       names+="      - $cname"$'\n'
-    done < <(jq -r '.[] | "\(.client | del(.["skip-cert-verify"]) | tojson)\t\(.client.name | tojson)"' "$CS_ETC/inbounds.json" 2>/dev/null || true)
+    done < <(jq -r '.[] | (.name // .client.name) as $n | "\(.client | del(.["skip-cert-verify"]) | .name = $n | tojson)\t\($n | tojson)"' "$CS_ETC/inbounds.json" 2>/dev/null || true)
   fi
   install -d -m 700 "$CLIENT_DIR"
   p_arg="${proxies%$'\n'}"; [[ -n $p_arg ]] || p_arg="  []"

@@ -333,7 +333,7 @@ do_info() {
     echo "    - $(proxy_line "$name" "$port" "$uuid" "$pub" "$sid" "$sni" "${enc:-}")"
   done < "$STATE"
   if [[ -f $CS_ETC/inbounds.json ]]; then
-    jq -rc '.[] | .client' "$CS_ETC/inbounds.json" 2>/dev/null | while IFS= read -r c; do
+    jq -rc '.[] | (.name // .client.name) as $n | .client | del(.["skip-cert-verify"]) | .name = $n' "$CS_ETC/inbounds.json" 2>/dev/null | while IFS= read -r c; do
       [[ -n $c ]] && echo "    - $c"
     done
   fi

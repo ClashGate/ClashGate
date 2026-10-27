@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v0.93 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
+"""ClashGate v0.94 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -35,7 +35,7 @@ import uuid as uuidlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse, quote
 
-VERSION = "0.93"
+VERSION = "0.94"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -118,7 +118,7 @@ DEFAULT_NODE_NAMES = {
     "socks": "SOCKS5",
 }
 PROTOCOL_DESCRIPTIONS = {
-    "vless-reality": "免要证书的新一代协议",
+    "vless-reality": "免证书的新一代协议",
     "shadowsocks": "经典轻量级加密协议，默认锁定 aes-256-gcm",
     "hysteria2": "新一代 UDP 协议",
     "snell": "轻量高效的私有协议，内置随机 TLS 伪装",
@@ -246,16 +246,19 @@ def load_inbounds() -> list:
     try:
         with open(INBOUNDS) as f:
             items = json.load(f)
+        out = []
+        seen_names = set()
         for item in items:
             if isinstance(item, dict) and isinstance(item.get("client"), dict):
                 item["client"].pop("skip-cert-verify", None)
                 if item.get("name"):
                     nm = str(item["name"])
-                    cnm = str(item["client"].get("name", ""))
-                    if "|Clash|" in cnm and not cnm.startswith(nm + "|Clash|"):
-                        suffix = cnm.split("|Clash|", 1)[1]
-                        item["client"]["name"] = f"{nm}|Clash|{suffix}"
-        return items
+                    item["client"]["name"] = nm
+                    if nm in seen_names:
+                        continue
+                    seen_names.add(nm)
+                out.append(item)
+        return out
     except FileNotFoundError:
         return []
 
@@ -1098,7 +1101,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
         if not pub:
             pub = x25519_pub_from_priv(priv)
         client = {
-            "name": f"{label}|Clash|Reality", "type": "vless", "server": ip, "port": port,
+            "name": label, "type": "vless", "server": ip, "port": port,
             "uuid": uid, "tls": True, "flow": flow or "xtls-rprx-vision",
             "client-fingerprint": "safari",
         }
@@ -1117,7 +1120,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
     elif ltype == "vless":
         kind = "vless"
         client = {
-            "name": f"{label}|Clash|VLESS", "type": "vless", "server": srv, "port": port,
+            "name": label, "type": "vless", "server": srv, "port": port,
             "uuid": uid, "tls": has_cert, "udp": True,
         }
         if has_cert:
@@ -1152,7 +1155,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
     elif ltype in ("shadowsocks", "ss"):
         kind = "shadowsocks"
         client = {
-            "name": f"{label}|Clash|SS", "type": "ss", "server": ip, "port": port,
+            "name": label, "type": "ss", "server": ip, "port": port,
             "cipher": str(lst.get("cipher", "aes-256-gcm")),
             "password": str(lst.get("password", pw)), "udp": True,
         }
@@ -1160,7 +1163,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
         kind = "hysteria2"
         alpn = lst.get("alpn") if isinstance(lst.get("alpn"), list) else ["h3"]
         client = {
-            "name": f"{label}|Clash|Hy2", "type": "hysteria2", "server": domain, "port": port,
+            "name": label, "type": "hysteria2", "server": domain, "port": port,
             "password": str(lst.get("password") or pw), "sni": domain, "alpn": alpn,
             "udp": True,
         }
@@ -1172,7 +1175,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
         kind = "hysteria2-realm"
         alpn = lst.get("alpn") if isinstance(lst.get("alpn"), list) else ["h2", "http/1.1"]
         client = {
-            "name": f"{label}|Clash|Hy2Realm", "type": "hysteria2", "server": domain, "port": port,
+            "name": label, "type": "hysteria2", "server": domain, "port": port,
             "password": str(lst.get("token") or pw), "sni": domain, "alpn": alpn,
             "udp": True,
         }
@@ -1183,14 +1186,14 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
             prev_fp = str(prev["client"].get("client-fingerprint") or "")
         fp = prev_fp if prev_fp in ANYTLS_FP_POOL else random.choice(ANYTLS_FP_POOL)
         client = {
-            "name": f"{label}|Clash|AnyTLS", "type": "anytls", "server": domain, "port": port,
+            "name": label, "type": "anytls", "server": domain, "port": port,
             "password": str(lst.get("password") or pw), "sni": domain,
             "client-fingerprint": fp, "udp": True,
         }
     elif ltype == "vmess":
         kind = "vmess"
         client = {
-            "name": f"{label}|Clash|VMess", "type": "vmess", "server": srv, "port": port,
+            "name": label, "type": "vmess", "server": srv, "port": port,
             "uuid": uid, "alterId": alter_id, "cipher": "auto", "tls": has_cert, "udp": True,
         }
         if has_cert:
@@ -1206,7 +1209,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
     elif ltype == "trusttunnel":
         kind = "trusttunnel"
         client = {
-            "name": f"{label}|Clash|TrustTunnel", "type": "trusttunnel", "server": domain,
+            "name": label, "type": "trusttunnel", "server": domain,
             "port": port, "username": user, "password": pw, "sni": domain,
             "udp": True,
         }
@@ -1215,7 +1218,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
         ver = int(lst.get("version") or 5)
         obfs = lst.get("obfs-opts") if isinstance(lst.get("obfs-opts"), dict) else {"mode": "tls", "host": pick_reality_sni()}
         client = {
-            "name": f"{label}|Clash|Snell", "type": "snell", "server": ip, "port": port,
+            "name": label, "type": "snell", "server": ip, "port": port,
             "psk": str(lst.get("psk", "")), "version": ver, "udp": True, "obfs-opts": obfs,
         }
     elif ltype == "tuic":
@@ -1223,7 +1226,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
         cc = str(lst.get("congestion-controller") or "bbr")
         alpn = lst.get("alpn") if isinstance(lst.get("alpn"), list) else ["h3"]
         client = {
-            "name": f"{label}|Clash|TUICv5", "type": "tuic", "server": domain, "port": port,
+            "name": label, "type": "tuic", "server": domain, "port": port,
             "uuid": uid, "password": pw, "sni": domain, "alpn": alpn,
             "congestion-controller": cc, "udp-relay-mode": "native",
             "reduce-rtt": True, "udp": True,
@@ -1236,7 +1239,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
         cc = str(lst.get("congestion-controller") or "bbr")
         zrtt = bool(lst.get("zero-rtt", True))
         client = {
-            "name": f"{label}|Clash|ShadowQUIC", "type": "shadowquic", "server": ip, "port": port,
+            "name": label, "type": "shadowquic", "server": ip, "port": port,
             "username": user, "password": pw, "sni": jls_host, "alpn": ["h3"],
             "congestion-controller": cc, "zero-rtt": zrtt, "udp": True,
         }
@@ -1244,7 +1247,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
         kind = "mieru"
         tr = str(lst.get("transport") or "TCP").upper()
         client = {
-            "name": f"{label}|Clash|Mieru", "type": "mieru", "server": ip, "port": port,
+            "name": label, "type": "mieru", "server": ip, "port": port,
             "transport": tr, "username": user, "password": pw, "udp": True,
         }
     elif ltype in ("sudoku", "soduku"):
@@ -1253,7 +1256,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
         if prev and isinstance(prev.get("client"), dict) and prev["client"].get("key"):
             priv_k = prev["client"]["key"]
         client = {
-            "name": f"{label}|Clash|Sudoku", "type": "sudoku", "server": ip, "port": port,
+            "name": label, "type": "sudoku", "server": ip, "port": port,
             "key": priv_k, "aead-method": str(lst.get("aead-method", "chacha20-poly1305")),
             "padding-min": int(lst.get("padding-min", 2)), "padding-max": int(lst.get("padding-max", 7)),
             "table-type": str(lst.get("table-type", "prefer_ascii")),
@@ -1262,16 +1265,15 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
     elif ltype == "http":
         kind = "http"
         client = {
-            "name": f"{label}|Clash|HTTP", "type": "http", "server": srv, "port": port,
+            "name": label, "type": "http", "server": srv, "port": port,
             "username": user, "password": pw, "tls": has_cert, "udp": True,
         }
         if has_cert:
             client["sni"] = domain
     else:  # socks, socks5, mixed
         kind = "mixed" if ltype == "mixed" else "socks"
-        tag = "Mixed" if ltype == "mixed" else "SOCKS5"
         client = {
-            "name": f"{label}|Clash|{tag}", "type": "socks5", "server": srv, "port": port,
+            "name": label, "type": "socks5", "server": srv, "port": port,
             "username": user, "password": pw, "tls": has_cert, "udp": True,
         }
 
@@ -1348,7 +1350,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
     existing_names = {n["name"] for n in read_nodes()} | {i["name"] for i in load_inbounds()}
     name = form.get("name", "").strip()
     default_base = DEFAULT_NODE_NAMES.get(kind, kind)
-    if not name or (name == default_base and default_base in existing_names):
+    if not name:
         name = default_base if default_base not in existing_names else f"{default_base}-{port}"
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,48}", name):
         raise ValueError("名称仅限 1-48 位字母、数字及 . _ -")
@@ -1369,7 +1371,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
                     "decryption": dec,
                     "reality-config": {"dest": f"{sni}:443", "private-key": priv,
                                        "short-id": [sid], "server-names": [sni]}}
-        client = {"name": f"{label}|Clash|Reality", "type": "vless", "server": ip, "port": port,
+        client = {"name": label, "type": "vless", "server": ip, "port": port,
                   "uuid": uid, "tls": True, "flow": "xtls-rprx-vision", "client-fingerprint": "safari",
                   "encryption": enc,
                   "reality-opts": {"public-key": pub, "short-id": sid},
@@ -1380,7 +1382,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
         pw = secrets.token_urlsafe(16)
         listener = {"name": name, "type": "shadowsocks", "udp": True, "port": port,
                     "listen": "0.0.0.0", "password": pw, "cipher": cipher}
-        client = {"name": f"{label}|Clash|SS", "type": "ss", "server": ip, "port": port,
+        client = {"name": label, "type": "ss", "server": ip, "port": port,
                   "cipher": cipher, "password": pw, "udp": True}
 
     elif kind == "hysteria2":
@@ -1390,7 +1392,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
                     "certificate": CERT, "private-key": KEY, "alpn": ["h3"],
                     "ignore-client-bandwidth": False,
                     "obfs": "salamander", "obfs-password": obfs_pw}
-        client = {"name": f"{label}|Clash|Hy2", "type": "hysteria2", "server": domain, "port": port,
+        client = {"name": label, "type": "hysteria2", "server": domain, "port": port,
                   "password": pw, "sni": domain, "alpn": ["h3"],
                   "obfs": "salamander", "obfs-password": obfs_pw, "udp": True}
 
@@ -1401,7 +1403,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
         psk = base64.b64encode(secrets.token_bytes(16)).decode()
         listener = {**base, "type": "snell", "psk": psk, "version": version, "udp": True,
                     "obfs-opts": {"mode": obfs_mode, "host": obfs_host}}
-        client = {"name": f"{label}|Clash|Snell", "type": "snell", "server": ip, "port": port,
+        client = {"name": label, "type": "snell", "server": ip, "port": port,
                   "psk": psk, "version": version, "udp": True,
                   "obfs-opts": {"mode": obfs_mode, "host": obfs_host}}
 
@@ -1416,7 +1418,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
         listener = {**base, "type": "trusttunnel", "users": [{"username": user, "password": pw}],
                     "certificate": CERT, "private-key": KEY, "network": ["tcp", "udp"],
                     "congestion-controller": cc}
-        client = {"name": f"{label}|Clash|TrustTunnel", "type": "trusttunnel", "server": domain,
+        client = {"name": label, "type": "trusttunnel", "server": domain,
                   "port": port, "username": user, "password": pw, "sni": domain,
                   "udp": True}
 
@@ -1428,7 +1430,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
         if use_tls:
             listener["certificate"] = CERT
             listener["private-key"] = KEY
-        client = {"name": f"{label}|Clash|HTTP", "type": "http",
+        client = {"name": label, "type": "http",
                   "server": domain if use_tls else ip, "port": port,
                   "username": user, "password": pw, "tls": use_tls, "udp": True}
         if use_tls:
@@ -1442,7 +1444,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
         if use_tls:
             listener["certificate"] = CERT
             listener["private-key"] = KEY
-        client = {"name": f"{label}|Clash|SOCKS5", "type": "socks5",
+        client = {"name": label, "type": "socks5",
                   "server": domain if use_tls else ip, "port": port,
                   "username": user, "password": pw, "tls": use_tls, "udp": True}
 
@@ -1453,7 +1455,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
         listener = {**base, "type": "anytls", "users": {user: pw},
                     "certificate": CERT, "private-key": KEY,
                     "padding-scheme": random_anytls_padding()}
-        client = {"name": f"{label}|Clash|AnyTLS", "type": "anytls", "server": domain, "port": port,
+        client = {"name": label, "type": "anytls", "server": domain, "port": port,
                   "password": pw, "sni": domain, "client-fingerprint": fp,
                   "udp": True}
 
@@ -1464,7 +1466,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
             transport = "TCP"
         pw = secrets.token_urlsafe(16)
         listener = {**base, "type": "mieru", "transport": transport, "users": {user: pw}}
-        client = {"name": f"{label}|Clash|Mieru", "type": "mieru", "server": ip, "port": port,
+        client = {"name": label, "type": "mieru", "server": ip, "port": port,
                   "transport": transport, "username": user, "password": pw, "udp": True}
 
     elif kind == "sudoku":
@@ -1475,7 +1477,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
         listener = {**base, "type": "sudoku", "key": pub_k, "aead-method": aead,
                     "padding-min": 2, "padding-max": 7, "table-type": table,
                     "enable-pure-downlink": pure_dl}
-        client = {"name": f"{label}|Clash|Sudoku", "type": "sudoku", "server": ip, "port": port,
+        client = {"name": label, "type": "sudoku", "server": ip, "port": port,
                   "key": priv_k, "aead-method": aead, "padding-min": 2, "padding-max": 7,
                   "table-type": table, "enable-pure-downlink": pure_dl, "udp": True}
 
@@ -1489,7 +1491,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
         listener = {**base, "type": "tuic", "users": {uid: pw},
                     "certificate": CERT, "private-key": KEY,
                     "congestion-controller": cc, "alpn": ["h3"]}
-        client = {"name": f"{label}|Clash|TUICv5", "type": "tuic", "server": domain, "port": port,
+        client = {"name": label, "type": "tuic", "server": domain, "port": port,
                   "uuid": uid, "password": pw, "sni": domain, "alpn": ["h3"],
                   "congestion-controller": cc, "udp-relay-mode": udp_mode,
                   "reduce-rtt": True, "udp": True}
@@ -1507,7 +1509,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
                     "congestion-controller": cc, "zero-rtt": zero_rtt,
                     "quic-version-probe": True, "max-idle-time": 30000,
                     "disable-mtu-discovery": False}
-        client = {"name": f"{label}|Clash|ShadowQUIC", "type": "shadowquic", "server": ip, "port": port,
+        client = {"name": label, "type": "shadowquic", "server": ip, "port": port,
                   "username": user, "password": pw, "sni": jls_host, "alpn": ["h3"],
                   "congestion-controller": cc, "zero-rtt": zero_rtt, "udp": True}
 
@@ -1956,10 +1958,60 @@ def wait_mihomo_ports(timeout=2.0):
         time.sleep(0.15)
 
 
+_PENDING_UFW_BASELINE = None
+_RECENT_ADD_REQS = {}
+
+
+def _dedup_inbounds(items: list) -> list:
+    out = []
+    seen = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        nm = str(item.get("name") or "")
+        if nm and nm in seen:
+            continue
+        if nm:
+            seen.add(nm)
+        if isinstance(item.get("client"), dict) and nm:
+            item["client"]["name"] = nm
+            item["client"].pop("skip-cert-verify", None)
+        out.append(item)
+    return out
+
+
+def save_inbounds(new: list):
+    """Persist inbounds.json and server/client config fragments to disk without reloading Mihomo."""
+    global _PENDING_UFW_BASELINE
+    cur_nodes = read_nodes()
+    if _PENDING_UFW_BASELINE is None:
+        _PENDING_UFW_BASELINE = collect_ufw_specs(cur_nodes, load_inbounds())
+    cleaned = _dedup_inbounds(new)
+    atomic_write(INBOUNDS, json.dumps(cleaned, indent=2, ensure_ascii=False), 0o600)
+    atomic_write(FRAG_EXTRA, render_extra(cleaned), 0o640)
+    _sync_custom_conf_listeners(cur_nodes, cleaned)
+    atomic_write(CONF, assemble_config(), 0o640)
+    sync_client_files()
+
+
+def save_nodes(new_nodes: list):
+    """Persist install-time VLESS Reality nodes (nodes.tsv) and config fragments to disk without reloading Mihomo."""
+    global _PENDING_UFW_BASELINE
+    cur_inbs = load_inbounds()
+    if _PENDING_UFW_BASELINE is None:
+        _PENDING_UFW_BASELINE = collect_ufw_specs(read_nodes(), cur_inbs)
+    atomic_write(NODES_TSV, render_nodes_tsv(new_nodes), 0o640)
+    atomic_write(FRAG_REALITY, render_reality(new_nodes), 0o640)
+    _sync_custom_conf_listeners(new_nodes, cur_inbs)
+    atomic_write(CONF, assemble_config(), 0o640)
+    sync_client_files()
+
+
 def apply_inbounds(new: list):
     """Write inbounds + fragment + config, validate, restart; roll back on failure."""
     cur_nodes = read_nodes()
     old_specs = collect_ufw_specs(cur_nodes, load_inbounds())
+    cleaned = _dedup_inbounds(new)
     files = (INBOUNDS, FRAG_EXTRA, CUSTOM_CONF, CONF) if is_custom_config_mode() else (INBOUNDS, FRAG_EXTRA, CONF)
     backup = {}
     for p in files:
@@ -1969,9 +2021,9 @@ def apply_inbounds(new: list):
         except FileNotFoundError:
             backup[p] = None
     try:
-        atomic_write(INBOUNDS, json.dumps(new, indent=2, ensure_ascii=False), 0o600)
-        atomic_write(FRAG_EXTRA, render_extra(new))
-        _sync_custom_conf_listeners(cur_nodes, new)
+        atomic_write(INBOUNDS, json.dumps(cleaned, indent=2, ensure_ascii=False), 0o600)
+        atomic_write(FRAG_EXTRA, render_extra(cleaned))
+        _sync_custom_conf_listeners(cur_nodes, cleaned)
         atomic_write(CONF, assemble_config())
         rc, out = validate_config()
         if rc != 0:
@@ -1989,7 +2041,7 @@ def apply_inbounds(new: list):
         run([SYSTEMCTL, "restart", "mihomo"])
         raise
     sync_client_files()
-    sync_ufw(old_specs, collect_ufw_specs(cur_nodes, new))
+    sync_ufw(old_specs, collect_ufw_specs(cur_nodes, cleaned))
     wait_mihomo_ports()
 
 
@@ -2030,6 +2082,31 @@ def apply_nodes(new_nodes: list):
     wait_mihomo_ports()
 
 
+def save_server_proxies(new_proxies: list):
+    """Persist server outbound proxies to disk ONLY (proxies.json + proxies.extra.yaml + config.yaml) without reloading Mihomo."""
+    files = (PROXIES_JSON, FRAG_PROXIES, CUSTOM_CONF, CONF) if is_custom_config_mode() else (PROXIES_JSON, FRAG_PROXIES, CONF)
+    backup = {}
+    for p in files:
+        try:
+            with open(p) as f:
+                backup[p] = f.read()
+        except FileNotFoundError:
+            backup[p] = None
+    try:
+        atomic_write(PROXIES_JSON, json.dumps(new_proxies, indent=2, ensure_ascii=False), 0o600)
+        atomic_write(FRAG_PROXIES, dump_yaml_proxies(new_proxies), 0o640)
+        _sync_custom_conf_proxies(new_proxies)
+        atomic_write(CONF, assemble_config(), 0o640)
+    except Exception:
+        for p, data in backup.items():
+            if data is None:
+                if os.path.exists(p):
+                    os.remove(p)
+            else:
+                atomic_write(p, data, 0o600 if p == PROXIES_JSON else 0o640)
+        raise
+
+
 def apply_server_proxies(new_proxies: list):
     """Write server outbound proxies (proxies.json + proxies.extra.yaml + config.yaml), validate, restart."""
     files = (PROXIES_JSON, FRAG_PROXIES, CUSTOM_CONF, CONF) if is_custom_config_mode() else (PROXIES_JSON, FRAG_PROXIES, CONF)
@@ -2061,6 +2138,31 @@ def apply_server_proxies(new_proxies: list):
         run([SYSTEMCTL, "restart", "mihomo"])
         raise
     wait_mihomo_ports()
+
+
+def save_proxy_providers(new_providers: dict):
+    """Persist server proxy-providers to disk ONLY (providers.json + providers.extra.yaml + config.yaml) without reloading Mihomo."""
+    files = (PROVIDERS_JSON, FRAG_PROVIDERS, CUSTOM_CONF, CONF) if is_custom_config_mode() else (PROVIDERS_JSON, FRAG_PROVIDERS, CONF)
+    backup = {}
+    for p in files:
+        try:
+            with open(p) as f:
+                backup[p] = f.read()
+        except FileNotFoundError:
+            backup[p] = None
+    try:
+        atomic_write(PROVIDERS_JSON, json.dumps(new_providers, indent=2, ensure_ascii=False), 0o600)
+        atomic_write(FRAG_PROVIDERS, dump_yaml_providers(new_providers), 0o640)
+        _sync_custom_conf_providers(new_providers)
+        atomic_write(CONF, assemble_config(), 0o640)
+    except Exception:
+        for p, data in backup.items():
+            if data is None:
+                if os.path.exists(p):
+                    os.remove(p)
+            else:
+                atomic_write(p, data, 0o600 if p == PROVIDERS_JSON else 0o640)
+        raise
 
 
 def apply_proxy_providers(new_providers: dict):
@@ -2219,7 +2321,7 @@ def reset_to_template_config():
 def reality_client(n: dict, env: dict) -> dict:
     """Client proxy for an install-time Reality node (same fields as core.sh proxy_line)."""
     d = {
-        "name": f"{n['name']}|Clash|Reality", "type": "vless",
+        "name": n["name"], "type": "vless",
         "server": env.get("SERVER_IP", ""), "port": n["port"], "uuid": n["uuid"], "tls": True,
         "flow": "xtls-rprx-vision", "client-fingerprint": "safari",
     }
@@ -2402,13 +2504,30 @@ def parse_version_tuple(v: str) -> tuple:
 
 
 def get_local_mihomo_version() -> str:
-    _, out = run([resolve_mihomo_bin(), "-v"], timeout=5)
-    first = (out.splitlines()[0] if out else "").strip()
-    m = re.search(r"\b(v?\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z._-]+)?)\b", first)
-    if m:
-        v = m.group(1)
-        return v if v.startswith("v") else f"v{v}"
+    try:
+        _, out = run([resolve_mihomo_bin(), "-v"], timeout=5)
+        first = (out.splitlines()[0] if out else "").strip()
+        m = re.search(r"\b(v?\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z._-]+)?)\b", first)
+        if m:
+            v = m.group(1)
+            return v if v.startswith("v") else f"v{v}"
+    except Exception:
+        pass
     return ""
+
+
+def get_mihomo_version_num(st: dict = None) -> str:
+    """Return local Mihomo version without leading 'v' (e.g. '1.19.33'), or '' if unreadable."""
+    try:
+        first = (st.get("version", "") if isinstance(st, dict) else "").strip()
+        if first:
+            m = re.search(r"\b(v?\d+\.\d+(?:\.\d+)*(?:-[0-9A-Za-z._-]+)?)\b", first)
+            if m:
+                return m.group(1).lstrip("vV")
+        v = get_local_mihomo_version()
+        return v.lstrip("vV") if v else ""
+    except Exception:
+        return ""
 
 
 def detect_cpu_arch() -> str:
@@ -2422,13 +2541,19 @@ def detect_cpu_arch() -> str:
     raise RuntimeError(f"不支持的 CPU 架构：{mach}")
 
 
-def _http_get_text(url: str, timeout: int = 15, headers: dict = None) -> str:
+def _http_get_text(url: str, timeout: int = 20, headers: dict = None) -> str:
     hdrs = {"User-Agent": f"clashgate/{VERSION}"}
     if headers:
         hdrs.update(headers)
     req = urllib.request.Request(url, headers=hdrs)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"GitHub 接口请求失败（HTTP {e.code}）") from None
+    except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as e:
+        reason = getattr(e, "reason", e)
+        raise RuntimeError(f"无法连接 GitHub，请检查服务器网络（{reason}）") from None
 
 
 def _resolve_repo_slug(env: dict = None) -> str:
@@ -2461,7 +2586,7 @@ def fetch_latest_clashgate_version() -> str:
         "CLASHGATE_RAW_COMMON",
         f"https://raw.githubusercontent.com/{slug}/main/scripts/lib/common.sh",
     )
-    txt = _http_get_text(url, timeout=15)
+    txt = _http_get_text(url, timeout=20)
     m = re.search(r"^CS_VERSION=([0-9A-Za-z._-]+)", txt, re.M)
     if not m:
         raise RuntimeError("未能从 GitHub 解析最新版本号")
@@ -2469,12 +2594,25 @@ def fetch_latest_clashgate_version() -> str:
 
 
 def fetch_latest_mihomo_release() -> dict:
-    txt = _http_get_text(MIHOMO_REPO_API, timeout=15, headers={"Accept": "application/vnd.github+json"})
-    data = json.loads(txt)
+    txt = _http_get_text(MIHOMO_REPO_API, timeout=20, headers={"Accept": "application/vnd.github+json"})
+    try:
+        data = json.loads(txt)
+    except Exception:
+        raise RuntimeError("解析 GitHub 返回的版本数据失败") from None
     tag = str(data.get("tag_name") or "").strip()
     if not tag:
         raise RuntimeError("未能从 GitHub 获取 Mihomo 最新版本标签")
     return data
+
+
+_CORE_UPDATE_TASK_LOCK = threading.Lock()
+_CORE_UPDATE_TASK = {
+    "running": False,
+    "ok": None,
+    "msg": "",
+    "started_at": 0.0,
+    "finished_at": 0.0,
+}
 
 
 def update_mihomo_core_direct() -> tuple:
@@ -2499,10 +2637,19 @@ def update_mihomo_core_direct() -> tuple:
     tmp_bin = bin_path + ".new"
     try:
         req = urllib.request.Request(download_url, headers={"User-Agent": f"clashgate/{VERSION}"})
-        with urllib.request.urlopen(req, timeout=90) as resp, open(tmp_gz, "wb") as out_f:
-            shutil.copyfileobj(resp, out_f)
-        with gzip.open(tmp_gz, "rb") as gz_f, open(tmp_bin, "wb") as bin_f:
-            shutil.copyfileobj(gz_f, bin_f)
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp, open(tmp_gz, "wb") as out_f:
+                shutil.copyfileobj(resp, out_f)
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"下载内核文件失败（HTTP {e.code}）") from None
+        except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as e:
+            reason = getattr(e, "reason", e)
+            raise RuntimeError(f"下载内核文件超时或网络中断，请稍后重试（{reason}）") from None
+        try:
+            with gzip.open(tmp_gz, "rb") as gz_f, open(tmp_bin, "wb") as bin_f:
+                shutil.copyfileobj(gz_f, bin_f)
+        except Exception as e:
+            raise RuntimeError(f"解压内核文件失败：{e}") from None
         os.chmod(tmp_bin, 0o755)
         rc, v_out = run([tmp_bin, "-v"], timeout=10)
         if rc != 0:
@@ -2537,6 +2684,40 @@ def update_mihomo_core_direct() -> tuple:
     else:
         msg = f"Mihomo 内核已更新至最新版本 {latest_tag} 并重启生效。"
     return changed, local_ver, latest_tag, msg
+
+
+def start_background_core_update() -> dict:
+    """Start or attach to an asynchronous Mihomo core update task so HTTP responses don't time out or get severed by restart."""
+    with _CORE_UPDATE_TASK_LOCK:
+        if _CORE_UPDATE_TASK["running"]:
+            return dict(_CORE_UPDATE_TASK)
+        _CORE_UPDATE_TASK["running"] = True
+        _CORE_UPDATE_TASK["ok"] = None
+        _CORE_UPDATE_TASK["msg"] = "正在后台检查并更新 Mihomo 内核，请稍候…"
+        _CORE_UPDATE_TASK["started_at"] = time.time()
+        _CORE_UPDATE_TASK["finished_at"] = 0.0
+
+    def _worker():
+        ok = False
+        msg = ""
+        try:
+            with LOCK:
+                _, _, _, msg = update_mihomo_core_direct()
+                ok = True
+        except Exception as e:
+            msg = f"更新内核失败：{e}"
+            ok = False
+        finally:
+            with _CORE_UPDATE_TASK_LOCK:
+                _CORE_UPDATE_TASK["running"] = False
+                _CORE_UPDATE_TASK["ok"] = ok
+                _CORE_UPDATE_TASK["msg"] = msg
+                _CORE_UPDATE_TASK["finished_at"] = time.time()
+
+    t = threading.Thread(target=_worker, name="core-updater", daemon=True)
+    t.start()
+    with _CORE_UPDATE_TASK_LOCK:
+        return dict(_CORE_UPDATE_TASK)
 
 
 # ---------------------------------------------------------------- Vue 3 + Tailwind CSS Console UI & HTTP
@@ -2770,8 +2951,10 @@ class Panel(BaseHTTPRequestHandler):
 
         cport = get_controller_port(env)
         traffic = get_traffic_stats(env)
+        mver = get_mihomo_version_num(st)
         return {
             "version": VERSION,
+            "mihomo_version": mver,
             "csrf": s["csrf"],
             "sub_url": self.sub_url(),
             "zb_url": zashboard_url(env),
@@ -2786,6 +2969,7 @@ class Panel(BaseHTTPRequestHandler):
                 "active": st["active"],
                 "state_txt": state_txt,
                 "state_cls": state_cls,
+                "mihomo_version": mver,
                 "inbound_total": len(ports),
                 "inbound_listening": n_listen,
                 "outbound_nodes_count": len(srv_proxies),
@@ -2891,11 +3075,29 @@ class Panel(BaseHTTPRequestHandler):
             return self.send(200, self.dashboard(s, initial_tab="advanced"))
         if path == "/api/state":
             return self.send(200, json.dumps(self.build_client_state(s), ensure_ascii=False), "application/json; charset=utf-8")
+        if path == "/api/update-core-status":
+            with _CORE_UPDATE_TASK_LOCK:
+                tstate = dict(_CORE_UPDATE_TASK)
+            if tstate["running"]:
+                return self.send(200, json.dumps({"ok": True, "running": True, "msg": tstate["msg"]}, ensure_ascii=False),
+                                 "application/json; charset=utf-8")
+            state = self.build_client_state(s)
+            ok = bool(tstate["ok"]) if tstate["ok"] is not None else True
+            payload = {
+                "ok": ok,
+                "running": False,
+                "msg": tstate["msg"] or ("更新内核完成" if ok else "更新内核失败"),
+                "state": state,
+                "zb_url": state["zb_url"],
+                "sub_url": state["sub_url"],
+            }
+            return self.send(200, json.dumps(payload, ensure_ascii=False), "application/json; charset=utf-8")
         if path in ("/config/server.yaml", "/server.yaml"):
             return self.do_server_config()
         if path == "/api/status":
             st = mihomo_status()
             st["version_panel"] = VERSION
+            st["mihomo_version"] = get_mihomo_version_num(st)
             st["custom_config_mode"] = is_custom_config_mode()
             st["traffic"] = get_traffic_stats()
             st["inbounds"] = [{k: i[k] for k in ("id", "kind", "name", "port")} for i in load_inbounds()]
@@ -2932,7 +3134,7 @@ class Panel(BaseHTTPRequestHandler):
         if path in ("/action/restart", "/action/reload"):
             return self.do_action(s, path.rsplit("/", 1)[1])
         if path == "/action/update-core":
-            return self.do_update_core(s)
+            return self.do_update_core(s, form)
         if path == "/action/check-update":
             return self.do_check_update(s)
         if path == "/action/upgrade-self":
@@ -3033,19 +3235,42 @@ class Panel(BaseHTTPRequestHandler):
         self.send(401, self.login_page("用户名或密码错误。"))
 
     def do_action(self, s, action):
+        global _PENDING_UFW_BASELINE
         zh = {"restart": "重启", "reload": "重载"}[action]
         with LOCK:
-            if action == "reload":
-                rc, out = validate_config()
-                if rc != 0:
-                    return self.respond_mutation(s, "配置校验未通过，未执行重载：" + out[-300:], False)
+            cur_nodes = read_nodes()
+            cur_inbs = load_inbounds()
+            cur_proxies = load_server_proxies()
+            cur_providers = load_proxy_providers()
+            atomic_write(FRAG_REALITY, render_reality(cur_nodes), 0o640)
+            atomic_write(FRAG_EXTRA, render_extra(cur_inbs), 0o640)
+            atomic_write(FRAG_PROXIES, dump_yaml_proxies(cur_proxies), 0o640)
+            atomic_write(FRAG_PROVIDERS, dump_yaml_providers(cur_providers), 0o640)
+            if is_custom_config_mode():
+                _sync_custom_conf_listeners(cur_nodes, cur_inbs)
+                _sync_custom_conf_proxies(cur_proxies)
+                _sync_custom_conf_providers(cur_providers)
+            atomic_write(CONF, assemble_config(), 0o640)
+            sync_client_files()
+            rc, out = validate_config()
+            if rc != 0:
+                return self.respond_mutation(s, f"配置校验未通过，未执行{zh}：" + out[-300:], False)
+            new_specs = collect_ufw_specs(cur_nodes, cur_inbs)
+            old_specs = _PENDING_UFW_BASELINE if _PENDING_UFW_BASELINE is not None else new_specs
+            sync_ufw(old_specs, new_specs)
+            _PENDING_UFW_BASELINE = new_specs
             rc, out = run([SYSTEMCTL, action, "mihomo"])
+            if rc == 0 and action == "reload":
+                expected_ports = {int(n["port"]) for n in cur_nodes} | {int(i["port"]) for i in cur_inbs}
+                st_now = mihomo_status()
+                if st_now["listening"] and not expected_ports.issubset(set(st_now["listening"])):
+                    rc, out = run([SYSTEMCTL, "restart", "mihomo"])
             if rc == 0:
                 wait_mihomo_ports()
         _, active = run([SYSTEMCTL, "is-active", "mihomo"])
         state = STATE_ZH.get(active.strip(), (active.strip(), ""))[0]
         if rc == 0:
-            return self.respond_mutation(s, f"{zh}成功，Mihomo 当前状态：{state}", active.strip() == "active")
+            return self.respond_mutation(s, f"{zh}成功，服务端配置与客户端订阅已同步生效（Mihomo 当前状态：{state}）", active.strip() == "active")
         return self.respond_mutation(s, f"{zh}失败：{out[-300:]}（Mihomo 当前状态：{state}）", False)
 
     def do_reset_sub(self, s):
@@ -3109,7 +3334,14 @@ class Panel(BaseHTTPRequestHandler):
         tail = " | ".join(l for l in out.splitlines() if l.strip())[-300:]
         return self.respond_mutation(s, f"证书申请 / 续期失败：{tail}", False)
 
-    def do_update_core(self, s):
+    def do_update_core(self, s, form=None):
+        if form and form.get("async") == "1" and self.is_ajax():
+            tstate = start_background_core_update()
+            return self.send(
+                200,
+                json.dumps({"ok": True, "running": True, "msg": tstate["msg"]}, ensure_ascii=False),
+                "application/json; charset=utf-8",
+            )
         with LOCK:
             try:
                 _, _, _, msg = update_mihomo_core_direct()
@@ -3156,38 +3388,73 @@ class Panel(BaseHTTPRequestHandler):
 
     def do_add(self, s, form):
         env = read_env()
+        req_id = (form.get("req_id") or "").strip()
+        raw_kind = (form.get("kind") or "").strip()
+        if raw_kind == "shadowqiuc":
+            raw_kind = "shadowquic"
+        elif raw_kind == "soduku":
+            raw_kind = "sudoku"
+        raw_name = (form.get("name") or "").strip()
+        raw_port = (form.get("port") or "").strip()
         with LOCK:
+            now = time.time()
+            for k in [k for k, v in _RECENT_ADD_REQS.items() if now - v[0] > 60]:
+                _RECENT_ADD_REQS.pop(k, None)
+            if req_id and req_id in _RECENT_ADD_REQS:
+                prev_inb = _RECENT_ADD_REQS[req_id][1]
+                return self.respond_mutation(
+                    s,
+                    f"已添加 {KIND_ZH.get(prev_inb['kind'], prev_inb['kind'])} 节点「{prev_inb['name']}」（端口 {prev_inb['port']}），已保存，请点顶部「重载配置」生效",
+                    True,
+                )
+            cur = load_inbounds()
+            target_name = raw_name or DEFAULT_NODE_NAMES.get(raw_kind, raw_kind)
+            for existing in cur:
+                if existing.get("name") == target_name and existing.get("kind") == raw_kind:
+                    if not raw_port or str(existing.get("port")) == raw_port:
+                        return self.respond_mutation(
+                            s,
+                            f"已添加 {KIND_ZH.get(existing['kind'], existing['kind'])} 节点「{existing['name']}」（端口 {existing['port']}），已保存，请点顶部「重载配置」生效",
+                            True,
+                        )
             try:
-                inb = build_inbound(form.get("kind", ""), form, env)
-                apply_inbounds(load_inbounds() + [inb])
+                inb = build_inbound(raw_kind, form, env)
+                save_inbounds(cur + [inb])
+                if req_id:
+                    _RECENT_ADD_REQS[req_id] = (now, inb)
             except Exception as e:
                 return self.respond_mutation(s, f"添加失败：{e}", False)
         return self.respond_mutation(
-            s, f"已添加 {KIND_ZH.get(inb['kind'], inb['kind'])} 入站「{inb['name']}」，端口 {inb['port']}", True)
+            s,
+            f"已添加 {KIND_ZH.get(inb['kind'], inb['kind'])} 节点「{inb['name']}」（端口 {inb['port']}），已保存，请点顶部「重载配置」生效",
+            True,
+        )
 
     def do_delete(self, s, iid):
         with LOCK:
+            _RECENT_ADD_REQS.clear()
             cur = load_inbounds()
             new = [i for i in cur if i["id"] != iid]
             if len(new) == len(cur):
-                return self.respond_mutation(s, "入站不存在或已删除", False)
+                return self.respond_mutation(s, "已删除", True)
             try:
-                apply_inbounds(new)
+                save_inbounds(new)
             except Exception as e:
                 return self.respond_mutation(s, f"删除失败：{e}", False)
-        return self.respond_mutation(s, "入站已删除", True)
+        return self.respond_mutation(s, "已删除，请点顶部「重载配置」生效", True)
 
     def do_delete_node(self, s, name):
         with LOCK:
+            _RECENT_ADD_REQS.clear()
             cur = read_nodes()
             new = [n for n in cur if n["name"] != name]
             if len(new) == len(cur):
-                return self.respond_mutation(s, "入站不存在或已删除", False)
+                return self.respond_mutation(s, "已删除", True)
             try:
-                apply_nodes(new)
+                save_nodes(new)
             except Exception as e:
                 return self.respond_mutation(s, f"删除失败：{e}", False)
-        return self.respond_mutation(s, f"已删除入站「{name}」", True)
+        return self.respond_mutation(s, f"已删除节点「{name}」，请点顶部「重载配置」生效", True)
 
     def do_reset_node_password(self, s, name):
         with LOCK:
@@ -3253,23 +3520,23 @@ class Panel(BaseHTTPRequestHandler):
                     else:
                         by_name[p["name"]] = len(merged)
                         merged.append(p)
-                apply_server_proxies(merged)
+                save_server_proxies(merged)
             except Exception as e:
                 return self.respond_mutation(s, f"添加服务端 proxies 节点失败：{e}", False)
         names = "、".join(p["name"] for p in added)
-        return self.respond_mutation(s, f"已向服务端 proxies: 添加 {len(added)} 个节点（{names}）", True)
+        return self.respond_mutation(s, f"已向服务端 proxies: 添加 {len(added)} 个节点（{names}），已保存，请点顶部「重载配置」生效", True)
 
     def do_delete_proxy(self, s, name):
         with LOCK:
             cur = load_server_proxies()
             new = [p for p in cur if p["name"] != name]
             if len(new) == len(cur):
-                return self.respond_mutation(s, "节点不存在或已删除", False)
+                return self.respond_mutation(s, "已删除", True)
             try:
-                apply_server_proxies(new)
+                save_server_proxies(new)
             except Exception as e:
                 return self.respond_mutation(s, f"删除服务端节点失败：{e}", False)
-        return self.respond_mutation(s, f"已从服务端 proxies: 删除节点「{name}」", True)
+        return self.respond_mutation(s, f"已删除节点「{name}」，请点顶部「重载配置」生效", True)
 
     def do_add_provider(self, s, form):
         url = form.get("sub_url", "")
@@ -3280,23 +3547,23 @@ class Panel(BaseHTTPRequestHandler):
                 prov_name, entry = build_proxy_provider(url, name, cur)
                 merged = dict(cur)
                 merged[prov_name] = entry
-                apply_proxy_providers(merged)
+                save_proxy_providers(merged)
             except Exception as e:
                 return self.respond_mutation(s, f"导入订阅链接失败：{e}", False)
         return self.respond_mutation(
-            s, f"已导入订阅源「{prov_name}」（路径 {entry['path']}）到服务端 proxy-providers:", True)
+            s, f"已导入订阅源「{prov_name}」（路径 {entry['path']}）到服务端 proxy-providers:，已保存，请点顶部「重载配置」生效", True)
 
     def do_delete_provider(self, s, name):
         with LOCK:
             cur = load_proxy_providers()
             if name not in cur:
-                return self.respond_mutation(s, "订阅源不存在或已删除", False)
+                return self.respond_mutation(s, "已删除", True)
             merged = {k: v for k, v in cur.items() if k != name}
             try:
-                apply_proxy_providers(merged)
+                save_proxy_providers(merged)
             except Exception as e:
                 return self.respond_mutation(s, f"删除订阅源失败：{e}", False)
-        return self.respond_mutation(s, f"已删除订阅源「{name}」", True)
+        return self.respond_mutation(s, f"已删除订阅源「{name}」，请点顶部「重载配置」生效", True)
 
     def do_save_custom_config(self, s, form):
         raw = form.get("custom_config_raw", "")
@@ -3322,7 +3589,8 @@ class Panel(BaseHTTPRequestHandler):
     # -- views
     def login_page(self, err=""):
         e = html.escape
-        boot = {"page": "login", "version": VERSION, "login_error": err}
+        mver = get_mihomo_version_num()
+        boot = {"page": "login", "version": VERSION, "mihomo_version": mver, "login_error": err}
         err_html = f"<div class=err>{e(err)}</div>" if err else ""
         fallback = (
             f"<div><h1>ClashGate <span>v{VERSION}</span></h1>{err_html}"
@@ -3374,11 +3642,13 @@ class Panel(BaseHTTPRequestHandler):
             f"<form method=post action=/action/reset-sub>{hid}<button type=submit>更换订阅链接</button></form></section>"
             if state["sub_url"] else ""
         )
+        mver = state.get("mihomo_version", "")
+        ver_label = f"v{VERSION} · mihomo {mver}" if mver else f"v{VERSION}"
         fallback = (
-            f"<header><span>ClashGate</span><span>v{VERSION}</span></header>"
+            f"<header><span>ClashGate</span><span>{e(ver_label)}</span></header>"
             f"<main>{zb_sec}{sub_sec}"
             f"<section><h2>入站节点</h2>{inb_rows}</section>"
-            f"<section><h2>添加监听器</h2><form method=post action=/inbounds/add>{hid}"
+            f"<section><h2>添加节点</h2><form method=post action=/inbounds/add>{hid}"
             f"<select id=kind name=kind>{opts}</select>"
             f"<p>{e(PROTOCOL_DESCRIPTIONS['vless-reality'])}</p>"
             f"<input id=nm name=name value=VlessReality placeholder='默认 VlessReality'>"
