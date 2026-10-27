@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v0.94 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
+"""ClashGate v0.95 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -35,7 +35,7 @@ import uuid as uuidlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse, quote
 
-VERSION = "0.94"
+VERSION = "0.95"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -2621,6 +2621,8 @@ def update_mihomo_core_direct() -> tuple:
     local_ver = get_local_mihomo_version()
     rel = fetch_latest_mihomo_release()
     latest_tag = str(rel.get("tag_name") or "").strip()
+    if local_ver and local_ver.strip().lstrip("vV") == latest_tag.lstrip("vV"):
+        return False, local_ver, latest_tag, f"已是最新版本 {latest_tag}，无需更新"
     arch = detect_cpu_arch()
     asset_name = f"mihomo-linux-{arch}-{latest_tag}.gz"
     download_url = ""
@@ -2678,11 +2680,11 @@ def update_mihomo_core_direct() -> tuple:
     if rc != 0:
         raise RuntimeError("重启 Mihomo 失败：" + out[-300:])
     wait_mihomo_ports()
-    changed = (local_ver != latest_tag)
-    if changed and local_ver:
+    changed = True
+    if local_ver:
         msg = f"Mihomo 内核已从 {local_ver} 更新至 {latest_tag} 并重启生效。"
     else:
-        msg = f"Mihomo 内核已更新至最新版本 {latest_tag} 并重启生效。"
+        msg = f"Mihomo 内核已更新至 {latest_tag} 并重启生效。"
     return changed, local_ver, latest_tag, msg
 
 
@@ -3409,14 +3411,8 @@ class Panel(BaseHTTPRequestHandler):
                 )
             cur = load_inbounds()
             target_name = raw_name or DEFAULT_NODE_NAMES.get(raw_kind, raw_kind)
-            for existing in cur:
-                if existing.get("name") == target_name and existing.get("kind") == raw_kind:
-                    if not raw_port or str(existing.get("port")) == raw_port:
-                        return self.respond_mutation(
-                            s,
-                            f"已添加 {KIND_ZH.get(existing['kind'], existing['kind'])} 节点「{existing['name']}」（端口 {existing['port']}），已保存，请点顶部「重载配置」生效",
-                            True,
-                        )
+            if any(existing.get("name") == target_name for existing in cur):
+                return self.respond_mutation(s, "节点名称重复，添加失败", False)
             try:
                 inb = build_inbound(raw_kind, form, env)
                 save_inbounds(cur + [inb])
@@ -3436,12 +3432,12 @@ class Panel(BaseHTTPRequestHandler):
             cur = load_inbounds()
             new = [i for i in cur if i["id"] != iid]
             if len(new) == len(cur):
-                return self.respond_mutation(s, "已删除", True)
+                return self.respond_mutation(s, "节点删除成功，重载配置生效", True)
             try:
                 save_inbounds(new)
             except Exception as e:
                 return self.respond_mutation(s, f"删除失败：{e}", False)
-        return self.respond_mutation(s, "已删除，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, "节点删除成功，重载配置生效", True)
 
     def do_delete_node(self, s, name):
         with LOCK:
@@ -3502,9 +3498,7 @@ class Panel(BaseHTTPRequestHandler):
                 apply_inbounds(new_inbs)
             except Exception as e:
                 return self.respond_mutation(s, f"重置密码失败：{e}", False)
-        if target_kind in ("vless-reality", "vless"):
-            return self.respond_mutation(s, f"已重置节点「{target_name}」的 UUID、Reality 私钥与 VLESS 加密密钥，服务端与订阅已同步更新。", True)
-        return self.respond_mutation(s, f"已重置节点「{target_name}」的随机密码/密钥，服务端与客户端订阅已同步更新。", True)
+        return self.respond_mutation(s, "密码重置成功，重载配置生效", True)
 
     def do_add_proxies(self, s, form):
         raw = form.get("proxies_raw", "")

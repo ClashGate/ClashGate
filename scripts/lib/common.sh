@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # clashgate 公共函数：常量、日志、交互、环境持久化、下载与安装文件
 
-CS_VERSION=0.94
+CS_VERSION=0.95
 REPO_OWNER=${REPO_OWNER:-ClashGate}
 REPO_NAME=${REPO_NAME:-ClashGate}
 REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}

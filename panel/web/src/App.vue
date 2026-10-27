@@ -4,7 +4,7 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '0.94',
+  version: '0.95',
   mihomo_version: '',
   csrf: '',
   login_error: '',
@@ -46,7 +46,7 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '0.94',
+  version: boot.version || '0.95',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
@@ -503,16 +503,10 @@ async function submitAddInbound() {
 
 async function resetInboundPassword(item) {
   if (!item.reset_url) return
-  const promptMsg =
-    item.kind === 'vless-reality' || item.kind === 'vless'
-      ? `确定重置节点「${item.name}」的密钥？将同时随机轮换 UUID、Reality 私钥与 VLESS 加密密钥，并同步到服务端与客户端订阅。`
-      : `确定重置节点「${item.name}」的密码？将立即生成新的随机密码并同步到服务端与客户端订阅。`
-  if (!window.confirm(promptMsg)) return
   await postAction(item.reset_url, {}, `rst-${item.key}`)
 }
 
 async function deleteInbound(item) {
-  if (!window.confirm(`确定删除节点「${item.name}」？`)) return
   await postAction(item.delete_url, {}, `del-${item.key}`)
 }
 
@@ -1043,7 +1037,7 @@ onUnmounted(() => {
                   rel="noopener"
                   class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition"
                 >
-                  查看运行配置
+                  查看Mihomo服务端配置
                 </a>
               </div>
             </div>
@@ -1135,7 +1129,7 @@ onUnmounted(() => {
             <div class="space-y-2.5">
               <div>
                 <div class="text-xs font-medium text-slate-500 mb-1">
-                  导入 Clash / Mihomo 客户端即可使用（所有节点增删与重置密码实时双向同步）
+                  导入 Clash / Mihomo 客户端即可使用
                 </div>
                 <div
                   id="sub-url"
