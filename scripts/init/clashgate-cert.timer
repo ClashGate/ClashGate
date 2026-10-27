@@ -1,0 +1,13 @@
+[Unit]
+Description=clashgate: periodic TLS certificate renewal
+
+[Timer]
+# 每小时检查一次：未到续期时间时 acme.sh 不做任何事；首次申请失败（DNS 未生效等）也会自动重试。
+# 用日历时间而不是 OnUnitActiveSec：后者在重装 / 服务从未运行时可能没有下一次触发时间。
+OnCalendar=hourly
+OnBootSec=5min
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

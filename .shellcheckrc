@@ -1,0 +1,4 @@
+shell=bash
+# lib files are sourced by scripts/cmd/clashgate.sh
+external-sources=true
+disable=SC1091

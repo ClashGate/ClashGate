@@ -1,0 +1,26 @@
+[Unit]
+Description=Mihomo (Clash Meta) server - ClashGate
+Documentation=https://wiki.metacubex.one/en/
+After=network-online.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mihomo
+Group=mihomo
+WorkingDirectory=/etc/clashgate
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+# Unified root /etc/clashgate houses config, certs, panel, and runtime geodata/cache
+Environment=SAFE_PATHS=/etc/clashgate
+ExecStartPre=/etc/clashgate/mihomo -t -d /etc/clashgate -f /etc/clashgate/config.yaml
+ExecStart=/etc/clashgate/mihomo -d /etc/clashgate -f /etc/clashgate/config.yaml
+# sh builtin kill: minimal Debian may lack procps' /bin/kill
+ExecReload=/bin/sh -c 'kill -HUP $MAINPID'
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

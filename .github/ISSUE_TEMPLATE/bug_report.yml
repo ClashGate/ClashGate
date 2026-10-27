@@ -1,0 +1,36 @@
+name: 问题反馈
+description: 安装失败、运行异常等
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 提交前请先运行 `clashgate update` 更新到最新版本，并确认问题仍然存在。请务必隐去域名、IP、UUID、密钥、订阅链接等敏感信息。
+  - type: dropdown
+    id: mode
+    attributes:
+      label: 安装模式
+      options:
+        - 无证书模式
+        - 自动证书模式
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: 系统版本
+      placeholder: 例如 Debian 12 amd64
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: 问题描述与复现步骤
+      placeholder: 执行了什么命令，期望什么结果，实际发生了什么
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关输出 / 日志
+      description: 安装输出的报错部分，或 `clashgate status`、`clashgate log` 的输出（请先脱敏）
+      render: text

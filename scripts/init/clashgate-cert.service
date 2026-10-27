@@ -1,0 +1,8 @@
+[Unit]
+Description=clashgate: renew TLS certificate (acme.sh) for Mihomo and the panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/etc/clashgate/scripts/certctl.sh renew

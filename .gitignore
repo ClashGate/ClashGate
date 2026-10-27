@@ -1,0 +1,19 @@
+# secrets / generated runtime
+*.pem
+certs/
+runtime.yaml
+.env
+*.key
+client-config/
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# local AI reference only — never publish (open-source later)
+serve.yaml
+
+# python & frontend build deps
+__pycache__/
+node_modules/

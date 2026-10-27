@@ -1,0 +1,17 @@
+[Unit]
+Description=ClashGate panel (clashgate auto-cert mode)
+After=network-online.target mihomo.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/etc/clashgate
+# Runs as root so it can rewrite /etc/clashgate and call systemctl; serves HTTPS itself with the certificate in /etc/clashgate/certs.
+ExecStart=/usr/bin/python3 /etc/clashgate/panel/panel.py serve --config /etc/clashgate/panel.json
+Restart=on-failure
+RestartSec=3
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
