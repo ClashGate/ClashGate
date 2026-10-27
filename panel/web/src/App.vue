@@ -5,13 +5,14 @@ import { t, lang, setLang } from './i18n.js'
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '0.97',
+  version: '0.98',
   mihomo_version: '',
   csrf: '',
   login_error: '',
   flash_msg: '',
   flash_ok: true,
   sub_url: '',
+  sub_qr_data_url: '',
   zb_url: '',
   mihomo_secret: '',
   srv_cfg_url: '/config/server.yaml',
@@ -20,6 +21,8 @@ const boot = window.__CS_BOOT__ || {
   certs_present: true,
   custom_config_mode: false,
   custom_config_raw: '',
+  pending_reload_count: 0,
+  pending_reload_items: [],
   status: {
     active: 'active',
     state_txt: '运行中',
@@ -29,6 +32,7 @@ const boot = window.__CS_BOOT__ || {
     inbound_listening: 0,
     outbound_nodes_count: 0,
     outbound_providers_count: 0,
+    pending_reload_count: 0,
     cert_days: null,
     cert_hours: null,
     cert_expires: '',
@@ -47,10 +51,11 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '0.97',
+  version: boot.version || '0.98',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
+  sub_qr_data_url: boot.sub_qr_data_url || '',
   zb_url: boot.zb_url || '',
   mihomo_secret: boot.mihomo_secret || '',
   srv_cfg_url: boot.srv_cfg_url || '/config/server.yaml',
@@ -59,12 +64,83 @@ const state = reactive({
   certs_present: boot.certs_present !== false,
   custom_config_mode: !!boot.custom_config_mode,
   custom_config_raw: boot.custom_config_raw || '',
+  pending_reload_count: Number(boot.pending_reload_count || (boot.status && boot.status.pending_reload_count) || 0),
+  pending_reload_items: Array.isArray(boot.pending_reload_items) ? boot.pending_reload_items : [],
   status: { ...(boot.status || {}) },
   inbounds: Array.isArray(boot.inbounds) ? boot.inbounds : [],
   all_proxies_yaml: boot.all_proxies_yaml || '',
   proxies: Array.isArray(boot.proxies) ? boot.proxies : [],
   providers: Array.isArray(boot.providers) ? boot.providers : [],
 })
+
+const showPendingDiff = ref(false)
+const confirmDialog = reactive({
+  show: false,
+  title: '',
+  message: '',
+  confirmText: '',
+  tone: 'amber',
+  onConfirm: null,
+})
+
+function openConfirmDialog({ title, message, confirmText, tone = 'amber', onConfirm }) {
+  confirmDialog.title = title || t('确认操作')
+  confirmDialog.message = message || ''
+  confirmDialog.confirmText = confirmText || t('确认')
+  confirmDialog.tone = tone
+  confirmDialog.onConfirm = onConfirm || null
+  confirmDialog.show = true
+}
+
+function closeConfirmDialog() {
+  confirmDialog.show = false
+  confirmDialog.onConfirm = null
+}
+
+async function acceptConfirmDialog() {
+  const fn = confirmDialog.onConfirm
+  closeConfirmDialog()
+  if (typeof fn === 'function') {
+    await fn()
+  }
+}
+
+function formatPendingItem(item) {
+  if (!item) return ''
+  const op = item.op || ''
+  const name = item.name || ''
+  const port = item.port
+  if (op === 'add') {
+    return lang.value === 'en'
+      ? `+ Add node “${name}” (port ${port})`
+      : `+ 添加节点「${name}」（端口 ${port}）`
+  }
+  if (op === 'delete') {
+    return lang.value === 'en' ? `- Delete node “${name}”` : `- 删除节点「${name}」`
+  }
+  if (op === 'reset-password') {
+    return lang.value === 'en' ? `~ Reset password “${name}”` : `~ 重置密码「${name}」`
+  }
+  if (op === 'reset-secret') {
+    return lang.value === 'en' ? '~ Reset API secret' : '~ 重置 API 密钥'
+  }
+  if (op === 'reset-sub') {
+    return lang.value === 'en' ? '~ Change subscription link' : '~ 更换订阅链接'
+  }
+  if (op === 'add-proxy') {
+    return lang.value === 'en' ? `+ Add outbound node “${name}”` : `+ 添加出站节点「${name}」`
+  }
+  if (op === 'delete-proxy') {
+    return lang.value === 'en' ? `- Delete outbound node “${name}”` : `- 删除出站节点「${name}」`
+  }
+  if (op === 'add-provider') {
+    return lang.value === 'en' ? `+ Import provider “${name}”` : `+ 导入订阅源「${name}」`
+  }
+  if (op === 'delete-provider') {
+    return lang.value === 'en' ? `- Delete provider “${name}”` : `- 删除订阅源「${name}」`
+  }
+  return item.detail || ''
+}
 
 const topbarVersionText = computed(() => {
   const mv = String(state.mihomo_version || (state.status && state.status.mihomo_version) || '').trim()
@@ -317,9 +393,13 @@ async function checkUpdateAndPrompt() {
   if (res.has_update) {
     const latest = res.latest_version || t('最新版')
     const current = res.current_version || state.version
-    if (window.confirm(t('检测到新版本 v{latest}（当前版本 v{current}），是否立即升级？', { latest, current }))) {
-      await postAction('/action/upgrade-self', {}, '/action/upgrade-self')
-    }
+    openConfirmDialog({
+      title: t('检查更新'),
+      message: t('检测到新版本 v{latest}（当前版本 v{current}），是否立即升级？', { latest, current }),
+      confirmText: t('立即升级'),
+      tone: 'emerald',
+      onConfirm: () => postAction('/action/upgrade-self', {}, '/action/upgrade-self'),
+    })
   }
 }
 
@@ -337,6 +417,12 @@ async function refreshServerStateSilent() {
       const data = await res.json()
       if (data) {
         if (data.mihomo_version) state.mihomo_version = data.mihomo_version
+        if (data.pending_reload_count !== undefined) {
+          state.pending_reload_count = Number(data.pending_reload_count || 0)
+        }
+        if (Array.isArray(data.pending_reload_items)) {
+          state.pending_reload_items = data.pending_reload_items
+        }
         if (data.status) {
           Object.assign(state.status, data.status)
           if (data.status.mihomo_version) state.mihomo_version = data.status.mihomo_version
@@ -352,6 +438,7 @@ function applyServerState(newState) {
   if (newState.mihomo_version) state.mihomo_version = newState.mihomo_version
   if (newState.csrf) state.csrf = newState.csrf
   if (newState.sub_url !== undefined) state.sub_url = newState.sub_url
+  if (newState.sub_qr_data_url !== undefined) state.sub_qr_data_url = newState.sub_qr_data_url
   if (newState.zb_url !== undefined) state.zb_url = newState.zb_url
   if (newState.mihomo_secret !== undefined) state.mihomo_secret = newState.mihomo_secret
   if (newState.srv_cfg_url !== undefined) state.srv_cfg_url = newState.srv_cfg_url
@@ -362,6 +449,13 @@ function applyServerState(newState) {
   if (newState.custom_config_raw !== undefined) {
     state.custom_config_raw = newState.custom_config_raw
     customConfigText.value = newState.custom_config_raw
+  }
+  if (newState.pending_reload_count !== undefined) {
+    state.pending_reload_count = Number(newState.pending_reload_count || 0)
+    if (state.pending_reload_count === 0) showPendingDiff.value = false
+  }
+  if (Array.isArray(newState.pending_reload_items)) {
+    state.pending_reload_items = newState.pending_reload_items
   }
   if (newState.status) {
     Object.assign(state.status, newState.status)
@@ -515,14 +609,24 @@ async function deleteInbound(item) {
   await postAction(item.delete_url, {}, `del-${item.key}`)
 }
 
-async function resetSubUrl() {
-  if (!window.confirm(t('确定更换订阅链接？更换后原订阅链接将立即失效。'))) return
-  await postAction('/action/reset-sub', {}, 'reset-sub')
+function resetSubUrl() {
+  openConfirmDialog({
+    title: t('更换订阅链接'),
+    message: t('确定更换订阅链接？需点击顶部「重载配置」后新订阅链接才会生效（重载后旧链接失效）。'),
+    confirmText: t('确认更换'),
+    tone: 'amber',
+    onConfirm: () => postAction('/action/reset-sub', {}, 'reset-sub'),
+  })
 }
 
-async function resetZbSecret() {
-  if (!window.confirm(t('确定重置 Zashboard API 密钥？重置后直连地址将同步更新。'))) return
-  await postAction('/action/reset-secret', {}, 'reset-secret')
+function resetZbSecret() {
+  openConfirmDialog({
+    title: t('重置 API 密钥'),
+    message: t('确定重置 Zashboard API 密钥？需点击顶部「重载配置」后直连地址才会更新。'),
+    confirmText: t('确认重置'),
+    tone: 'amber',
+    onConfirm: () => postAction('/action/reset-secret', {}, 'reset-secret'),
+  })
 }
 
 async function submitAddProvider() {
@@ -541,9 +645,14 @@ async function submitAddProvider() {
   }
 }
 
-async function deleteProvider(name) {
-  if (!window.confirm(t('确定删除订阅源「{name}」？', { name }))) return
-  await postAction('/providers/delete', { name }, `del-prov-${name}`)
+function deleteProvider(name) {
+  openConfirmDialog({
+    title: t('删除'),
+    message: t('确定删除订阅源「{name}」？', { name }),
+    confirmText: t('确认删除'),
+    tone: 'rose',
+    onConfirm: () => postAction('/providers/delete', { name }, `del-prov-${name}`),
+  })
 }
 
 async function submitAddProxies() {
@@ -554,9 +663,14 @@ async function submitAddProxies() {
   }
 }
 
-async function deleteProxy(name) {
-  if (!window.confirm(t('确定删除出站节点「{name}」？', { name }))) return
-  await postAction('/proxies/delete', { name }, `del-proxy-${name}`)
+function deleteProxy(name) {
+  openConfirmDialog({
+    title: t('删除'),
+    message: t('确定删除出站节点「{name}」？', { name }),
+    confirmText: t('确认删除'),
+    tone: 'rose',
+    onConfirm: () => postAction('/proxies/delete', { name }, `del-proxy-${name}`),
+  })
 }
 
 function loadFileInto(ev, targetRef) {
@@ -674,14 +788,14 @@ async function submitCustomConfig() {
   await postAction('/config/custom', { custom_config_raw: customConfigText.value }, 'save-custom')
 }
 
-async function resetTemplateConfig() {
-  if (
-    !window.confirm(
-      t('确定恢复默认配置？这将还原内置默认服务端模板，并重新生成一个默认 VlessReality 节点（同时同步至客户端订阅）。')
-    )
-  )
-    return
-  await postAction('/config/reset-template', {}, 'reset-template')
+function resetTemplateConfig() {
+  openConfirmDialog({
+    title: t('恢复标准模板'),
+    message: t('确定恢复标准模板？这将还原内置标准服务端模板，并重新生成一个默认 VlessReality 节点（同时同步至客户端订阅）。'),
+    confirmText: t('恢复标准模板'),
+    tone: 'rose',
+    onConfirm: () => postAction('/config/reset-template', {}, 'reset-template'),
+  })
 }
 
 function selectTab(tab) {
@@ -817,6 +931,53 @@ onUnmounted(() => {
       </div>
     </transition>
 
+    <!-- In-Panel Confirmation Modal -->
+    <div
+      v-if="confirmDialog.show"
+      id="confirm-modal"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/30 backdrop-blur-xs"
+      @click.self="closeConfirmDialog"
+    >
+      <div
+        class="w-full max-w-md bg-white rounded-2xl border border-emerald-100 p-6 shadow-xl space-y-4"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <h3 class="text-base font-bold text-slate-900">{{ confirmDialog.title }}</h3>
+          <button
+            type="button"
+            @click="closeConfirmDialog"
+            class="text-slate-400 hover:text-slate-600 text-sm px-2 py-0.5 rounded-lg cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+        <p class="text-sm text-slate-600 leading-relaxed">{{ confirmDialog.message }}</p>
+        <div class="flex items-center justify-end gap-2.5 pt-1">
+          <button
+            type="button"
+            @click="closeConfirmDialog"
+            class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
+          >
+            {{ t('取消') }}
+          </button>
+          <button
+            type="button"
+            @click="acceptConfirmDialog"
+            class="px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+            :class="
+              confirmDialog.tone === 'rose'
+                ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-xs'
+                : confirmDialog.tone === 'emerald'
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
+                  : 'bg-amber-500 hover:bg-amber-400 text-white shadow-xs'
+            "
+          >
+            {{ confirmDialog.confirmText || t('确认') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Bright Topbar -->
     <header class="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-emerald-100/90 text-slate-900">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
@@ -885,68 +1046,164 @@ onUnmounted(() => {
     <!-- Main Container -->
     <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6 flex-1">
       <!-- Concise Status Strip -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div
-          class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)] flex items-center justify-between"
-        >
-          <div>
-            <div class="text-xs font-medium text-slate-500">{{ t('运行状态') }}</div>
-            <div class="mt-1.5 flex items-center gap-2">
-              <span
-                class="w-2.5 h-2.5 rounded-full"
-                :class="{
-                  'bg-emerald-500 ring-4 ring-emerald-500/20': state.status.state_cls === 'ok',
-                  'bg-amber-500 ring-4 ring-amber-500/20': state.status.state_cls === 'warn',
-                  'bg-rose-500 ring-4 ring-rose-500/20':
-                    state.status.state_cls !== 'ok' && state.status.state_cls !== 'warn',
-                }"
-              ></span>
-              <span class="text-lg font-bold text-slate-900">{{ t(state.status.state_txt || '未知') }}</span>
+      <div class="space-y-3">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <!-- Card 1: 入站节点 -->
+          <div
+            id="stat-card-inbounds"
+            class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)] flex items-center justify-between gap-2"
+          >
+            <div>
+              <div class="flex items-center gap-2">
+                <span
+                  class="w-2 h-2 rounded-full"
+                  :class="{
+                    'bg-emerald-500 ring-3 ring-emerald-500/20': state.status.state_cls === 'ok',
+                    'bg-amber-500 ring-3 ring-amber-500/20': state.status.state_cls === 'warn',
+                    'bg-rose-500 ring-3 ring-rose-500/20':
+                      state.status.state_cls !== 'ok' && state.status.state_cls !== 'warn',
+                  }"
+                ></span>
+                <span class="text-xs font-medium text-slate-500">{{ t('入站节点') }}</span>
+              </div>
+              <div class="mt-1.5 flex items-baseline gap-1.5">
+                <span class="text-lg font-bold text-slate-900">{{ state.inbounds.length }}</span>
+                <span class="text-xs text-slate-500">{{ state.inbounds.length }} {{ t('个节点运行中') }}</span>
+              </div>
+            </div>
+            <span
+              class="px-2.5 py-1 text-xs font-semibold rounded-lg shrink-0"
+              :class="
+                state.custom_config_mode
+                  ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
+                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+              "
+            >
+              {{ state.custom_config_mode ? t('自定义模式') : t('标准模板') }}
+            </span>
+          </div>
+
+          <!-- Card 2: 出站节点 -->
+          <div
+            id="stat-card-outbounds"
+            class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)]"
+          >
+            <div class="text-xs font-medium text-slate-500">{{ t('出站节点') }}</div>
+            <div class="mt-1.5 flex items-baseline gap-1.5">
+              <span class="text-lg font-bold text-slate-900">
+                {{ (state.status.outbound_nodes_count ?? 0) + (state.status.outbound_providers_count ?? 0) }}
+              </span>
+              <span class="text-xs text-slate-500">
+                {{ state.status.outbound_nodes_count ?? 0 }} {{ t('节点 ·') }} {{ state.status.outbound_providers_count ?? 0 }} {{ t('订阅源') }}
+              </span>
             </div>
           </div>
-          <span
-            class="px-2.5 py-1 text-xs font-semibold rounded-lg"
+
+          <!-- Card 3: 待重载配置 -->
+          <div
+            id="stat-card-pending-reload"
+            role="button"
+            tabindex="0"
+            @click="showPendingDiff = !showPendingDiff"
+            @keydown.enter.prevent="showPendingDiff = !showPendingDiff"
+            class="rounded-2xl border p-4 sm:p-5 transition cursor-pointer select-none flex items-center justify-between gap-2"
             :class="
-              state.custom_config_mode
-                ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
-                : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+              state.pending_reload_count > 0
+                ? 'bg-amber-50/90 border-amber-300 shadow-[0_2px_12px_-4px_rgba(245,158,11,0.2)] hover:bg-amber-50'
+                : 'bg-white border-emerald-100/90 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)] hover:bg-emerald-50/30'
             "
           >
-            {{ state.custom_config_mode ? t('自定义模式') : t('标准模板') }}
-          </span>
-        </div>
+            <div>
+              <div class="text-xs font-medium" :class="state.pending_reload_count > 0 ? 'text-amber-800' : 'text-slate-500'">
+                {{ t('待重载配置') }}
+              </div>
+              <div class="mt-1.5 flex items-baseline gap-1.5">
+                <span
+                  id="pending-reload-count"
+                  class="text-lg font-bold"
+                  :class="state.pending_reload_count > 0 ? 'text-amber-900' : 'text-slate-900'"
+                >
+                  {{ state.pending_reload_count }}
+                </span>
+                <span
+                  class="text-xs"
+                  :class="state.pending_reload_count > 0 ? 'text-amber-700 font-medium' : 'text-slate-500'"
+                >
+                  {{ state.pending_reload_count > 0 ? t('项待重载生效') : t('无待生效') }}
+                </span>
+              </div>
+            </div>
+            <span
+              v-if="state.pending_reload_count > 0"
+              class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100/90 text-amber-800 border border-amber-300/80 shrink-0"
+            >
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+              {{ showPendingDiff ? t('收起') : t('点击展开变更') }}
+            </span>
+          </div>
 
-        <div
-          class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)]"
-        >
-          <div class="text-xs font-medium text-slate-500">{{ t('入站监听') }}</div>
-          <div class="mt-1.5 flex items-baseline gap-1.5">
-            <span class="text-lg font-bold text-slate-900">{{ state.status.inbound_listening ?? 0 }}</span>
-            <span class="text-xs text-slate-500">/ {{ state.status.inbound_total ?? 0 }} {{ t('个端口运行中') }}</span>
+          <!-- Card 4: 已代理流量 -->
+          <div
+            id="stat-card-traffic"
+            class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)]"
+          >
+            <div class="text-xs font-medium text-slate-500">{{ t('已代理流量') }}</div>
+            <div class="mt-1.5 flex items-baseline gap-1.5">
+              <span class="text-lg font-bold text-slate-900">{{ trafficDisplay }}</span>
+              <span class="text-xs text-slate-400 truncate">{{ trafficDetail }}</span>
+            </div>
           </div>
         </div>
 
+        <!-- Expandable Pending Reload Diff Panel -->
         <div
-          class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)]"
+          v-if="showPendingDiff"
+          id="pending-reload-diff-panel"
+          class="rounded-2xl border px-4 py-3.5 text-xs space-y-2.5 transition"
+          :class="
+            state.pending_reload_count > 0
+              ? 'bg-amber-50/90 border-amber-200/90 text-amber-950'
+              : 'bg-white border-emerald-100 text-slate-600'
+          "
         >
-          <div class="text-xs font-medium text-slate-500">{{ t('服务端出站') }}</div>
-          <div class="mt-1.5 flex items-baseline gap-1.5">
-            <span class="text-lg font-bold text-slate-900">
-              {{ (state.status.outbound_nodes_count ?? 0) + (state.status.outbound_providers_count ?? 0) }}
-            </span>
-            <span class="text-xs text-slate-500">
-              {{ state.status.outbound_nodes_count ?? 0 }} {{ t('节点 ·') }} {{ state.status.outbound_providers_count ?? 0 }} {{ t('订阅源') }}
-            </span>
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="font-semibold flex items-center gap-2">
+              <span
+                class="w-2 h-2 rounded-full"
+                :class="state.pending_reload_count > 0 ? 'bg-amber-500' : 'bg-emerald-500'"
+              ></span>
+              <span>{{ t('待生效变更明细') }}（{{ state.pending_reload_count }}）</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                v-if="state.pending_reload_count > 0"
+                type="button"
+                :disabled="busyKey === '/action/reload'"
+                @click="postAction('/action/reload', {}, '/action/reload')"
+                class="px-3 py-1 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-white transition cursor-pointer"
+              >
+                {{ busyKey === '/action/reload' ? t('重载中…') : t('重载配置') }}
+              </button>
+              <button
+                type="button"
+                @click="showPendingDiff = false"
+                class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white/80 hover:bg-white text-slate-600 border border-slate-200/80 transition cursor-pointer"
+              >
+                {{ t('收起') }}
+              </button>
+            </div>
           </div>
-        </div>
-
-        <div
-          class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)]"
-        >
-          <div class="text-xs font-medium text-slate-500">{{ t('已代理流量') }}</div>
-          <div class="mt-1.5 flex items-baseline gap-1.5">
-            <span class="text-lg font-bold text-slate-900">{{ trafficDisplay }}</span>
-            <span class="text-xs text-slate-400 truncate">{{ trafficDetail }}</span>
+          <div v-if="state.pending_reload_items && state.pending_reload_items.length > 0" class="space-y-1 font-mono">
+            <div
+              v-for="(it, idx) in state.pending_reload_items"
+              :key="idx"
+              class="px-3 py-1.5 rounded-xl bg-white/90 border border-amber-200/60 text-slate-800"
+            >
+              {{ formatPendingItem(it) }}
+            </div>
+          </div>
+          <div v-else class="text-slate-500">
+            {{ t('无待生效') }}
           </div>
         </div>
       </div>
@@ -1141,15 +1398,32 @@ onUnmounted(() => {
             </div>
 
             <div class="space-y-2.5">
-              <div>
-                <div class="text-xs font-medium text-slate-500 mb-1">
-                  {{ t('导入 Clash / Mihomo 客户端即可使用') }}
+              <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                <div class="flex-1 min-w-0">
+                  <div class="text-xs font-medium text-slate-500 mb-1">
+                    {{ t('导入 Clash / Mihomo 客户端即可使用') }}
+                  </div>
+                  <div
+                    id="sub-url"
+                    class="px-3.5 py-2.5 rounded-xl bg-[#f6faf8] border border-emerald-100 font-mono text-xs text-slate-700 break-all select-all"
+                  >
+                    {{ state.sub_url || '/etc/clashgate/client/mihomo-client.yaml' }}
+                  </div>
                 </div>
                 <div
-                  id="sub-url"
-                  class="px-3.5 py-2.5 rounded-xl bg-[#f6faf8] border border-emerald-100 font-mono text-xs text-slate-700 break-all select-all"
+                  v-if="state.sub_url && state.sub_qr_data_url"
+                  class="flex items-center gap-2.5 shrink-0 bg-[#f6faf8] border border-emerald-100 rounded-xl px-2.5 py-2"
                 >
-                  {{ state.sub_url || '/etc/clashgate/client/mihomo-client.yaml' }}
+                  <img
+                    id="sub-qr"
+                    :src="state.sub_qr_data_url"
+                    :alt="t('订阅二维码')"
+                    class="w-16 h-16 rounded-lg bg-white p-1 border border-emerald-200/70 shrink-0"
+                  />
+                  <div class="text-xs space-y-0.5 sm:max-w-[110px]">
+                    <div class="font-semibold text-slate-800">{{ t('订阅二维码') }}</div>
+                    <div class="text-[11px] text-slate-500 leading-tight">{{ t('扫码导入 Clash / Mihomo 订阅') }}</div>
+                  </div>
                 </div>
               </div>
               <div class="text-xs text-slate-500 flex items-center justify-between gap-2 pt-1">
@@ -1692,14 +1966,14 @@ onUnmounted(() => {
               </p>
             </div>
 
-            <!-- 恢复默认配置（始终可见：一点即还原模板配置，并生成一个默认 VlessReality 节点） -->
+            <!-- 恢复标准模板（始终可见：一点即还原模板配置，并生成一个默认 VlessReality 节点） -->
             <button
               type="button"
               :disabled="busyKey === 'reset-template'"
               @click="resetTemplateConfig"
               class="px-4 py-2 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200/90 disabled:opacity-50 transition cursor-pointer shrink-0"
             >
-              {{ busyKey === 'reset-template' ? t('正在恢复默认配置…') : t('恢复默认配置') }}
+              {{ busyKey === 'reset-template' ? t('正在恢复标准模板…') : t('恢复标准模板') }}
             </button>
           </div>
 

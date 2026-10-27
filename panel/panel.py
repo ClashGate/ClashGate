@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v0.97 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
+"""ClashGate v0.98 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -24,6 +24,7 @@ import secrets
 import shutil
 import socket
 import ssl
+import struct
 import subprocess
 import sys
 import tempfile
@@ -32,13 +33,14 @@ import time
 import urllib.error
 import urllib.request
 import uuid as uuidlib
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse, quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 
-VERSION = "0.97"
+VERSION = "0.98"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -47,6 +49,7 @@ ENV_FILE = CS_ROOT + "/clashgate.env"
 INBOUNDS = CS_ROOT + "/inbounds.json"
 PROXIES_JSON = CS_ROOT + "/proxies.json"
 PROVIDERS_JSON = CS_ROOT + "/providers.json"
+PENDING_RELOAD_JSON = CS_ROOT + "/pending_reload.json"
 TRAFFIC_JSON = CS_ROOT + "/traffic.json"
 MIHOMO_DIR = CS_ROOT
 CONF = MIHOMO_DIR + "/config.yaml"
@@ -1965,6 +1968,319 @@ _PENDING_UFW_BASELINE = None
 _RECENT_ADD_REQS = {}
 
 
+# ---------------------------------------------------------------- QR Code (Pure Python PNG Data-URL) & Pending Reload Log
+_QR_VER_L = {
+    1:  (19,   7,  1, 19,  0, 0,   ()),
+    2:  (34,  10,  1, 34,  0, 0,   (6, 18)),
+    3:  (55,  15,  1, 55,  0, 0,   (6, 22)),
+    4:  (80,  20,  1, 80,  0, 0,   (6, 26)),
+    5:  (108, 26,  1, 108, 0, 0,   (6, 30)),
+    6:  (136, 18,  2, 68,  0, 0,   (6, 34)),
+    7:  (156, 20,  2, 78,  0, 0,   (6, 22, 38)),
+    8:  (194, 24,  2, 97,  0, 0,   (6, 24, 42)),
+    9:  (232, 30,  2, 116, 0, 0,   (6, 26, 46)),
+    10: (274, 18,  2, 68,  2, 69,  (6, 28, 50)),
+    11: (324, 20,  4, 81,  0, 0,   (6, 30, 54)),
+    12: (370, 24,  2, 92,  2, 93,  (6, 32, 58)),
+}
+_GF_EXP = [0] * 512
+_GF_LOG = [0] * 256
+_x = 1
+for _i in range(255):
+    _GF_EXP[_i] = _x
+    _GF_EXP[_i + 255] = _x
+    _GF_LOG[_x] = _i
+    _x <<= 1
+    if _x & 0x100:
+        _x ^= 0x11D
+_QR_CACHE = {}
+
+
+def _gf_mul(a: int, b: int) -> int:
+    return _GF_EXP[_GF_LOG[a] + _GF_LOG[b]] if (a and b) else 0
+
+
+def _rs_encode(data: list, nsym: int) -> list:
+    g = [1]
+    for i in range(nsym):
+        ng = [0] * (len(g) + 1)
+        for j, c in enumerate(g):
+            ng[j] ^= c
+            ng[j + 1] ^= _gf_mul(c, _GF_EXP[i])
+        g = ng
+    res = list(data) + [0] * nsym
+    for i in range(len(data)):
+        coef = res[i]
+        if coef:
+            for j in range(1, len(g)):
+                res[i + j] ^= _gf_mul(g[j], coef)
+    return res[len(data):]
+
+
+def _make_qr_matrix(text: str) -> list:
+    raw = text.encode("utf-8")
+    n = len(raw)
+    ver = 1
+    for v in sorted(_QR_VER_L):
+        cap = _QR_VER_L[v][0]
+        cc_bits = 8 if v <= 9 else 16
+        if 4 + cc_bits + 8 * n <= 8 * cap:
+            ver = v
+            break
+    else:
+        raise ValueError("QR data too long")
+    total_dc, ec_len, nb1, db1, nb2, db2, aligns = _QR_VER_L[ver]
+    cc_bits = 8 if ver <= 9 else 16
+    bits = [0, 1, 0, 0]
+    for i in range(cc_bits - 1, -1, -1):
+        bits.append((n >> i) & 1)
+    for b in raw:
+        for i in range(7, -1, -1):
+            bits.append((b >> i) & 1)
+    max_bits = total_dc * 8
+    for _ in range(min(4, max_bits - len(bits))):
+        bits.append(0)
+    while len(bits) % 8 != 0:
+        bits.append(0)
+    codewords = [int("".join(str(b) for b in bits[i:i + 8]), 2) for i in range(0, len(bits), 8)]
+    pads = (0xEC, 0x11)
+    pi = 0
+    while len(codewords) < total_dc:
+        codewords.append(pads[pi & 1])
+        pi += 1
+
+    blocks_d, blocks_e = [], []
+    idx = 0
+    for _ in range(nb1):
+        blk = codewords[idx:idx + db1]
+        idx += db1
+        blocks_d.append(blk)
+        blocks_e.append(_rs_encode(blk, ec_len))
+    for _ in range(nb2):
+        blk = codewords[idx:idx + db2]
+        idx += db2
+        blocks_d.append(blk)
+        blocks_e.append(_rs_encode(blk, ec_len))
+
+    interleaved = []
+    for i in range(max(db1, db2)):
+        for b in blocks_d:
+            if i < len(b):
+                interleaved.append(b[i])
+    for i in range(ec_len):
+        for e in blocks_e:
+            interleaved.append(e[i])
+
+    final_bits = []
+    for cw in interleaved:
+        for i in range(7, -1, -1):
+            final_bits.append((cw >> i) & 1)
+    if ver in (2, 3, 4, 5, 6):
+        final_bits.extend([0] * 7)
+
+    size = 17 + 4 * ver
+    grid = [[0] * size for _ in range(size)]
+    is_func = [[False] * size for _ in range(size)]
+
+    def set_func(r, c, val):
+        if 0 <= r < size and 0 <= c < size:
+            grid[r][c] = 1 if val else 0
+            is_func[r][c] = True
+
+    def place_finder(tr, tc):
+        for r in range(-1, 8):
+            for c in range(-1, 8):
+                v = (r in (0, 6) or c in (0, 6) or (2 <= r <= 4 and 2 <= c <= 4)) if (0 <= r <= 6 and 0 <= c <= 6) else False
+                set_func(tr + r, tc + c, v)
+
+    place_finder(0, 0)
+    place_finder(0, size - 7)
+    place_finder(size - 7, 0)
+    for i in range(8, size - 8):
+        set_func(6, i, i % 2 == 0)
+        set_func(i, 6, i % 2 == 0)
+    for r in aligns:
+        for c in aligns:
+            if (r < 9 and c < 9) or (r < 9 and c > size - 10) or (r > size - 10 and c < 9):
+                continue
+            for dr in range(-2, 3):
+                for dc in range(-2, 3):
+                    set_func(r + dr, c + dc, abs(dr) == 2 or abs(dc) == 2 or (dr == 0 and dc == 0))
+    set_func(4 * ver + 9, 8, True)
+    for i in range(9):
+        if not is_func[8][i]:
+            set_func(8, i, False)
+        if not is_func[i][8]:
+            set_func(i, 8, False)
+    for i in range(8):
+        set_func(8, size - 1 - i, False)
+        set_func(size - 1 - i, 8, False)
+    if ver >= 7:
+        rem = ver
+        for _ in range(12):
+            rem = (rem << 1) ^ ((rem >> 11) * 0x1F25)
+        vinfo = (ver << 12) | rem
+        for i in range(18):
+            bit = (vinfo >> i) & 1
+            r, c = i // 3, size - 11 + (i % 3)
+            set_func(r, c, bit)
+            set_func(c, r, bit)
+
+    bi = 0
+    up = True
+    col = size - 1
+    while col > 0:
+        if col == 6:
+            col -= 1
+        rows = range(size - 1, -1, -1) if up else range(size)
+        for r in rows:
+            for dc in (0, -1):
+                c = col + dc
+                if not is_func[r][c]:
+                    b = final_bits[bi] if bi < len(final_bits) else 0
+                    bi += 1
+                    if (r + c) % 2 == 0:
+                        b ^= 1
+                    grid[r][c] = b
+        up = not up
+        col -= 2
+
+    f_data = 0b01000
+    rem = f_data
+    for _ in range(10):
+        rem = (rem << 1) ^ ((rem >> 9) * 0x537)
+    f_bits = ((f_data << 10) | rem) ^ 0x5412
+    f_pos1 = [(8, 0), (8, 1), (8, 2), (8, 3), (8, 4), (8, 5), (8, 7), (8, 8), (7, 8), (5, 8), (4, 8), (3, 8), (2, 8), (1, 8), (0, 8)]
+    f_pos2 = [(size - 1, 8), (size - 2, 8), (size - 3, 8), (size - 4, 8), (size - 5, 8), (size - 6, 8), (size - 7, 8),
+              (8, size - 8), (8, size - 7), (8, size - 6), (8, size - 5), (8, size - 4), (8, size - 3), (8, size - 2), (8, size - 1)]
+    for i in range(15):
+        bit = (f_bits >> i) & 1
+        grid[f_pos1[i][0]][f_pos1[i][1]] = bit
+        grid[f_pos2[i][0]][f_pos2[i][1]] = bit
+    return grid
+
+
+def qr_png_data_url(text: str, scale: int = 4, border: int = 2) -> str:
+    """Render a QR code PNG data URL for sub_url using stdlib only."""
+    if not text:
+        return ""
+    cached = _QR_CACHE.get(text)
+    if cached:
+        return cached
+    try:
+        grid = _make_qr_matrix(text)
+        n = len(grid)
+        dim = (n + 2 * border) * scale
+        white_row = b"\x00" + (b"\xff" * dim)
+        rows = [white_row] * (border * scale)
+        for r in range(n):
+            line = bytearray(b"\x00")
+            line.extend(b"\xff" * (border * scale))
+            for c in range(n):
+                line.extend((b"\x00" if grid[r][c] else b"\xff") * scale)
+            line.extend(b"\xff" * (border * scale))
+            row_bytes = bytes(line)
+            for _ in range(scale):
+                rows.append(row_bytes)
+        rows.extend([white_row] * (border * scale))
+        raw = b"".join(rows)
+
+        def _chunk(tag: bytes, body: bytes) -> bytes:
+            return struct.pack(">I", len(body)) + tag + body + struct.pack(">I", zlib.crc32(tag + body) & 0xFFFFFFFF)
+
+        ihdr = struct.pack(">IIBBBBB", dim, dim, 8, 0, 0, 0, 0)
+        png = b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr) + _chunk(b"IDAT", zlib.compress(raw, 9)) + _chunk(b"IEND", b"")
+        res = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+        if len(_QR_CACHE) > 16:
+            _QR_CACHE.clear()
+        _QR_CACHE[text] = res
+        return res
+    except Exception as e:
+        sys.stderr.write(f"qr_png_data_url warning: {e}\n")
+        return ""
+
+
+def load_pending_reload() -> dict:
+    default = {"items": [], "sub_token": "", "mihomo_secret": ""}
+    try:
+        with open(PENDING_RELOAD_JSON) as f:
+            d = json.load(f)
+            if isinstance(d, dict):
+                items = d.get("items") if isinstance(d.get("items"), list) else []
+                return {
+                    "items": [it for it in items if isinstance(it, dict)],
+                    "sub_token": str(d.get("sub_token") or ""),
+                    "mihomo_secret": str(d.get("mihomo_secret") or ""),
+                }
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    return default
+
+
+def save_pending_reload(state: dict):
+    cleaned = {
+        "items": [it for it in (state.get("items") or []) if isinstance(it, dict)],
+        "sub_token": str(state.get("sub_token") or ""),
+        "mihomo_secret": str(state.get("mihomo_secret") or ""),
+    }
+    atomic_write(PENDING_RELOAD_JSON, json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n", 0o600)
+
+
+def clear_pending_reload():
+    try:
+        if os.path.exists(PENDING_RELOAD_JSON):
+            os.remove(PENDING_RELOAD_JSON)
+    except OSError:
+        pass
+
+
+def record_pending_reload(op: str, name: str = "", port: int = None, kind: str = "", detail: str = "",
+                          sub_token: str = None, mihomo_secret: str = None):
+    st = load_pending_reload()
+    items = list(st["items"])
+    if sub_token is not None:
+        st["sub_token"] = sub_token
+    if mihomo_secret is not None:
+        st["mihomo_secret"] = mihomo_secret
+
+    if op in ("reset-secret", "reset-sub"):
+        items = [it for it in items if it.get("op") != op]
+        items.append({"op": op, "kind": kind or op, "name": name, "port": port, "detail": detail})
+    elif op == "delete":
+        had_add = any(it.get("op") == "add" and it.get("name") == name and (it.get("kind") == kind or not kind) for it in items)
+        items = [it for it in items if not (it.get("name") == name and it.get("op") in ("add", "reset-password", "delete"))]
+        if not had_add:
+            items.append({"op": "delete", "kind": kind, "name": name, "port": port, "detail": detail})
+    elif op == "reset-password":
+        has_add_or_rst = any(it.get("name") == name and it.get("op") in ("add", "reset-password") for it in items)
+        if not has_add_or_rst:
+            items.append({"op": "reset-password", "kind": kind, "name": name, "port": port, "detail": detail})
+        else:
+            for it in items:
+                if it.get("name") == name and it.get("op") == "reset-password":
+                    it["detail"] = detail
+    elif op == "add":
+        items = [it for it in items if not (it.get("name") == name and it.get("op") in ("add", "delete"))]
+        items.append({"op": "add", "kind": kind, "name": name, "port": port, "detail": detail})
+    elif op in ("add-proxy", "delete-proxy", "add-provider", "delete-provider"):
+        base_kind = "proxy" if "proxy" in op else "provider"
+        if op.startswith("delete-"):
+            had_add = any(it.get("op") == f"add-{base_kind}" and it.get("name") == name for it in items)
+            items = [it for it in items if not (it.get("name") == name and it.get("op") in (f"add-{base_kind}", f"delete-{base_kind}"))]
+            if not had_add:
+                items.append({"op": op, "kind": base_kind, "name": name, "port": port, "detail": detail})
+        else:
+            items = [it for it in items if not (it.get("name") == name and it.get("op") in (f"add-{base_kind}", f"delete-{base_kind}"))]
+            items.append({"op": op, "kind": base_kind, "name": name, "port": port, "detail": detail})
+    else:
+        items.append({"op": op, "kind": kind, "name": name, "port": port, "detail": detail})
+
+    st["items"] = items
+    save_pending_reload(st)
+
+
 def _dedup_inbounds(items: list) -> list:
     out = []
     seen = set()
@@ -2084,8 +2400,8 @@ def apply_nodes(new_nodes: list):
 
 
 def save_server_proxies(new_proxies: list):
-    """Persist server outbound proxies to disk ONLY (proxies.json + proxies.extra.yaml + config.yaml) without reloading Mihomo."""
-    files = (PROXIES_JSON, FRAG_PROXIES, CUSTOM_CONF, CONF) if is_custom_config_mode() else (PROXIES_JSON, FRAG_PROXIES, CONF)
+    """Persist server outbound proxies to disk ONLY (proxies.json + proxies.extra.yaml) without writing live CONF or reloading Mihomo."""
+    files = (PROXIES_JSON, FRAG_PROXIES, CUSTOM_CONF) if is_custom_config_mode() else (PROXIES_JSON, FRAG_PROXIES)
     backup = {}
     for p in files:
         try:
@@ -2097,7 +2413,6 @@ def save_server_proxies(new_proxies: list):
         atomic_write(PROXIES_JSON, json.dumps(new_proxies, indent=2, ensure_ascii=False), 0o600)
         atomic_write(FRAG_PROXIES, dump_yaml_proxies(new_proxies), 0o640)
         _sync_custom_conf_proxies(new_proxies)
-        atomic_write(CONF, assemble_config(), 0o640)
     except Exception:
         for p, data in backup.items():
             if data is None:
@@ -2142,8 +2457,8 @@ def apply_server_proxies(new_proxies: list):
 
 
 def save_proxy_providers(new_providers: dict):
-    """Persist server proxy-providers to disk ONLY (providers.json + providers.extra.yaml + config.yaml) without reloading Mihomo."""
-    files = (PROVIDERS_JSON, FRAG_PROVIDERS, CUSTOM_CONF, CONF) if is_custom_config_mode() else (PROVIDERS_JSON, FRAG_PROVIDERS, CONF)
+    """Persist server proxy-providers to disk ONLY (providers.json + providers.extra.yaml) without writing live CONF or reloading Mihomo."""
+    files = (PROVIDERS_JSON, FRAG_PROVIDERS, CUSTOM_CONF) if is_custom_config_mode() else (PROVIDERS_JSON, FRAG_PROVIDERS)
     backup = {}
     for p in files:
         try:
@@ -2155,7 +2470,6 @@ def save_proxy_providers(new_providers: dict):
         atomic_write(PROVIDERS_JSON, json.dumps(new_providers, indent=2, ensure_ascii=False), 0o600)
         atomic_write(FRAG_PROVIDERS, dump_yaml_providers(new_providers), 0o640)
         _sync_custom_conf_providers(new_providers)
-        atomic_write(CONF, assemble_config(), 0o640)
     except Exception:
         for p, data in backup.items():
             if data is None:
@@ -2888,19 +3202,27 @@ class Panel(BaseHTTPRequestHandler):
         providers = load_proxy_providers()
         cert = parse_cert(st["cert"].get("info", ""))
 
+        pending_st = load_pending_reload()
+        pending_items = list(pending_st["items"])
+        pending_reset_names = {
+            it.get("name") for it in pending_items
+            if it.get("op") == "reset-password" and it.get("name")
+        }
+
         inbound_items = []
         all_proxies = []
         for n in nodes:
             proxy = reality_client(n, env)
             all_proxies.append(proxy)
+            is_pending = (n["port"] not in listening and st["active"] == "active") or (n["name"] in pending_reset_names)
             inbound_items.append({
                 "key": f"node:{n['name']}",
                 "name": n["name"],
                 "kind": "vless-reality",
                 "kind_label": KIND_ZH["vless-reality"],
                 "port": n["port"],
-                "listening": n["port"] in listening,
-                "pending_reload": n["port"] not in listening and st["active"] == "active",
+                "listening": n["port"] in listening and (n["name"] not in pending_reset_names),
+                "pending_reload": is_pending,
                 "can_reset_password": True,
                 "reset_url": f"/nodes/{quote(n['name'])}/reset-password",
                 "delete_url": f"/nodes/{quote(n['name'])}/delete",
@@ -2911,14 +3233,15 @@ class Panel(BaseHTTPRequestHandler):
             proxy = i["client"]
             all_proxies.append(proxy)
             can_reset = can_reset_inbound_password(i)
+            is_pending = (i["port"] not in listening and st["active"] == "active") or (i["name"] in pending_reset_names)
             inbound_items.append({
                 "key": f"inb:{i['id']}",
                 "name": i["name"],
                 "kind": i["kind"],
                 "kind_label": KIND_ZH.get(i["kind"], i["kind"]),
                 "port": i["port"],
-                "listening": i["port"] in listening,
-                "pending_reload": i["port"] not in listening and st["active"] == "active",
+                "listening": i["port"] in listening and (i["name"] not in pending_reset_names),
+                "pending_reload": is_pending,
                 "can_reset_password": can_reset,
                 "reset_url": f"/inbounds/{i['id']}/reset-password" if can_reset else "",
                 "delete_url": f"/inbounds/{i['id']}/delete",
@@ -2972,11 +3295,20 @@ class Panel(BaseHTTPRequestHandler):
         cport = get_controller_port(env)
         traffic = get_traffic_stats(env)
         mver = get_mihomo_version_num(st)
+        cur_sub_url = self.sub_url()
+        req_lang = self.lang()
+        localized_pending_items = []
+        for it in pending_items:
+            entry = dict(it)
+            if req_lang == "en" and isinstance(entry.get("detail"), str):
+                entry["detail"] = _tr_msg(entry["detail"], "en")
+            localized_pending_items.append(entry)
         return {
             "version": VERSION,
             "mihomo_version": mver,
             "csrf": s["csrf"],
-            "sub_url": self.sub_url(),
+            "sub_url": cur_sub_url,
+            "sub_qr_data_url": qr_png_data_url(cur_sub_url) if cur_sub_url else "",
             "zb_url": zashboard_url(env),
             "mihomo_secret": get_mihomo_secret(env),
             "srv_cfg_url": "/config/server.yaml",
@@ -2985,6 +3317,8 @@ class Panel(BaseHTTPRequestHandler):
             "certs_present": certs_present(),
             "custom_config_mode": custom_active,
             "custom_config_raw": cur_cfg,
+            "pending_reload_count": len(localized_pending_items),
+            "pending_reload_items": localized_pending_items,
             "status": {
                 "active": st["active"],
                 "state_txt": state_txt,
@@ -2994,6 +3328,7 @@ class Panel(BaseHTTPRequestHandler):
                 "inbound_listening": n_listen,
                 "outbound_nodes_count": len(srv_proxies),
                 "outbound_providers_count": len(providers),
+                "pending_reload_count": len(localized_pending_items),
                 "cert_days": cert.get("days"),
                 "cert_hours": cert.get("hours"),
                 "cert_expires": cert.get("expires", ""),
@@ -3267,6 +3602,31 @@ class Panel(BaseHTTPRequestHandler):
         global _PENDING_UFW_BASELINE
         zh = {"restart": "重启", "reload": "重载"}[action]
         with LOCK:
+            pending_st = load_pending_reload()
+            if pending_st.get("mihomo_secret"):
+                new_secret = pending_st["mihomo_secret"]
+                write_env_var("MIHOMO_SECRET", new_secret)
+                env = read_env()
+                atomic_write(FRAG_CONTROLLER, render_controller_fragment(env), 0o640)
+                if is_custom_config_mode():
+                    try:
+                        with open(CUSTOM_CONF) as f:
+                            raw_c = f.read()
+                        updated_c = re.sub(r'^(\s*secret\s*:\s*).*$', f'\\1"{new_secret}"', raw_c, flags=re.M)
+                        atomic_write(CUSTOM_CONF, updated_c, 0o640)
+                    except FileNotFoundError:
+                        pass
+            if pending_st.get("sub_token"):
+                new_token = pending_st["sub_token"]
+                self.cfg["sub_token"] = new_token
+                if self.cfg_path:
+                    try:
+                        with open(self.cfg_path) as f:
+                            disk_cfg = json.load(f)
+                    except Exception:
+                        disk_cfg = dict(self.cfg)
+                    disk_cfg["sub_token"] = new_token
+                    atomic_write(self.cfg_path, json.dumps(disk_cfg, indent=2, ensure_ascii=False) + "\n", 0o600)
             cur_nodes = read_nodes()
             cur_inbs = load_inbounds()
             cur_proxies = load_server_proxies()
@@ -3295,6 +3655,7 @@ class Panel(BaseHTTPRequestHandler):
                 if st_now["listening"] and not expected_ports.issubset(set(st_now["listening"])):
                     rc, out = run([SYSTEMCTL, "restart", "mihomo"])
             if rc == 0:
+                clear_pending_reload()
                 wait_mihomo_ports()
         _, active = run([SYSTEMCTL, "is-active", "mihomo"])
         state = STATE_ZH.get(active.strip(), (active.strip(), ""))[0]
@@ -3305,55 +3666,34 @@ class Panel(BaseHTTPRequestHandler):
     def do_reset_sub(self, s):
         new_token = secrets.token_hex(24)
         with LOCK:
-            self.cfg["sub_token"] = new_token
-            if self.cfg_path:
-                try:
-                    with open(self.cfg_path) as f:
-                        disk_cfg = json.load(f)
-                except Exception:
-                    disk_cfg = dict(self.cfg)
-                disk_cfg["sub_token"] = new_token
-                atomic_write(self.cfg_path, json.dumps(disk_cfg, indent=2, ensure_ascii=False) + "\n", 0o600)
-        return self.respond_mutation(s, "订阅链接已更换，旧订阅链接已失效。", True)
+            record_pending_reload(
+                op="reset-sub",
+                kind="sub",
+                name="sub",
+                detail="~ 更换订阅链接",
+                sub_token=new_token,
+            )
+        return self.respond_mutation(s, "已记录更换订阅链接，请点顶部「重载配置」生效（重载后旧订阅链接失效）。", True)
 
     def do_reset_secret(self, s):
         alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
         new_secret = "".join(secrets.choice(alphabet) for _ in range(20))
         with LOCK:
-            old_env = read_env()
-            old_secret = old_env.get("MIHOMO_SECRET", "")
-            files = (FRAG_CONTROLLER, CUSTOM_CONF, CONF)
-            backup = {}
-            for p in files:
-                try:
-                    with open(p) as f:
-                        backup[p] = f.read()
-                except FileNotFoundError:
-                    backup[p] = None
             try:
-                write_env_var("MIHOMO_SECRET", new_secret)
                 env = read_env()
-                atomic_write(FRAG_CONTROLLER, render_controller_fragment(env), 0o640)
-                if is_custom_config_mode() and backup[CUSTOM_CONF]:
-                    updated = re.sub(r'^(\s*secret\s*:\s*).*$', f'\\1"{new_secret}"', backup[CUSTOM_CONF], flags=re.M)
-                    atomic_write(CUSTOM_CONF, updated, 0o640)
-                atomic_write(CONF, assemble_config(), 0o640)
-                rc, out = validate_config()
-                if rc != 0:
-                    raise RuntimeError("配置校验失败（mihomo -t）：" + out[-300:])
-                rc, out = run([SYSTEMCTL, "restart", "mihomo"])
-                if rc != 0:
-                    raise RuntimeError("重启失败：" + out[-300:])
-                wait_mihomo_ports()
+                env_draft = dict(env)
+                env_draft["MIHOMO_SECRET"] = new_secret
+                atomic_write(FRAG_CONTROLLER, render_controller_fragment(env_draft), 0o640)
+                record_pending_reload(
+                    op="reset-secret",
+                    kind="secret",
+                    name="secret",
+                    detail="~ 重置 API 密钥",
+                    mihomo_secret=new_secret,
+                )
             except Exception as e:
-                if old_secret:
-                    write_env_var("MIHOMO_SECRET", old_secret)
-                for p, data in backup.items():
-                    if data is not None:
-                        atomic_write(p, data, 0o640)
-                run([SYSTEMCTL, "restart", "mihomo"])
                 return self.respond_mutation(s, f"重置密钥失败：{e}", False)
-        return self.respond_mutation(s, "已重置 Zashboard API 密钥，链接已同步更新。", True)
+        return self.respond_mutation(s, "已生成新 Zashboard API 密钥，请点顶部「重载配置」生效（重载后直连地址才会更新）。", True)
 
     def do_cert_action(self, s):
         with LOCK:
@@ -3443,6 +3783,13 @@ class Panel(BaseHTTPRequestHandler):
             try:
                 inb = build_inbound(raw_kind, form, env)
                 save_inbounds(cur + [inb])
+                record_pending_reload(
+                    op="add",
+                    kind=inb["kind"],
+                    name=inb["name"],
+                    port=inb["port"],
+                    detail=f"+ 添加节点「{inb['name']}」（端口 {inb['port']}）",
+                )
                 if req_id:
                     _RECENT_ADD_REQS[req_id] = (now, inb)
             except Exception as e:
@@ -3457,11 +3804,20 @@ class Panel(BaseHTTPRequestHandler):
         with LOCK:
             _RECENT_ADD_REQS.clear()
             cur = load_inbounds()
+            removed = [i for i in cur if i["id"] == iid]
             new = [i for i in cur if i["id"] != iid]
             if len(new) == len(cur):
                 return self.respond_mutation(s, "节点删除成功，重载配置生效", True)
             try:
                 save_inbounds(new)
+                for rm in removed:
+                    record_pending_reload(
+                        op="delete",
+                        kind=rm.get("kind", ""),
+                        name=rm["name"],
+                        port=rm.get("port"),
+                        detail=f"- 删除节点「{rm['name']}」",
+                    )
             except Exception as e:
                 return self.respond_mutation(s, f"删除失败：{e}", False)
         return self.respond_mutation(s, "节点删除成功，重载配置生效", True)
@@ -3470,11 +3826,20 @@ class Panel(BaseHTTPRequestHandler):
         with LOCK:
             _RECENT_ADD_REQS.clear()
             cur = read_nodes()
+            removed = [n for n in cur if n["name"] == name]
             new = [n for n in cur if n["name"] != name]
             if len(new) == len(cur):
                 return self.respond_mutation(s, "已删除", True)
             try:
                 save_nodes(new)
+                for rm in removed:
+                    record_pending_reload(
+                        op="delete",
+                        kind="vless-reality",
+                        name=rm["name"],
+                        port=rm.get("port"),
+                        detail=f"- 删除节点「{rm['name']}」",
+                    )
             except Exception as e:
                 return self.respond_mutation(s, f"删除失败：{e}", False)
         return self.respond_mutation(s, f"已删除节点「{name}」，请点顶部「重载配置」生效", True)
@@ -3483,11 +3848,13 @@ class Panel(BaseHTTPRequestHandler):
         with LOCK:
             cur = read_nodes()
             found = False
+            found_port = None
             new_nodes = []
             try:
                 for n in cur:
                     if n["name"] == name:
                         found = True
+                        found_port = n.get("port")
                         priv, pub = reality_keypair()
                         dec, enc = vless_x25519_keypair()
                         n = dict(n)
@@ -3501,6 +3868,13 @@ class Panel(BaseHTTPRequestHandler):
                 if not found:
                     return self.respond_mutation(s, "入站节点不存在", False)
                 save_nodes(new_nodes)
+                record_pending_reload(
+                    op="reset-password",
+                    kind="vless-reality",
+                    name=name,
+                    port=found_port,
+                    detail=f"~ 重置密码「{name}」",
+                )
             except Exception as e:
                 return self.respond_mutation(s, f"重置密钥失败：{e}", False)
         return self.respond_mutation(s, f"已重置节点「{name}」的 UUID、Reality 私钥与 VLESS 加密密钥，重载配置生效", True)
@@ -3510,6 +3884,7 @@ class Panel(BaseHTTPRequestHandler):
             cur = load_inbounds()
             target_name = ""
             target_kind = ""
+            target_port = None
             new_inbs = []
             try:
                 for i in cur:
@@ -3518,11 +3893,19 @@ class Panel(BaseHTTPRequestHandler):
                             return self.respond_mutation(s, "该入站协议无需密码，不支持重置密码", False)
                         target_name = i["name"]
                         target_kind = i["kind"]
+                        target_port = i.get("port")
                         i = rotate_inbound_credentials(i)
                     new_inbs.append(i)
                 if not target_name:
                     return self.respond_mutation(s, "入站节点不存在", False)
                 save_inbounds(new_inbs)
+                record_pending_reload(
+                    op="reset-password",
+                    kind=target_kind,
+                    name=target_name,
+                    port=target_port,
+                    detail=f"~ 重置密码「{target_name}」",
+                )
             except Exception as e:
                 return self.respond_mutation(s, f"重置密码失败：{e}", False)
         return self.respond_mutation(s, "密码重置成功，重载配置生效", True)
@@ -3542,6 +3925,14 @@ class Panel(BaseHTTPRequestHandler):
                         by_name[p["name"]] = len(merged)
                         merged.append(p)
                 save_server_proxies(merged)
+                for p in added:
+                    record_pending_reload(
+                        op="add-proxy",
+                        kind="proxy",
+                        name=p["name"],
+                        port=p.get("port"),
+                        detail=f"+ 添加出站节点「{p['name']}」",
+                    )
             except Exception as e:
                 return self.respond_mutation(s, f"添加服务端 proxies 节点失败：{e}", False)
         names = "、".join(p["name"] for p in added)
@@ -3555,6 +3946,12 @@ class Panel(BaseHTTPRequestHandler):
                 return self.respond_mutation(s, "已删除", True)
             try:
                 save_server_proxies(new)
+                record_pending_reload(
+                    op="delete-proxy",
+                    kind="proxy",
+                    name=name,
+                    detail=f"- 删除出站节点「{name}」",
+                )
             except Exception as e:
                 return self.respond_mutation(s, f"删除服务端节点失败：{e}", False)
         return self.respond_mutation(s, f"已删除节点「{name}」，请点顶部「重载配置」生效", True)
@@ -3569,6 +3966,12 @@ class Panel(BaseHTTPRequestHandler):
                 merged = dict(cur)
                 merged[prov_name] = entry
                 save_proxy_providers(merged)
+                record_pending_reload(
+                    op="add-provider",
+                    kind="provider",
+                    name=prov_name,
+                    detail=f"+ 导入订阅源「{prov_name}」",
+                )
             except Exception as e:
                 return self.respond_mutation(s, f"导入订阅链接失败：{e}", False)
         return self.respond_mutation(
@@ -3582,6 +3985,12 @@ class Panel(BaseHTTPRequestHandler):
             merged = {k: v for k, v in cur.items() if k != name}
             try:
                 save_proxy_providers(merged)
+                record_pending_reload(
+                    op="delete-provider",
+                    kind="provider",
+                    name=name,
+                    detail=f"- 删除订阅源「{name}」",
+                )
             except Exception as e:
                 return self.respond_mutation(s, f"删除订阅源失败：{e}", False)
         return self.respond_mutation(s, f"已删除订阅源「{name}」，请点顶部「重载配置」生效", True)
@@ -3595,6 +4004,7 @@ class Panel(BaseHTTPRequestHandler):
                 if auto_fix:
                     raw, _ = rewrite_cert_paths_in_yaml(raw, env)
                 apply_custom_config(raw)
+                clear_pending_reload()
             except Exception as e:
                 return self.respond_mutation(s, f"更新自定义服务端配置失败：{e}", False)
         return self.respond_mutation(s, "自定义 mihomo 服务端配置已通过校验并应用生效。", True)
@@ -3603,6 +4013,7 @@ class Panel(BaseHTTPRequestHandler):
         with LOCK:
             try:
                 reset_to_template_config()
+                clear_pending_reload()
             except Exception as e:
                 return self.respond_mutation(s, f"恢复默认配置失败：{e}", False)
         return self.respond_mutation(s, "已恢复默认服务端配置，并生成默认 VlessReality 节点。", True)
@@ -3658,8 +4069,13 @@ class Panel(BaseHTTPRequestHandler):
             f"<button type=button>复制地址</button>"
             f"<form method=post action=/action/reset-secret>{hid}<button type=submit>重置 API 密钥</button></form></section>"
         )
+        sub_qr_img = (
+            f"<img id=sub-qr src='{e(state.get('sub_qr_data_url', ''))}' alt='订阅二维码'>"
+            if state.get("sub_qr_data_url") else ""
+        )
         sub_sec = (
             f"<section><h2>客户端订阅链接</h2><div id=sub-url>{e(state['sub_url'])}</div>"
+            f"<div><span>订阅二维码</span>{sub_qr_img}</div>"
             f"<button type=button>复制订阅链接</button>"
             f"<form method=post action=/action/reset-sub>{hid}<button type=submit>更换订阅链接</button></form></section>"
             if state["sub_url"] else ""
@@ -3675,7 +4091,10 @@ class Panel(BaseHTTPRequestHandler):
             f"<p>{e(PROTOCOL_DESCRIPTIONS['vless-reality'])}</p>"
             f"<input id=nm name=name value=VlessReality placeholder='默认 VlessReality'>"
             f"<input id=port name=port placeholder='留空随机端口'>"
-            f"<button type=submit>添加入站节点</button></form></section></main>"
+            f"<button type=submit>添加入站节点</button></form></section>"
+            f"<section><h2>自定义 mihomo 服务端配置</h2>"
+            f"<form method=post action=/config/reset-template>{hid}<button type=submit>恢复标准模板</button></form></section>"
+            f"</main>"
         )
         return render_spa_html("ClashGate", boot, fallback)
 
