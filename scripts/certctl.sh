@@ -9,8 +9,8 @@
 #   port  端口模式（默认）：申请/续期时临时使用 80 端口
 #   dns   DNS API 模式：使用 Cloudflare API Token（CF_Token），无需占用 80/443 端口，支持 *.泛域名
 # 证书来源（TLS）：
-#   staging     Let's Encrypt 测试证书（默认）
-#   production  Let's Encrypt 正式证书
+#   production  Let's Encrypt 正式证书（默认）
+#   staging     Let's Encrypt 测试证书
 #   internal    本机自签证书（开发用，不走 ACME）
 # 部署结果：/etc/clashgate/certs/{fullchain,privkey}.pem（root:mihomo 0640），Mihomo 入站与面板共用。
 # 退出码：0 = 证书已就绪，1 = 失败。
@@ -32,7 +32,11 @@ CA_LE_TEST=https://acme-staging-v02.api.letsencrypt.org/directory
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 [[ -n "${DOMAIN:-}" ]] || { echo "certctl: 未设置 DOMAIN" >&2; exit 1; }
-TLS=${TLS:-staging}
+if [[ ${REPO_NAME:-ClashGate} == ClashGateBeat ]]; then
+  TLS=${TLS:-staging}
+else
+  TLS=${TLS:-production}
+fi
 CERT_MODE=${CERT_MODE:-port}
 BASE_DOMAIN=${DOMAIN#\*.}
 ACTION=${1:-renew}
@@ -137,8 +141,8 @@ acme() { # acme.sh 签发成功时会把整张证书 PEM 打到输出里：去�
 }
 
 case $TLS in
-  production) server=letsencrypt      api=$CA_LE ;;
-  *)          server=letsencrypt_test api=$CA_LE_TEST ;;
+  staging) server=letsencrypt_test api=$CA_LE_TEST ;;
+  *)       server=letsencrypt      api=$CA_LE ;;
 esac
 if [[ -n "${CS_ACME_SERVER:-}" ]]; then server=$CS_ACME_SERVER api=$CS_ACME_SERVER; fi   # 开发用：本地 pebble 等
 extra=()

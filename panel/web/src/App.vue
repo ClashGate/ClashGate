@@ -4,7 +4,7 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '0.92',
+  version: '0.93',
   csrf: '',
   login_error: '',
   flash_msg: '',
@@ -44,7 +44,7 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '0.92',
+  version: boot.version || '0.93',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
   zb_url: boot.zb_url || '',

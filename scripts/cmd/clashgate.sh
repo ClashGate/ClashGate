@@ -45,7 +45,7 @@ interactive_setup() {
     printf '\n\033[1mClashGate v%s 一键安装\033[0m\n\n' "$CS_VERSION"
     printf '请选择安装模式：\n'
     printf '  1) 无证书模式（默认）：仅 VLESS Reality 节点，安装后输出客户端配置\n'
-    printf '  2) 自动证书模式：自动申请域名证书（端口模式 / DNS API），提供 HTTPS 管理面板和订阅链接\n'
+    printf '  2) 自动证书模式：自动申请 Let'\''s Encrypt 正式证书（端口模式 / DNS API），提供 HTTPS 管理面板和订阅链接\n'
     printf '  3) 手动证书模式：使用自备域名证书，校验通过后提供 HTTPS 管理面板和订阅链接\n'
     while :; do
       c=$(ask '请输入 [1/2/3]（回车默认 1）：' 1)

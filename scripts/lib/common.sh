@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # clashgate 公共函数：常量、日志、交互、环境持久化、下载与安装文件
 
-CS_VERSION=0.92
+CS_VERSION=0.93
 REPO_OWNER=${REPO_OWNER:-ClashGate}
 REPO_NAME=${REPO_NAME:-ClashGate}
 REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
@@ -46,7 +46,12 @@ WILDCARD_DOMAIN_RE='^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'
 PKG_MGR=""
 MODE=no-cert MODE_SET=0 NODES=1 VPS_NAME="" SERVER_IP=""   # NODES：默认生成 1 个 Reality 节点，更多节点在面板添加
 CERT_MODE=port CERT_MODE_SET=0 CF_TOKEN=""                 # CERT_MODE：port（端口模式）| dns（DNS API 模式）| manual（手动证书模式）
-DOMAIN="" EMAIL="" TLS=staging PANEL_PORT=""               # 默认 Let's Encrypt staging（仅自动申请）；面板端口随机选空闲高端口
+if [[ ${REPO_NAME:-ClashGate} == ClashGateBeat ]]; then
+  TLS=${TLS:-staging}
+else
+  TLS=${TLS:-production}
+fi
+DOMAIN="" EMAIL="" PANEL_PORT=""                           # 默认 Let's Encrypt 正式证书（production）；面板端口随机选空闲高端口
 CONTROLLER_PORT="" MIHOMO_SECRET=""                        # Mihomo external-controller-tls + zashboard 随机空闲高端口与密钥
 PANEL_PASS="" PANEL_HASH="" SUB_TOKEN="" WARNINGS=()
 STEP=0; TOTAL=8
