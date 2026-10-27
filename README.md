@@ -13,7 +13,7 @@
 
 ## ✨ 核心特性
 
-- **三种安装模式**：**无证书模式**（默认直出 VLESS Reality 节点）、**自动证书模式**（自动申请 Let's Encrypt 正式证书，支持端口验证与 Cloudflare DNS API 验证及自动续期）、**手动证书模式**（自备 `/etc/clashgate/certs/` 证书）。
+- **三种安装模式**：**无证书模式**（默认直出 VLESS Reality 节点）、**自动证书模式**（自动申请 Let's Encrypt 证书，支持端口验证与 Cloudflare DNS API 验证及自动续期）、**手动证书模式**（自备 `/etc/clashgate/certs/` 证书）。
 - **HTTPS 管理面板（v0.93）**：
   - **开箱即用**：支持 12 种入站协议（VLESS Reality、Hysteria2、Snell V5、Shadowsocks、AnyTLS、TUIC v5、TrustTunnel、ShadowQUIC、Mieru、Sudoku、HTTP、SOCKS5），安全参数（加密方式、混淆、SNI 池、指纹等）全部内置锁定，支持一键**重置密码/密钥**。
   - **首页直达**：实时流量统计（已代理流量 GB）、订阅链接（支持一键更换）、入站节点、Zashboard 控制台（含免填直连地址与 API 密钥）常驻首页；顶栏支持一键更新内核与检查版本更新。
