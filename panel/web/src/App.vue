@@ -4,7 +4,7 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '0.95',
+  version: '0.96',
   mihomo_version: '',
   csrf: '',
   login_error: '',
@@ -46,7 +46,7 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '0.95',
+  version: boot.version || '0.96',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
@@ -908,7 +908,7 @@ onUnmounted(() => {
           <div class="text-xs font-medium text-slate-500">入站监听</div>
           <div class="mt-1.5 flex items-baseline gap-1.5">
             <span class="text-lg font-bold text-slate-900">{{ state.status.inbound_listening ?? 0 }}</span>
-            <span class="text-xs text-slate-500">/ {{ state.status.inbound_total ?? 0 }} 个端口监听中</span>
+            <span class="text-xs text-slate-500">/ {{ state.status.inbound_total ?? 0 }} 个端口运行中</span>
           </div>
         </div>
 
@@ -1012,7 +1012,7 @@ onUnmounted(() => {
                       : 'bg-amber-50 text-amber-700 border border-amber-200/70'
                   "
                 >
-                  端口 :{{ state.controller_port }} {{ state.controller_listening ? '监听中' : '未监听' }}
+                  端口 :{{ state.controller_port }} {{ state.controller_listening ? '运行中' : '未运行' }}
                 </span>
               </div>
               <div class="flex items-center gap-2 flex-wrap">
@@ -1200,14 +1200,16 @@ onUnmounted(() => {
                       :class="
                         item.listening
                           ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+                          : item.pending_reload
+                          ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
                           : 'bg-rose-50 text-rose-700 border border-rose-200/60'
                       "
                     >
                       <span
                         class="w-1.5 h-1.5 rounded-full"
-                        :class="item.listening ? 'bg-emerald-500' : 'bg-rose-500'"
+                        :class="item.listening ? 'bg-emerald-500' : item.pending_reload ? 'bg-amber-500' : 'bg-rose-500'"
                       ></span>
-                      {{ item.listening ? '监听中' : '未监听' }}
+                      {{ item.listening ? '运行中' : item.pending_reload ? '重载配置生效' : '未运行' }}
                     </span>
                   </div>
                   <div class="text-xs text-slate-500 font-mono">端口 :{{ item.port }}</div>

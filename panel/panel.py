@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v0.95 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
+"""ClashGate v0.96 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -35,7 +35,7 @@ import uuid as uuidlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse, quote
 
-VERSION = "0.95"
+VERSION = "0.96"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -1990,8 +1990,7 @@ def save_inbounds(new: list):
     atomic_write(INBOUNDS, json.dumps(cleaned, indent=2, ensure_ascii=False), 0o600)
     atomic_write(FRAG_EXTRA, render_extra(cleaned), 0o640)
     _sync_custom_conf_listeners(cur_nodes, cleaned)
-    atomic_write(CONF, assemble_config(), 0o640)
-    sync_client_files()
+    # 0.96: draft only. Live CONF / client sync / reload happen solely in do_action(reload|restart).
 
 
 def save_nodes(new_nodes: list):
@@ -2003,8 +2002,7 @@ def save_nodes(new_nodes: list):
     atomic_write(NODES_TSV, render_nodes_tsv(new_nodes), 0o640)
     atomic_write(FRAG_REALITY, render_reality(new_nodes), 0o640)
     _sync_custom_conf_listeners(new_nodes, cur_inbs)
-    atomic_write(CONF, assemble_config(), 0o640)
-    sync_client_files()
+    # 0.96: draft only. Live CONF / client sync / reload happen solely in do_action(reload|restart).
 
 
 def apply_inbounds(new: list):
@@ -2884,6 +2882,7 @@ class Panel(BaseHTTPRequestHandler):
                 "kind_label": KIND_ZH["vless-reality"],
                 "port": n["port"],
                 "listening": n["port"] in listening,
+                "pending_reload": n["port"] not in listening and st["active"] == "active",
                 "can_reset_password": True,
                 "reset_url": f"/nodes/{quote(n['name'])}/reset-password",
                 "delete_url": f"/nodes/{quote(n['name'])}/delete",
@@ -2901,6 +2900,7 @@ class Panel(BaseHTTPRequestHandler):
                 "kind_label": KIND_ZH.get(i["kind"], i["kind"]),
                 "port": i["port"],
                 "listening": i["port"] in listening,
+                "pending_reload": i["port"] not in listening and st["active"] == "active",
                 "can_reset_password": can_reset,
                 "reset_url": f"/inbounds/{i['id']}/reset-password" if can_reset else "",
                 "delete_url": f"/inbounds/{i['id']}/delete",
@@ -3473,10 +3473,10 @@ class Panel(BaseHTTPRequestHandler):
                     new_nodes.append(n)
                 if not found:
                     return self.respond_mutation(s, "入站节点不存在", False)
-                apply_nodes(new_nodes)
+                save_nodes(new_nodes)
             except Exception as e:
                 return self.respond_mutation(s, f"重置密钥失败：{e}", False)
-        return self.respond_mutation(s, f"已重置节点「{name}」的 UUID、Reality 私钥与 VLESS 加密密钥，服务端与订阅已同步更新。", True)
+        return self.respond_mutation(s, f"已重置节点「{name}」的 UUID、Reality 私钥与 VLESS 加密密钥，重载配置生效", True)
 
     def do_reset_inbound_password(self, s, iid):
         with LOCK:
@@ -3495,7 +3495,7 @@ class Panel(BaseHTTPRequestHandler):
                     new_inbs.append(i)
                 if not target_name:
                     return self.respond_mutation(s, "入站节点不存在", False)
-                apply_inbounds(new_inbs)
+                save_inbounds(new_inbs)
             except Exception as e:
                 return self.respond_mutation(s, f"重置密码失败：{e}", False)
         return self.respond_mutation(s, "密码重置成功，重载配置生效", True)
