@@ -1,7 +1,10 @@
 # shellcheck shell=bash
 # clashgate 公共函数：常量、日志、交互、环境持久化、下载与安装文件
 
-CS_VERSION=0.96
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/i18n.sh"   # CLASHGATE_LANG=en|zh；默认中文
+
+CS_VERSION=0.97
 REPO_OWNER=${REPO_OWNER:-ClashGate}
 REPO_NAME=${REPO_NAME:-ClashGate}
 REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
@@ -56,13 +59,13 @@ CONTROLLER_PORT="" MIHOMO_SECRET=""                        # Mihomo external-con
 PANEL_PASS="" PANEL_HASH="" SUB_TOKEN="" WARNINGS=()
 STEP=0; TOTAL=8
 
-log()  { printf '\033[1;34m[%d/%d]\033[0m %s\n' "$((++STEP))" "$TOTAL" "$*"; }
+log()  { _tr_msg "$*"; printf '\033[1;34m[%d/%d]\033[0m %s\n' "$((++STEP))" "$TOTAL" "$REPLY"; }
 
-info() { printf '    %s\n' "$*"; }
+info() { _tr_msg "$*"; printf '    %s\n' "$REPLY"; }
 
-warn() { printf '\033[1;33m警告：\033[0m%s\n' "$*" >&2; WARNINGS+=("$*"); }
+warn() { _tr_msg "$*"; printf '\033[1;33m%s\033[0m%s\n' "$(L 警告： 'Warning: ')" "$REPLY" >&2; WARNINGS+=("$REPLY"); }
 
-die()  { printf '\033[1;31m错误：\033[0m%s\n' "$*" >&2; exit 1; }
+die()  { local m=$1 extra=""; shift; ((!$#)) || extra=$'\n'"$*"; _tr_msg "$m"; printf '\033[1;31m%s\033[0m%s%s\n' "$(L 错误： 'Error: ')" "$REPLY" "$extra" >&2; exit 1; }
 
 need_root() { [[ $EUID -eq 0 ]] || die "请以 root 身份运行（可先执行 sudo -i 再运行安装命令）"; }
 
@@ -157,10 +160,10 @@ svc_state() {
   local st
   st=$(systemctl is-active "$1" 2>/dev/null || true)
   case $st in
-    active)   printf '\033[1;32m运行中\033[0m' ;;
-    inactive) printf '\033[1;31m已停止\033[0m' ;;
-    failed)   printf '\033[1;31m失败\033[0m' ;;
-    *)        printf '%s' "${st:-未知}" ;;
+    active)   printf '\033[1;32m%s\033[0m' "$(L 运行中 running)" ;;
+    inactive) printf '\033[1;31m%s\033[0m' "$(L 已停止 stopped)" ;;
+    failed)   printf '\033[1;31m%s\033[0m' "$(L 失败 failed)" ;;
+    *)        printf '%s' "${st:-$(L 未知 unknown)}" ;;
   esac
 }
 

@@ -1,0 +1,214 @@
+// ClashGate panel i18n: default zh; choice kept in localStorage + cookie (cookie lets the server localize API messages).
+import { ref } from 'vue'
+
+const KEY = 'clashgate_lang'
+export const EN = {
+ "内核更新成功": "Core updated successfully",
+ "更新内核失败": "Core update failed",
+ "更新内核等待超时，请刷新页面查看内核版本状态": "Timed out waiting for the core update; refresh the page to check the core version",
+ "最新版": "latest",
+ "网络连接中断或服务正在重启，请稍后刷新页面查看状态": "Connection lost or the service is restarting; refresh the page later to check status",
+ "操作成功": "Done",
+ "操作失败": "Operation failed",
+ "请求超时（120s），请稍后刷新查看状态": "Request timed out (120s); refresh later to check status",
+ "已重载配置并更新客户端订阅": "Config reloaded and client subscription updated",
+ "确定更换订阅链接？更换后原订阅链接将立即失效。": "Change the subscription link? The old link will stop working immediately.",
+ "确定重置 Zashboard API 密钥？重置后直连地址将同步更新。": "Reset the Zashboard API secret? The direct-connect URL will be updated accordingly.",
+ "当前暂无入站节点可载入": "No inbound nodes available to load",
+ "请先粘贴需要转换的节点配置（支持单行 JSON / Flow 或多行 YAML）": "Paste the node config to convert first (single-line JSON / Flow or multi-line YAML)",
+ "配置解析失败，请检查格式是否正确": "Failed to parse the config; check the format",
+ "确定恢复默认配置？这将还原内置默认服务端模板，并重新生成一个默认 VlessReality 节点（同时同步至客户端订阅）。": "Restore the default config? This restores the built-in server template and regenerates a default VlessReality node (also synced to the client subscription).",
+ "服务端管理控制台 · 请登录": "Server admin console · Sign in",
+ "管理员账号": "Admin username",
+ "面板密码": "Panel password",
+ "请输入面板密码": "Enter the panel password",
+ "登 录": "Sign in",
+ "更新内核中…": "Updating core…",
+ "更新内核": "Update core",
+ "重载中…": "Reloading…",
+ "重载配置": "Reload config",
+ "升级中…": "Upgrading…",
+ "检查中…": "Checking…",
+ "检查更新": "Check for updates",
+ "退出": "Log out",
+ "运行状态": "Status",
+ "未知": "Unknown",
+ "自定义模式": "Custom mode",
+ "标准模板": "Standard template",
+ "入站监听": "Inbound listeners",
+ "个端口运行中": "ports running",
+ "服务端出站": "Server outbounds",
+ "节点 ·": "nodes ·",
+ "订阅源": "providers",
+ "已代理流量": "Proxied traffic",
+ "首页 · 入站与面板": "Home · Inbounds & panel",
+ "易读配置转换": "Readable config converter",
+ "自定义服务端配置": "Custom server config",
+ "Zashboard 控制面板": "Zashboard dashboard",
+ "端口 :": "Port :",
+ "运行中": "Running",
+ "未运行": "Not running",
+ "启动中": "Starting",
+ "停止中": "Stopping",
+ "重载中": "Reloading",
+ "已停止": "Stopped",
+ "失败": "Failed",
+ "打开 Zashboard": "Open Zashboard",
+ "已复制地址": "URL copied",
+ "复制地址": "Copy URL",
+ "查看Mihomo服务端配置": "View Mihomo server config",
+ "免填密钥直连地址 (HTTPS)": "Direct URL with secret prefilled (HTTPS)",
+ "API 密钥 (Secret)：": "API secret:",
+ "已复制": "Copied",
+ "复制密钥": "Copy secret",
+ "重置中…": "Resetting…",
+ "重置 API 密钥": "Reset API secret",
+ "客户端订阅链接": "Client subscription link",
+ "ACL4SSR 自动同步": "ACL4SSR auto sync",
+ "复制订阅链接": "Copy subscription link",
+ "更换中…": "Changing…",
+ "更换订阅链接": "Change subscription link",
+ "预览": "Preview",
+ "导入 Clash / Mihomo 客户端即可使用": "Import into a Clash / Mihomo client to use",
+ "本地客户端备份：": "Local client backup:",
+ "前往易读配置转换 →": "Go to readable config converter →",
+ "入站节点": "Inbound nodes",
+ "已复制全部": "All copied",
+ "复制全部配置": "Copy all configs",
+ "暂无入站节点，请在右侧添加节点": "No inbound nodes yet; add one on the right",
+ "重载配置生效": "Applies on reload",
+ "删除": "Delete",
+ "添加节点": "Add node",
+ "安全默认策略": "Secure defaults",
+ "协议类型": "Protocol",
+ "节点名称": "Node name",
+ "监听端口": "Listen port",
+ "留空随机端口": "Leave empty for a random port",
+ "拥塞控制": "Congestion control",
+ "bbr (默认)": "bbr (default)",
+ "传输协议": "Transport",
+ "TCP (默认)": "TCP (default)",
+ "启用 TLS": "Enable TLS",
+ "不启用 (默认)": "Disabled (default)",
+ "启用": "Enabled",
+ "正在添加…": "Adding…",
+ "添加入站节点": "Add inbound node",
+ "外部订阅源 (proxy-providers)": "External providers (proxy-providers)",
+ "订阅链接 (HTTP / HTTPS)": "Subscription URL (HTTP / HTTPS)",
+ "名称 (选填)": "Name (optional)",
+ "默认 sub": "Default: sub",
+ "默认 {name}": "Default: {name}",
+ "导入中…": "Importing…",
+ "导入订阅": "Import subscription",
+ "服务端出站节点 (proxies)": "Server outbound nodes (proxies)",
+ "粘贴单行 JSON / Flow 或多行 YAML 格式的 mihomo 节点配置（含 easytier、tailscale 等）…": "Paste mihomo node configs as single-line JSON / Flow or multi-line YAML (incl. easytier, tailscale, etc.)…",
+ "添加中…": "Adding…",
+ "添加出站节点": "Add outbound node",
+ "从文件载入": "Load from file",
+ "单行 JSON ⇄ 多行 YAML": "Single-line JSON ⇄ multi-line YAML",
+ "在此粘贴单行 JSON / Flow 节点配置或多行 YAML，一键转换为结构清晰的多行易读 YAML 格式。": "Paste single-line JSON / Flow node configs or multi-line YAML here and convert them into a clear, readable multi-line YAML in one click.",
+ "载入当前入站节点": "Load current inbound nodes",
+ "清空": "Clear",
+ "输入节点配置（单行 JSON / 多行 YAML）": "Input node config (single-line JSON / multi-line YAML)",
+ "转换为易读配置": "Convert to readable config",
+ "转换为单行配置": "Convert to single-line config",
+ "在此粘贴节点配置，例如：": "Paste node config here, e.g.:",
+ "转换结果（易读 YAML）": "Result (readable YAML)",
+ "已复制结果": "Result copied",
+ "复制转换结果": "Copy result",
+ "点击「转换为易读配置」后在此显示多行 YAML 结果…": "After clicking “Convert to readable config”, the multi-line YAML result appears here…",
+ "自定义 mihomo 服务端配置": "Custom mihomo server config",
+ "当前：自定义配置模式": "Current: custom config mode",
+ "当前：标准模板模式": "Current: standard template mode",
+ "您可以直接粘贴或编辑整份自备的 mihomo 服务端配置文件（": "You can paste or edit a complete mihomo server config file of your own (",
+ "），校验通过后立即应用，并自动同步刷新入站 Listeners 列表与客户端订阅。普通用户无需修改此页。": "). It is applied right after validation, and the inbound Listeners list and client subscription are refreshed automatically. Most users do not need to change this page.",
+ "正在恢复默认配置…": "Restoring default config…",
+ "恢复默认配置": "Restore default config",
+ "⚠️ 醒目提醒：Mihomo 证书目录与相对路径说明": "⚠️ Important: Mihomo certificate directory and relative paths",
+ "1. 本系统已将 Mihomo 运行目录（": "1. The Mihomo working directory (",
+ "）、配置文件与证书统一收纳在": "), config files and certificates are all kept in",
+ "，证书实际位于": "; the certificates are actually located at",
+ "与": "and",
+ "（相对路径即": "(relative paths:",
+ "2. 若您的自备配置中填写了其他证书路径或相对路径，请点击下方": "2. If your own config uses other certificate paths or relative paths, click",
+ "「自动修改证书路径」": "“Auto-fix certificate paths”",
+ "按钮一键修正为本机证书路径，随后点击": "below to correct them to this host's certificate paths, then click",
+ "「更新 mihomo 服务端配置」": "“Update mihomo server config”",
+ "校验并生效。": "to validate and apply.",
+ "在此粘贴完整的 mihomo 服务端 YAML 配置…": "Paste the complete mihomo server YAML config here…",
+ "自动修改证书路径": "Auto-fix certificate paths",
+ "正在校验并更新…": "Validating and updating…",
+ "更新 mihomo 服务端配置": "Update mihomo server config",
+ "从本地文件载入": "Load from local file",
+ "检测到新版本 v{latest}（当前版本 v{current}），是否立即升级？": "New version v{latest} found (current v{current}). Upgrade now?",
+ "请求异常：{raw}": "Request error: {raw}",
+ "确定删除订阅源「{name}」？": "Delete provider “{name}”?",
+ "确定删除出站节点「{name}」？": "Delete outbound node “{name}”?",
+ "已成功转换 {count} 个节点为{kind}": "Converted {count} node(s) to {kind}",
+ "单行配置": "single-line config",
+ "多行易读 YAML": "readable multi-line YAML",
+ "转换请求异常：{err}": "Conversion request error: {err}",
+ "已自动修正 {changed} 处证书路径，请点击「更新 mihomo 服务端配置」保存生效。": "Fixed {changed} certificate path(s). Click “Update mihomo server config” to save and apply.",
+ "复制配置": "Copy config",
+ "重置密码": "Reset password",
+ "免证书的新一代协议": "Next-generation certificate-free protocol",
+ "已锁定安全默认：默认启用 VLESS Encryption (vless-x25519)，SNI 从内置域名池随机抽取": "Secure defaults locked: VLESS Encryption (vless-x25519) enabled by default; SNI randomly picked from the built-in domain pool",
+ "新一代 UDP 协议": "Next-generation UDP protocol",
+ "已锁定安全默认：混淆密码 (Salamander) 默认随机生成，不可手动关闭": "Secure defaults locked: obfuscation password (Salamander) generated randomly and cannot be disabled",
+ "经典轻量级加密协议，默认锁定 aes-256-gcm": "Classic lightweight encrypted protocol, locked to aes-256-gcm by default",
+ "已锁定安全默认：加密算法固定为 aes-256-gcm，密码自动随机生成": "Secure defaults locked: cipher fixed to aes-256-gcm; password generated randomly",
+ "轻量高效的私有协议，内置随机 TLS 伪装": "Lightweight, efficient private protocol with built-in random TLS camouflage",
+ "已锁定安全默认：混淆模式固定为 tls，伪装 Host 从内置池随机抽取": "Secure defaults locked: obfs fixed to tls; camouflage Host randomly picked from the built-in pool",
+ "内置随机填充与随机指纹的新一代 TLS 协议": "Next-generation TLS protocol with built-in random padding and fingerprints",
+ "已锁定安全默认：客户端 TLS 指纹与长度填充策略均自动随机生成": "Secure defaults locked: client TLS fingerprint and length padding are generated randomly",
+ "免证书的新一代 QUIC 协议，内置随机 JLS 伪装": "Next-generation certificate-free QUIC protocol with built-in random JLS camouflage",
+ "已锁定安全默认：伪装地址 (JLS) 从内置域名池随机抽取，拥塞控制默认 bbr": "Secure defaults locked: camouflage address (JLS) randomly picked from the built-in domain pool; congestion control defaults to bbr",
+ "基于数独流量特征变换与 chacha20 加密的抗审查协议": "Anti-censorship protocol based on Sudoku traffic shaping and chacha20 encryption",
+ "已锁定安全默认：AEAD 加密固定为 chacha20-poly1305，密钥对自动生成": "Secure defaults locked: AEAD fixed to chacha20-poly1305; key pair generated automatically",
+ "基于 QUIC 的低延迟零握手机制 UDP 协议": "Low-latency, zero-handshake UDP protocol based on QUIC",
+ "已启用安全默认：UUID 与密码随机生成，开启 0-RTT 与 native UDP 转发": "Secure defaults enabled: UUID and password generated randomly; 0-RTT and native UDP relay on",
+ "基于标准 HTTP/2 与 HTTP/3 的高隐蔽 TLS 隧道协议": "Stealthy TLS tunnel protocol based on standard HTTP/2 and HTTP/3",
+ "已启用安全默认：强随机密码与 TLS 证书加密传输": "Secure defaults enabled: strong random password and TLS certificate encryption",
+ "抗深度包检测（DPI）的混淆传输代理协议": "Obfuscated proxy protocol resistant to deep packet inspection (DPI)",
+ "已启用安全默认：强随机密码与抗 DPI 流量混淆": "Secure defaults enabled: strong random password and DPI-resistant obfuscation",
+ "通用 HTTP / HTTPS 代理协议": "General HTTP / HTTPS proxy protocol",
+ "已启用安全默认：鉴权密码自动随机生成": "Secure defaults enabled: authentication password generated randomly",
+ "通用 SOCKS5 代理协议，支持 UDP 转发": "General SOCKS5 proxy protocol with UDP relay",
+ "已启用安全默认：鉴权密码自动随机生成，默认开启 UDP": "Secure defaults enabled: authentication password generated randomly; UDP on by default"
+}
+
+function detect() {
+  let v = ''
+  try {
+    v = window.localStorage.getItem(KEY) || ''
+  } catch {}
+  if (v !== 'en' && v !== 'zh') {
+    const m = document.cookie.match(/(?:^|;\s*)clashgate_lang=(en|zh)/)
+    v = m ? m[1] : 'zh'
+  }
+  return v
+}
+
+export const lang = ref(detect())
+
+function persist(v) {
+  try {
+    window.localStorage.setItem(KEY, v)
+  } catch {}
+  document.cookie = `${KEY}=${v}; path=/; max-age=31536000; SameSite=Lax`
+  document.documentElement.lang = v === 'en' ? 'en' : 'zh-CN'
+}
+persist(lang.value)
+
+export function setLang(v) {
+  lang.value = v === 'en' ? 'en' : 'zh'
+  persist(lang.value)
+}
+
+// t('中文源文案', { name }) -> current language. Placeholders use {name}. Unknown keys fall back to the source text.
+export function t(key, params) {
+  let s = key
+  if (lang.value === 'en' && Object.prototype.hasOwnProperty.call(EN, key)) s = EN[key]
+  if (params) s = s.replace(/\{(\w+)\}/g, (m, k) => (params[k] === undefined ? m : params[k]))
+  return s
+}

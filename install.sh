@@ -14,17 +14,20 @@ REPO_TARBALL=${REPO_TARBALL:-https://github.com/$REPO_SLUG/archive/refs/heads/ma
 _src=${BASH_SOURCE[0]:-}
 if [[ -n $_src && -f $_src ]]; then HERE="$(cd "$(dirname "$_src")" && pwd)"; else HERE=""; fi
 
-die() { printf '\033[1;31m错误：\033[0m%s\n' "$*" >&2; exit 1; }
+# CLASHGATE_LANG=en|zh（默认中文；未设时 LANG/LC_ALL 以 en 开头则英文）
+case ${CLASHGATE_LANG:-${LC_ALL:-${LANG:-}}} in en*|EN*) _en=1 ;; *) _en=0 ;; esac
+L() { if ((_en)); then printf '%s' "$2"; else printf '%s' "$1"; fi; }
+die() { printf '\033[1;31m%s\033[0m%s\n' "$(L 错误： 'Error: ')" "$*" >&2; exit 1; }
 
 if [[ -n $HERE && -f $HERE/scripts/cmd/clashgate.sh ]]; then
   CS_DEFAULT_ACTION=install exec bash "$HERE/scripts/cmd/clashgate.sh" "$@"
 fi
 
-command -v curl >/dev/null || die "缺少 curl，请先安装（如 apt-get install -y curl 或 dnf/yum install -y curl）"
-command -v tar >/dev/null || die "缺少 tar，请先安装（如 apt-get install -y tar 或 dnf/yum install -y tar）"
+command -v curl >/dev/null || die "$(L "缺少 curl，请先安装（如 apt-get install -y curl 或 dnf/yum install -y curl）" "curl is missing; install it first (e.g. apt-get install -y curl or dnf/yum install -y curl)")"
+command -v tar >/dev/null || die "$(L "缺少 tar，请先安装（如 apt-get install -y tar 或 dnf/yum install -y tar）" "tar is missing; install it first (e.g. apt-get install -y tar or dnf/yum install -y tar)")"
 tmp=$(mktemp -d /tmp/clashgate.XXXXXX)
-printf '正在从 GitHub (%s) 下载安装文件……\n' "$REPO_SLUG"
+printf "$(L '正在从 GitHub (%s) 下载安装文件……' 'Downloading install files from GitHub (%s)...')"$'\n' "$REPO_SLUG"
 curl -fsSL --retry 3 "$REPO_TARBALL" | tar -xz -C "$tmp" --strip-components=1 \
-  || { rm -rf "$tmp"; die "下载失败：$REPO_TARBALL（请确认服务器可以访问 GitHub）"; }
-[[ -f $tmp/scripts/cmd/clashgate.sh ]] || { rm -rf "$tmp"; die "下载的文件不完整"; }
+  || { rm -rf "$tmp"; die "$(L "下载失败：$REPO_TARBALL（请确认服务器可以访问 GitHub）" "Download failed: $REPO_TARBALL (make sure the server can reach GitHub)")"; }
+[[ -f $tmp/scripts/cmd/clashgate.sh ]] || { rm -rf "$tmp"; die "$(L 下载的文件不完整 'The downloaded files are incomplete')"; }
 CS_BOOTSTRAP_TMP=$tmp CS_DEFAULT_ACTION=install exec bash "$tmp/scripts/cmd/clashgate.sh" "$@"

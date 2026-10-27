@@ -1,10 +1,11 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
+import { t, lang, setLang } from './i18n.js'
 
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '0.96',
+  version: '0.97',
   mihomo_version: '',
   csrf: '',
   login_error: '',
@@ -46,7 +47,7 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '0.96',
+  version: boot.version || '0.97',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
@@ -69,6 +70,10 @@ const topbarVersionText = computed(() => {
   const mv = String(state.mihomo_version || (state.status && state.status.mihomo_version) || '').trim()
   return mv ? `v${state.version} · mihomo ${mv}` : `v${state.version}`
 })
+
+const converterPlaceholder = computed(
+  () => t('在此粘贴节点配置，例如：') + '\n- {"name":"VlessReality","type":"vless","server":"1.2.3.4","port":28443,...}'
+)
 
 const VALID_TABS = ['inbounds', 'outbounds', 'readable', 'advanced']
 const TAB_PATHS = {
@@ -270,7 +275,7 @@ async function updateCoreDirect() {
     // If server finished synchronously (e.g. direct response with running === false)
     if (startData && startData.running === false) {
       if (startData.state) applyServerState(startData.state)
-      showToast(startData.msg || (startData.ok ? '内核更新成功' : '更新内核失败'), !!startData.ok)
+      showToast(startData.msg || (startData.ok ? t('内核更新成功') : t('更新内核失败')), !!startData.ok)
       return
     }
   } catch {
@@ -294,7 +299,7 @@ async function updateCoreDirect() {
       const pollData = await pollRes.json()
       if (pollData && pollData.running === false) {
         if (pollData.state) applyServerState(pollData.state)
-        showToast(pollData.msg || (pollData.ok ? '内核更新成功' : '更新内核失败'), !!pollData.ok)
+        showToast(pollData.msg || (pollData.ok ? t('内核更新成功') : t('更新内核失败')), !!pollData.ok)
         busyKey.value = ''
         return
       }
@@ -303,16 +308,16 @@ async function updateCoreDirect() {
     }
   }
   busyKey.value = ''
-  showToast('更新内核等待超时，请刷新页面查看内核版本状态', false)
+  showToast(t('更新内核等待超时，请刷新页面查看内核版本状态'), false)
 }
 
 async function checkUpdateAndPrompt() {
   const res = await postAction('/action/check-update', {}, '/action/check-update')
   if (!res || !res.ok) return
   if (res.has_update) {
-    const latest = res.latest_version || '最新版'
+    const latest = res.latest_version || t('最新版')
     const current = res.current_version || state.version
-    if (window.confirm(`检测到新版本 v${latest}（当前版本 v${current}），是否立即升级？`)) {
+    if (window.confirm(t('检测到新版本 v{latest}（当前版本 v{current}），是否立即升级？', { latest, current }))) {
       await postAction('/action/upgrade-self', {}, '/action/upgrade-self')
     }
   }
@@ -371,9 +376,9 @@ function applyServerState(newState) {
 function formatFetchError(err) {
   const raw = String((err && err.message) || err || '')
   if (/NetworkError|Failed to fetch|Load failed|network/i.test(raw)) {
-    return '网络连接中断或服务正在重启，请稍后刷新页面查看状态'
+    return t('网络连接中断或服务正在重启，请稍后刷新页面查看状态')
   }
-  return `请求异常：${raw}`
+  return t('请求异常：{raw}', { raw })
 }
 
 async function postAction(url, params = {}, key = url) {
@@ -413,12 +418,12 @@ async function postAction(url, params = {}, key = url) {
       if (data.zb_url) state.zb_url = data.zb_url
       if (data.sub_url) state.sub_url = data.sub_url
     }
-    showToast(data.msg || (data.ok ? '操作成功' : '操作失败'), !!data.ok)
+    showToast(data.msg || (data.ok ? t('操作成功') : t('操作失败')), !!data.ok)
     return data
   } catch (err) {
     if (timer) clearTimeout(timer)
     if (err && err.name === 'AbortError') {
-      showToast('请求超时（120s），请稍后刷新查看状态', false)
+      showToast(t('请求超时（120s），请稍后刷新查看状态'), false)
       return null
     }
     // If reload / restart momentarily dropped proxy connection, re-sync state via GET /api/state
@@ -433,7 +438,7 @@ async function postAction(url, params = {}, key = url) {
         const stData = await stRes.json()
         applyServerState(stData)
         if (url === '/action/reload' || url === '/action/restart') {
-          showToast('已重载配置并更新客户端订阅', true)
+          showToast(t('已重载配置并更新客户端订阅'), true)
           return { ok: true, state: stData }
         }
       }
@@ -511,12 +516,12 @@ async function deleteInbound(item) {
 }
 
 async function resetSubUrl() {
-  if (!window.confirm('确定更换订阅链接？更换后原订阅链接将立即失效。')) return
+  if (!window.confirm(t('确定更换订阅链接？更换后原订阅链接将立即失效。'))) return
   await postAction('/action/reset-sub', {}, 'reset-sub')
 }
 
 async function resetZbSecret() {
-  if (!window.confirm('确定重置 Zashboard API 密钥？重置后直连地址将同步更新。')) return
+  if (!window.confirm(t('确定重置 Zashboard API 密钥？重置后直连地址将同步更新。'))) return
   await postAction('/action/reset-secret', {}, 'reset-secret')
 }
 
@@ -537,7 +542,7 @@ async function submitAddProvider() {
 }
 
 async function deleteProvider(name) {
-  if (!window.confirm(`确定删除订阅源「${name}」？`)) return
+  if (!window.confirm(t('确定删除订阅源「{name}」？', { name }))) return
   await postAction('/providers/delete', { name }, `del-prov-${name}`)
 }
 
@@ -550,7 +555,7 @@ async function submitAddProxies() {
 }
 
 async function deleteProxy(name) {
-  if (!window.confirm(`确定删除出站节点「${name}」？`)) return
+  if (!window.confirm(t('确定删除出站节点「{name}」？', { name }))) return
   await postAction('/proxies/delete', { name }, `del-proxy-${name}`)
 }
 
@@ -567,7 +572,7 @@ function loadFileInto(ev, targetRef) {
 
 function fillCurrentInboundsToConverter() {
   if (!state.all_proxies_yaml) {
-    showToast('当前暂无入站节点可载入', false)
+    showToast(t('当前暂无入站节点可载入'), false)
     return
   }
   converterInput.value = state.all_proxies_yaml
@@ -578,7 +583,7 @@ async function convertConfigFormat(mode = 'readable') {
   converterError.value = ''
   const raw = (converterInput.value || '').trim()
   if (!raw) {
-    converterError.value = '请先粘贴需要转换的节点配置（支持单行 JSON / Flow 或多行 YAML）'
+    converterError.value = t('请先粘贴需要转换的节点配置（支持单行 JSON / Flow 或多行 YAML）')
     return
   }
   busyKey.value = `convert-${mode}`
@@ -596,13 +601,13 @@ async function convertConfigFormat(mode = 'readable') {
     })
     const data = await res.json()
     if (!res.ok || !data.ok) {
-      converterError.value = data.msg || '配置解析失败，请检查格式是否正确'
+      converterError.value = data.msg || t('配置解析失败，请检查格式是否正确')
       return
     }
     converterOutput.value = mode === 'single' ? data.single : data.readable
-    showToast(`已成功转换 ${data.count} 个节点为${mode === 'single' ? '单行配置' : '多行易读 YAML'}`, true)
+    showToast(t('已成功转换 {count} 个节点为{kind}', { count: data.count, kind: mode === 'single' ? t('单行配置') : t('多行易读 YAML') }), true)
   } catch (e) {
-    converterError.value = `转换请求异常：${(e && e.message) || e}`
+    converterError.value = t('转换请求异常：{err}', { err: (e && e.message) || e })
   } finally {
     busyKey.value = ''
   }
@@ -661,7 +666,7 @@ function autoFixCertPaths() {
     }
   }
   customConfigText.value = lines.join('\n')
-  showToast(`已自动修正 ${changed} 处证书路径，请点击「更新 mihomo 服务端配置」保存生效。`, true)
+  showToast(t('已自动修正 {changed} 处证书路径，请点击「更新 mihomo 服务端配置」保存生效。', { changed }), true)
 }
 
 async function submitCustomConfig() {
@@ -672,7 +677,7 @@ async function submitCustomConfig() {
 async function resetTemplateConfig() {
   if (
     !window.confirm(
-      '确定恢复默认配置？这将还原内置默认服务端模板，并重新生成一个默认 VlessReality 节点（同时同步至客户端订阅）。'
+      t('确定恢复默认配置？这将还原内置默认服务端模板，并重新生成一个默认 VlessReality 节点（同时同步至客户端订阅）。')
     )
   )
     return
@@ -716,12 +721,17 @@ onUnmounted(() => {
     <div
       class="w-full max-w-md bg-white rounded-3xl shadow-[0_12px_40px_-10px_rgba(16,185,129,0.14)] border border-emerald-100 p-8 sm:p-9"
     >
-      <div class="flex items-center gap-3.5 mb-7">
-        <div
-          class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-white flex items-center justify-center font-bold text-lg shadow-md shadow-emerald-500/20"
+      <div class="flex justify-end -mt-2 mb-2">
+        <button
+          type="button"
+          @click="setLang(lang === 'zh' ? 'en' : 'zh')"
+          class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-emerald-50 border border-slate-200 text-slate-600 transition cursor-pointer"
         >
-          CG
-        </div>
+          {{ lang === 'zh' ? 'English' : '中文' }}
+        </button>
+      </div>
+      <div class="flex items-center gap-3.5 mb-7">
+        <img src="/assets/logo.png" alt="ClashGate" class="w-12 h-12 rounded-2xl object-cover shadow-md shadow-emerald-500/20 bg-white" />
         <div>
           <div class="flex items-center gap-2">
             <h1 class="text-xl font-bold text-slate-900 tracking-tight">ClashGate</h1>
@@ -731,7 +741,7 @@ onUnmounted(() => {
               {{ topbarVersionText }}
             </span>
           </div>
-          <p class="text-xs text-slate-500 mt-0.5">服务端管理控制台 · 请登录</p>
+          <p class="text-xs text-slate-500 mt-0.5">{{ t('服务端管理控制台 · 请登录') }}</p>
         </div>
       </div>
 
@@ -744,7 +754,7 @@ onUnmounted(() => {
 
       <form method="post" action="/login" class="space-y-4">
         <div>
-          <label for="u" class="block text-xs font-semibold text-slate-700 mb-1.5">管理员账号</label>
+          <label for="u" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('管理员账号') }}</label>
           <input
             id="u"
             name="username"
@@ -755,13 +765,13 @@ onUnmounted(() => {
           />
         </div>
         <div>
-          <label for="p" class="block text-xs font-semibold text-slate-700 mb-1.5">面板密码</label>
+          <label for="p" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('面板密码') }}</label>
           <input
             id="p"
             name="password"
             type="password"
             autocomplete="current-password"
-            placeholder="请输入面板密码"
+            :placeholder="t('请输入面板密码')"
             required
             autofocus
             class="w-full h-10 px-3.5 rounded-xl border border-slate-200 bg-slate-50/60 focus:bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15 transition"
@@ -771,7 +781,7 @@ onUnmounted(() => {
           type="submit"
           class="w-full h-10 mt-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-sm shadow-emerald-600/20 transition cursor-pointer"
         >
-          登 录
+          {{ t('登 录') }}
         </button>
       </form>
     </div>
@@ -811,11 +821,7 @@ onUnmounted(() => {
     <header class="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-emerald-100/90 text-slate-900">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
         <div class="flex items-center gap-3">
-          <div
-            class="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-white flex items-center justify-center font-bold text-sm shadow-sm shadow-emerald-500/20"
-          >
-            CG
-          </div>
+          <img src="/assets/logo.png" alt="ClashGate" class="w-9 h-9 rounded-xl object-cover shadow-sm shadow-emerald-500/20 bg-white" />
           <span class="font-bold text-base tracking-tight text-slate-900">ClashGate</span>
           <span
             class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80"
@@ -831,7 +837,7 @@ onUnmounted(() => {
             @click="updateCoreDirect"
             class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white shadow-xs shadow-emerald-600/15 transition cursor-pointer"
           >
-            {{ busyKey === '/action/update-core' ? '更新内核中…' : '更新内核' }}
+            {{ busyKey === '/action/update-core' ? t('更新内核中…') : t('更新内核') }}
           </button>
           <button
             type="button"
@@ -839,7 +845,7 @@ onUnmounted(() => {
             @click="postAction('/action/reload', {}, '/action/reload')"
             class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200/80 disabled:opacity-50 text-emerald-800 transition cursor-pointer"
           >
-            {{ busyKey === '/action/reload' ? '重载中…' : '重载配置' }}
+            {{ busyKey === '/action/reload' ? t('重载中…') : t('重载配置') }}
           </button>
           <button
             type="button"
@@ -849,11 +855,19 @@ onUnmounted(() => {
           >
             {{
               busyKey === '/action/upgrade-self'
-                ? '升级中…'
+                ? t('升级中…')
                 : busyKey === '/action/check-update'
-                  ? '检查中…'
-                  : '检查更新'
+                  ? t('检查中…')
+                  : t('检查更新')
             }}
+          </button>
+          <button
+            type="button"
+            @click="setLang(lang === 'zh' ? 'en' : 'zh')"
+            class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 border border-slate-200 text-slate-600 transition cursor-pointer"
+            :title="lang === 'zh' ? 'Switch to English' : '切换到中文'"
+          >
+            {{ lang === 'zh' ? 'English' : '中文' }}
           </button>
           <form method="post" action="/logout" class="inline">
             <input type="hidden" name="csrf" :value="state.csrf" />
@@ -861,7 +875,7 @@ onUnmounted(() => {
               type="submit"
               class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 border border-slate-200 text-slate-600 transition cursor-pointer"
             >
-              退出
+              {{ t('退出') }}
             </button>
           </form>
         </div>
@@ -876,7 +890,7 @@ onUnmounted(() => {
           class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)] flex items-center justify-between"
         >
           <div>
-            <div class="text-xs font-medium text-slate-500">运行状态</div>
+            <div class="text-xs font-medium text-slate-500">{{ t('运行状态') }}</div>
             <div class="mt-1.5 flex items-center gap-2">
               <span
                 class="w-2.5 h-2.5 rounded-full"
@@ -887,7 +901,7 @@ onUnmounted(() => {
                     state.status.state_cls !== 'ok' && state.status.state_cls !== 'warn',
                 }"
               ></span>
-              <span class="text-lg font-bold text-slate-900">{{ state.status.state_txt || '未知' }}</span>
+              <span class="text-lg font-bold text-slate-900">{{ t(state.status.state_txt || '未知') }}</span>
             </div>
           </div>
           <span
@@ -898,30 +912,30 @@ onUnmounted(() => {
                 : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
             "
           >
-            {{ state.custom_config_mode ? '自定义模式' : '标准模板' }}
+            {{ state.custom_config_mode ? t('自定义模式') : t('标准模板') }}
           </span>
         </div>
 
         <div
           class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)]"
         >
-          <div class="text-xs font-medium text-slate-500">入站监听</div>
+          <div class="text-xs font-medium text-slate-500">{{ t('入站监听') }}</div>
           <div class="mt-1.5 flex items-baseline gap-1.5">
             <span class="text-lg font-bold text-slate-900">{{ state.status.inbound_listening ?? 0 }}</span>
-            <span class="text-xs text-slate-500">/ {{ state.status.inbound_total ?? 0 }} 个端口运行中</span>
+            <span class="text-xs text-slate-500">/ {{ state.status.inbound_total ?? 0 }} {{ t('个端口运行中') }}</span>
           </div>
         </div>
 
         <div
           class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)]"
         >
-          <div class="text-xs font-medium text-slate-500">服务端出站</div>
+          <div class="text-xs font-medium text-slate-500">{{ t('服务端出站') }}</div>
           <div class="mt-1.5 flex items-baseline gap-1.5">
             <span class="text-lg font-bold text-slate-900">
               {{ (state.status.outbound_nodes_count ?? 0) + (state.status.outbound_providers_count ?? 0) }}
             </span>
             <span class="text-xs text-slate-500">
-              {{ state.status.outbound_nodes_count ?? 0 }} 节点 · {{ state.status.outbound_providers_count ?? 0 }} 订阅源
+              {{ state.status.outbound_nodes_count ?? 0 }} {{ t('节点 ·') }} {{ state.status.outbound_providers_count ?? 0 }} {{ t('订阅源') }}
             </span>
           </div>
         </div>
@@ -929,7 +943,7 @@ onUnmounted(() => {
         <div
           class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)]"
         >
-          <div class="text-xs font-medium text-slate-500">已代理流量</div>
+          <div class="text-xs font-medium text-slate-500">{{ t('已代理流量') }}</div>
           <div class="mt-1.5 flex items-baseline gap-1.5">
             <span class="text-lg font-bold text-slate-900">{{ trafficDisplay }}</span>
             <span class="text-xs text-slate-400 truncate">{{ trafficDetail }}</span>
@@ -951,7 +965,7 @@ onUnmounted(() => {
               : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
           "
         >
-          首页 · 入站与面板
+          {{ t('首页 · 入站与面板') }}
         </button>
         <button
           type="button"
@@ -963,7 +977,7 @@ onUnmounted(() => {
               : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
           "
         >
-          服务端出站
+          {{ t('服务端出站') }}
         </button>
         <button
           type="button"
@@ -975,7 +989,7 @@ onUnmounted(() => {
               : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
           "
         >
-          易读配置转换
+          {{ t('易读配置转换') }}
         </button>
         <button
           type="button"
@@ -987,7 +1001,7 @@ onUnmounted(() => {
               : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
           "
         >
-          自定义服务端配置
+          {{ t('自定义服务端配置') }}
         </button>
       </div>
 
@@ -1003,7 +1017,7 @@ onUnmounted(() => {
             <div class="flex items-center justify-between gap-3 flex-wrap">
               <div class="flex items-center gap-2.5">
                 <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                <h2 class="text-base font-bold text-slate-900">Zashboard 控制面板</h2>
+                <h2 class="text-base font-bold text-slate-900">{{ t('Zashboard 控制面板') }}</h2>
                 <span
                   class="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-semibold rounded-full"
                   :class="
@@ -1012,7 +1026,7 @@ onUnmounted(() => {
                       : 'bg-amber-50 text-amber-700 border border-amber-200/70'
                   "
                 >
-                  端口 :{{ state.controller_port }} {{ state.controller_listening ? '运行中' : '未运行' }}
+                  {{ t('端口 :') }}{{ state.controller_port }} {{ state.controller_listening ? t('运行中') : t('未运行') }}
                 </span>
               </div>
               <div class="flex items-center gap-2 flex-wrap">
@@ -1022,14 +1036,14 @@ onUnmounted(() => {
                   rel="noopener"
                   class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs shadow-emerald-600/15 transition"
                 >
-                  打开 Zashboard
+                  {{ t('打开 Zashboard') }}
                 </a>
                 <button
                   type="button"
                   @click="copyRaw(state.zb_url, 'zb-url')"
                   class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
                 >
-                  {{ copiedKey === 'zb-url' ? '已复制地址' : '复制地址' }}
+                  {{ copiedKey === 'zb-url' ? t('已复制地址') : t('复制地址') }}
                 </button>
                 <a
                   href="/config/server.yaml"
@@ -1037,14 +1051,14 @@ onUnmounted(() => {
                   rel="noopener"
                   class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition"
                 >
-                  查看Mihomo服务端配置
+                  {{ t('查看Mihomo服务端配置') }}
                 </a>
               </div>
             </div>
 
             <div class="space-y-2.5">
               <div>
-                <div class="text-xs font-medium text-slate-500 mb-1">免填密钥直连地址 (HTTPS)</div>
+                <div class="text-xs font-medium text-slate-500 mb-1">{{ t('免填密钥直连地址 (HTTPS)') }}</div>
                 <div
                   id="zb-url"
                   class="px-3.5 py-2 rounded-xl bg-[#f6faf8] border border-emerald-100 font-mono text-xs text-slate-700 break-all select-all"
@@ -1055,7 +1069,7 @@ onUnmounted(() => {
 
               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
                 <div class="flex items-center gap-2 min-w-0">
-                  <span class="text-xs font-medium text-slate-500 shrink-0">API 密钥 (Secret)：</span>
+                  <span class="text-xs font-medium text-slate-500 shrink-0">{{ t('API 密钥 (Secret)：') }}</span>
                   <code
                     id="zb-secret"
                     class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-800 font-mono text-xs break-all select-all"
@@ -1070,7 +1084,7 @@ onUnmounted(() => {
                     @click="copyRaw(state.mihomo_secret, 'zb-secret')"
                     class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition cursor-pointer"
                   >
-                    {{ copiedKey === 'zb-secret' ? '已复制' : '复制密钥' }}
+                    {{ copiedKey === 'zb-secret' ? t('已复制') : t('复制密钥') }}
                   </button>
                   <button
                     type="button"
@@ -1078,7 +1092,7 @@ onUnmounted(() => {
                     @click="resetZbSecret"
                     class="px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
                   >
-                    {{ busyKey === 'reset-secret' ? '重置中…' : '重置 API 密钥' }}
+                    {{ busyKey === 'reset-secret' ? t('重置中…') : t('重置 API 密钥') }}
                   </button>
                 </div>
               </div>
@@ -1092,11 +1106,11 @@ onUnmounted(() => {
             <div class="flex items-center justify-between gap-3 flex-wrap">
               <div class="flex items-center gap-2.5">
                 <span class="w-2.5 h-2.5 rounded-full bg-teal-500"></span>
-                <h2 class="text-base font-bold text-slate-900">客户端订阅链接</h2>
+                <h2 class="text-base font-bold text-slate-900">{{ t('客户端订阅链接') }}</h2>
                 <span
                   class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/70"
                 >
-                  ACL4SSR 自动同步
+                  {{ t('ACL4SSR 自动同步') }}
                 </span>
               </div>
               <div v-if="state.sub_url" class="flex items-center gap-2 flex-wrap">
@@ -1105,7 +1119,7 @@ onUnmounted(() => {
                   @click="copyRaw(state.sub_url, 'sub-url')"
                   class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs shadow-emerald-600/15 transition cursor-pointer"
                 >
-                  {{ copiedKey === 'sub-url' ? '已复制' : '复制订阅链接' }}
+                  {{ copiedKey === 'sub-url' ? t('已复制') : t('复制订阅链接') }}
                 </button>
                 <button
                   type="button"
@@ -1113,7 +1127,7 @@ onUnmounted(() => {
                   @click="resetSubUrl"
                   class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
                 >
-                  {{ busyKey === 'reset-sub' ? '更换中…' : '更换订阅链接' }}
+                  {{ busyKey === 'reset-sub' ? t('更换中…') : t('更换订阅链接') }}
                 </button>
                 <a
                   :href="state.sub_url"
@@ -1121,7 +1135,7 @@ onUnmounted(() => {
                   rel="noopener"
                   class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition"
                 >
-                  预览
+                  {{ t('预览') }}
                 </a>
               </div>
             </div>
@@ -1129,7 +1143,7 @@ onUnmounted(() => {
             <div class="space-y-2.5">
               <div>
                 <div class="text-xs font-medium text-slate-500 mb-1">
-                  导入 Clash / Mihomo 客户端即可使用
+                  {{ t('导入 Clash / Mihomo 客户端即可使用') }}
                 </div>
                 <div
                   id="sub-url"
@@ -1139,13 +1153,13 @@ onUnmounted(() => {
                 </div>
               </div>
               <div class="text-xs text-slate-500 flex items-center justify-between gap-2 pt-1">
-                <span>本地客户端备份：<code class="font-mono text-slate-700">/etc/clashgate/client/</code></span>
+                <span>{{ t('本地客户端备份：') }}<code class="font-mono text-slate-700">/etc/clashgate/client/</code></span>
                 <button
                   type="button"
                   @click="selectTab('readable')"
                   class="text-emerald-700 hover:text-emerald-600 font-semibold cursor-pointer"
                 >
-                  前往易读配置转换 →
+                  {{ t('前往易读配置转换 →') }}
                 </button>
               </div>
             </div>
@@ -1158,7 +1172,7 @@ onUnmounted(() => {
           <section class="lg:col-span-7 bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs">
             <div class="flex items-center justify-between gap-2 mb-4">
               <div class="flex items-center gap-2.5">
-                <h2 class="text-base font-bold text-slate-900">入站节点</h2>
+                <h2 class="text-base font-bold text-slate-900">{{ t('入站节点') }}</h2>
                 <span
                   class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60"
                 >
@@ -1172,13 +1186,13 @@ onUnmounted(() => {
                   @click="copyRaw(state.all_proxies_yaml, 'all-proxies')"
                   class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
                 >
-                  {{ copiedKey === 'all-proxies' ? '已复制全部' : '复制全部配置' }}
+                  {{ copiedKey === 'all-proxies' ? t('已复制全部') : t('复制全部配置') }}
                 </button>
               </div>
             </div>
 
             <div v-if="state.inbounds.length === 0" class="py-12 text-center text-sm text-slate-400">
-              暂无入站节点，请在右侧添加节点
+              {{ t('暂无入站节点，请在右侧添加节点') }}
             </div>
 
             <div v-else class="divide-y divide-slate-100 border border-slate-200/75 rounded-2xl overflow-hidden">
@@ -1209,10 +1223,10 @@ onUnmounted(() => {
                         class="w-1.5 h-1.5 rounded-full"
                         :class="item.listening ? 'bg-emerald-500' : item.pending_reload ? 'bg-amber-500' : 'bg-rose-500'"
                       ></span>
-                      {{ item.listening ? '运行中' : item.pending_reload ? '重载配置生效' : '未运行' }}
+                      {{ item.listening ? t('运行中') : item.pending_reload ? t('重载配置生效') : t('未运行') }}
                     </span>
                   </div>
-                  <div class="text-xs text-slate-500 font-mono">端口 :{{ item.port }}</div>
+                  <div class="text-xs text-slate-500 font-mono">{{ t('端口 :') }}{{ item.port }}</div>
                 </div>
 
                 <!-- Actions: 复制配置 + 重置密码 + 删除 -->
@@ -1222,7 +1236,7 @@ onUnmounted(() => {
                     @click="copyRaw(item.single_config, `single-${item.key}`)"
                     class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-200 text-slate-700 border border-slate-200/90 transition cursor-pointer"
                   >
-                    {{ copiedKey === `single-${item.key}` ? '已复制' : '复制配置' }}
+                    {{ copiedKey === `single-${item.key}` ? t('已复制') : t('复制配置') }}
                   </button>
                   <button
                     v-if="item.can_reset_password"
@@ -1231,7 +1245,7 @@ onUnmounted(() => {
                     @click="resetInboundPassword(item)"
                     class="px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-50/80 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
                   >
-                    {{ busyKey === `rst-${item.key}` ? '重置中…' : '重置密码' }}
+                    {{ busyKey === `rst-${item.key}` ? t('重置中…') : t('重置密码') }}
                   </button>
                   <button
                     type="button"
@@ -1239,7 +1253,7 @@ onUnmounted(() => {
                     @click="deleteInbound(item)"
                     class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
                   >
-                    删除
+                    {{ t('删除') }}
                   </button>
                 </div>
               </div>
@@ -1249,15 +1263,15 @@ onUnmounted(() => {
           <!-- Right: Locked-Default Add Node Form -->
           <section class="lg:col-span-5 bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs">
             <div class="flex items-center justify-between gap-2 mb-4">
-              <h2 class="text-base font-bold text-slate-900">添加节点</h2>
+              <h2 class="text-base font-bold text-slate-900">{{ t('添加节点') }}</h2>
               <span class="px-2.5 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700">
-                安全默认策略
+                {{ t('安全默认策略') }}
               </span>
             </div>
 
             <form @submit.prevent="submitAddInbound" class="space-y-4">
               <div>
-                <label for="kind" class="block text-xs font-semibold text-slate-700 mb-1.5">协议类型</label>
+                <label for="kind" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('协议类型') }}</label>
                 <select
                   id="kind"
                   v-model="inboundForm.kind"
@@ -1271,29 +1285,29 @@ onUnmounted(() => {
                 <!-- One-line concise Chinese description right below protocol selector -->
                 <p id="protocol-desc" class="mt-2 text-xs font-medium text-emerald-700 flex items-center gap-1.5">
                   <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
-                  <span>{{ currentProtocol.label }}：{{ currentProtocol.desc }}</span>
+                  <span>{{ currentProtocol.label }}：{{ t(currentProtocol.desc) }}</span>
                 </p>
               </div>
 
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label for="nm" class="block text-xs font-semibold text-slate-700 mb-1.5">节点名称</label>
+                  <label for="nm" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('节点名称') }}</label>
                   <input
                     id="nm"
                     v-model="inboundForm.name"
                     name="name"
-                    :placeholder="`默认 ${currentDefaultName}`"
+                    :placeholder="t('默认 {name}', { name: currentDefaultName })"
                     class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
                   />
                 </div>
                 <div>
-                  <label for="port" class="block text-xs font-semibold text-slate-700 mb-1.5">监听端口</label>
+                  <label for="port" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('监听端口') }}</label>
                   <input
                     id="port"
                     v-model="inboundForm.port"
                     name="port"
                     inputmode="numeric"
-                    placeholder="留空随机端口"
+                    :placeholder="t('留空随机端口')"
                     class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
                   />
                 </div>
@@ -1302,13 +1316,13 @@ onUnmounted(() => {
               <!-- Non-locked protocol options (TUIC / TrustTunnel / Mieru / HTTP / SOCKS5) -->
               <template v-if="inboundForm.kind === 'tuic'">
                 <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">拥塞控制</label>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('拥塞控制') }}</label>
                   <select
                     v-model="inboundForm.tuic_cc"
                     name="tuic_cc"
                     class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
                   >
-                    <option value="bbr">bbr (默认)</option>
+                    <option value="bbr">{{ t('bbr (默认)') }}</option>
                     <option value="cubic">cubic</option>
                     <option value="new_reno">new_reno</option>
                   </select>
@@ -1317,13 +1331,13 @@ onUnmounted(() => {
 
               <template v-else-if="inboundForm.kind === 'trusttunnel'">
                 <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">拥塞控制</label>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('拥塞控制') }}</label>
                   <select
                     v-model="inboundForm.tt_cc"
                     name="tt_cc"
                     class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
                   >
-                    <option value="bbr">bbr (默认)</option>
+                    <option value="bbr">{{ t('bbr (默认)') }}</option>
                     <option value="cubic">cubic</option>
                   </select>
                 </div>
@@ -1331,13 +1345,13 @@ onUnmounted(() => {
 
               <template v-else-if="inboundForm.kind === 'mieru'">
                 <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">传输协议</label>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('传输协议') }}</label>
                   <select
                     v-model="inboundForm.mieru_transport"
                     name="mieru_transport"
                     class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
                   >
-                    <option value="TCP">TCP (默认)</option>
+                    <option value="TCP">{{ t('TCP (默认)') }}</option>
                     <option value="UDP">UDP</option>
                   </select>
                 </div>
@@ -1345,35 +1359,35 @@ onUnmounted(() => {
 
               <template v-else-if="inboundForm.kind === 'http'">
                 <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">启用 TLS</label>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('启用 TLS') }}</label>
                   <select
                     v-model="inboundForm.http_tls"
                     name="http_tls"
                     class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
                   >
-                    <option value="0">不启用 (默认)</option>
-                    <option value="1">启用</option>
+                    <option value="0">{{ t('不启用 (默认)') }}</option>
+                    <option value="1">{{ t('启用') }}</option>
                   </select>
                 </div>
               </template>
 
               <template v-else-if="inboundForm.kind === 'socks'">
                 <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">启用 TLS</label>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('启用 TLS') }}</label>
                   <select
                     v-model="inboundForm.socks_tls"
                     name="socks_tls"
                     class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
                   >
-                    <option value="0">不启用 (默认)</option>
-                    <option value="1">启用</option>
+                    <option value="0">{{ t('不启用 (默认)') }}</option>
+                    <option value="1">{{ t('启用') }}</option>
                   </select>
                 </div>
               </template>
 
               <!-- Locked security defaults notice -->
               <div class="rounded-xl bg-[#f4fbf7] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900">
-                {{ currentProtocol.lockedNote }}
+                {{ t(currentProtocol.lockedNote) }}
               </div>
 
               <button
@@ -1381,7 +1395,7 @@ onUnmounted(() => {
                 :disabled="busyKey === 'add-inbound'"
                 class="w-full h-10 mt-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold shadow-xs shadow-emerald-600/15 transition cursor-pointer"
               >
-                {{ busyKey === 'add-inbound' ? '正在添加…' : '添加入站节点' }}
+                {{ busyKey === 'add-inbound' ? t('正在添加…') : t('添加入站节点') }}
               </button>
             </form>
           </section>
@@ -1393,7 +1407,7 @@ onUnmounted(() => {
         <!-- 导入外部订阅 (proxy-providers) -->
         <section class="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs space-y-4">
           <div class="flex items-center gap-2.5">
-            <h2 class="text-base font-bold text-slate-900">外部订阅源 (proxy-providers)</h2>
+            <h2 class="text-base font-bold text-slate-900">{{ t('外部订阅源 (proxy-providers)') }}</h2>
             <span
               class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60"
             >
@@ -1423,7 +1437,7 @@ onUnmounted(() => {
                   @click="copyRaw(prov.yaml, `prov-${prov.name}`)"
                   class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
                 >
-                  {{ copiedKey === `prov-${prov.name}` ? '已复制' : '复制配置' }}
+                  {{ copiedKey === `prov-${prov.name}` ? t('已复制') : t('复制配置') }}
                 </button>
                 <button
                   type="button"
@@ -1431,7 +1445,7 @@ onUnmounted(() => {
                   @click="deleteProvider(prov.name)"
                   class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
                 >
-                  删除
+                  {{ t('删除') }}
                 </button>
               </div>
             </div>
@@ -1439,7 +1453,7 @@ onUnmounted(() => {
 
           <form @submit.prevent="submitAddProvider" class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
             <div class="sm:col-span-7">
-              <label class="block text-xs font-semibold text-slate-700 mb-1.5">订阅链接 (HTTP / HTTPS)</label>
+              <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('订阅链接 (HTTP / HTTPS)') }}</label>
               <input
                 v-model="providerForm.sub_url"
                 name="sub_url"
@@ -1449,11 +1463,11 @@ onUnmounted(() => {
               />
             </div>
             <div class="sm:col-span-3">
-              <label class="block text-xs font-semibold text-slate-700 mb-1.5">名称 (选填)</label>
+              <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('名称 (选填)') }}</label>
               <input
                 v-model="providerForm.provider_name"
                 name="provider_name"
-                placeholder="默认 sub"
+                :placeholder="t('默认 sub')"
                 class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
               />
             </div>
@@ -1463,7 +1477,7 @@ onUnmounted(() => {
                 :disabled="busyKey === 'add-provider'"
                 class="w-full h-10 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold shadow-xs shadow-emerald-600/15 transition cursor-pointer"
               >
-                {{ busyKey === 'add-provider' ? '导入中…' : '导入订阅' }}
+                {{ busyKey === 'add-provider' ? t('导入中…') : t('导入订阅') }}
               </button>
             </div>
           </form>
@@ -1472,7 +1486,7 @@ onUnmounted(() => {
         <!-- 服务端手工出站节点 (proxies) -->
         <section class="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs space-y-4">
           <div class="flex items-center gap-2.5">
-            <h2 class="text-base font-bold text-slate-900">服务端出站节点 (proxies)</h2>
+            <h2 class="text-base font-bold text-slate-900">{{ t('服务端出站节点 (proxies)') }}</h2>
             <span
               class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60"
             >
@@ -1506,7 +1520,7 @@ onUnmounted(() => {
                   @click="copyRaw(p.single_config, `p-single-${p.name}`)"
                   class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
                 >
-                  {{ copiedKey === `p-single-${p.name}` ? '已复制' : '复制配置' }}
+                  {{ copiedKey === `p-single-${p.name}` ? t('已复制') : t('复制配置') }}
                 </button>
                 <button
                   type="button"
@@ -1514,7 +1528,7 @@ onUnmounted(() => {
                   @click="deleteProxy(p.name)"
                   class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
                 >
-                  删除
+                  {{ t('删除') }}
                 </button>
               </div>
             </div>
@@ -1525,7 +1539,7 @@ onUnmounted(() => {
               v-model="proxiesRaw"
               name="proxies_raw"
               rows="5"
-              placeholder="粘贴单行 JSON / Flow 或多行 YAML 格式的 mihomo 节点配置（含 easytier、tailscale 等）…"
+              :placeholder="t('粘贴单行 JSON / Flow 或多行 YAML 格式的 mihomo 节点配置（含 easytier、tailscale 等）…')"
               class="w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
             ></textarea>
             <div class="flex items-center gap-2.5 flex-wrap">
@@ -1534,12 +1548,12 @@ onUnmounted(() => {
                 :disabled="busyKey === 'add-proxies'"
                 class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold shadow-xs shadow-emerald-600/15 transition cursor-pointer"
               >
-                {{ busyKey === 'add-proxies' ? '添加中…' : '添加出站节点' }}
+                {{ busyKey === 'add-proxies' ? t('添加中…') : t('添加出站节点') }}
               </button>
               <label
                 class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-medium transition cursor-pointer"
               >
-                从文件载入
+                {{ t('从文件载入') }}
                 <input
                   type="file"
                   accept=".yaml,.yml,.json,.txt"
@@ -1558,15 +1572,15 @@ onUnmounted(() => {
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div class="flex items-center gap-2.5">
-                <h2 class="text-base font-bold text-slate-900">易读配置转换</h2>
+                <h2 class="text-base font-bold text-slate-900">{{ t('易读配置转换') }}</h2>
                 <span
                   class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/70"
                 >
-                  单行 JSON ⇄ 多行 YAML
+                  {{ t('单行 JSON ⇄ 多行 YAML') }}
                 </span>
               </div>
               <p class="text-xs text-slate-500 mt-1">
-                在此粘贴单行 JSON / Flow 节点配置或多行 YAML，一键转换为结构清晰的多行易读 YAML 格式。
+                {{ t('在此粘贴单行 JSON / Flow 节点配置或多行 YAML，一键转换为结构清晰的多行易读 YAML 格式。') }}
               </p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
@@ -1575,7 +1589,7 @@ onUnmounted(() => {
                 @click="fillCurrentInboundsToConverter"
                 class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
               >
-                载入当前入站节点
+                {{ t('载入当前入站节点') }}
               </button>
               <button
                 type="button"
@@ -1586,7 +1600,7 @@ onUnmounted(() => {
                 "
                 class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
               >
-                清空
+                {{ t('清空') }}
               </button>
             </div>
           </div>
@@ -1601,7 +1615,7 @@ onUnmounted(() => {
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <label class="text-xs font-semibold text-slate-700">输入节点配置（单行 JSON / 多行 YAML）</label>
+                <label class="text-xs font-semibold text-slate-700">{{ t('输入节点配置（单行 JSON / 多行 YAML）') }}</label>
                 <div class="flex items-center gap-2">
                   <button
                     type="button"
@@ -1609,7 +1623,7 @@ onUnmounted(() => {
                     @click="convertConfigFormat('readable')"
                     class="px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition cursor-pointer"
                   >
-                    转换为易读配置
+                    {{ t('转换为易读配置') }}
                   </button>
                   <button
                     type="button"
@@ -1617,7 +1631,7 @@ onUnmounted(() => {
                     @click="convertConfigFormat('single')"
                     class="px-3 py-1 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
                   >
-                    转换为单行配置
+                    {{ t('转换为单行配置') }}
                   </button>
                 </div>
               </div>
@@ -1625,21 +1639,21 @@ onUnmounted(() => {
                 id="converter-input"
                 v-model="converterInput"
                 rows="14"
-                placeholder='在此粘贴节点配置，例如：&#10;- {"name":"VlessReality","type":"vless","server":"1.2.3.4","port":28443,...}'
+                :placeholder="converterPlaceholder"
                 class="w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-900 leading-relaxed focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
               ></textarea>
             </div>
 
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <label class="text-xs font-semibold text-slate-700">转换结果（易读 YAML）</label>
+                <label class="text-xs font-semibold text-slate-700">{{ t('转换结果（易读 YAML）') }}</label>
                 <button
                   type="button"
                   :disabled="!converterOutput"
                   @click="copyRaw(converterOutput, 'conv-out')"
                   class="px-3.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 disabled:opacity-40 transition cursor-pointer"
                 >
-                  {{ copiedKey === 'conv-out' ? '已复制结果' : '复制转换结果' }}
+                  {{ copiedKey === 'conv-out' ? t('已复制结果') : t('复制转换结果') }}
                 </button>
               </div>
               <textarea
@@ -1647,7 +1661,7 @@ onUnmounted(() => {
                 v-model="converterOutput"
                 readonly
                 rows="14"
-                placeholder="点击「转换为易读配置」后在此显示多行 YAML 结果…"
+                :placeholder="t('点击「转换为易读配置」后在此显示多行 YAML 结果…')"
                 class="w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-800 leading-relaxed focus:outline-none"
               ></textarea>
             </div>
@@ -1661,7 +1675,7 @@ onUnmounted(() => {
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div class="space-y-1">
               <div class="flex items-center gap-2.5 flex-wrap">
-                <h2 class="text-base font-bold text-slate-900">自定义 mihomo 服务端配置</h2>
+                <h2 class="text-base font-bold text-slate-900">{{ t('自定义 mihomo 服务端配置') }}</h2>
                 <span
                   class="px-2.5 py-0.5 text-xs font-semibold rounded-full"
                   :class="
@@ -1670,11 +1684,11 @@ onUnmounted(() => {
                       : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
                   "
                 >
-                  {{ state.custom_config_mode ? '当前：自定义配置模式' : '当前：标准模板模式' }}
+                  {{ state.custom_config_mode ? t('当前：自定义配置模式') : t('当前：标准模板模式') }}
                 </span>
               </div>
               <p class="text-xs text-slate-500">
-                您可以直接粘贴或编辑整份自备的 mihomo 服务端配置文件（<code class="font-mono">config.yaml</code>），校验通过后立即应用，并自动同步刷新入站 Listeners 列表与客户端订阅。普通用户无需修改此页。
+                {{ t('您可以直接粘贴或编辑整份自备的 mihomo 服务端配置文件（') }}<code class="font-mono">config.yaml</code>{{ t('），校验通过后立即应用，并自动同步刷新入站 Listeners 列表与客户端订阅。普通用户无需修改此页。') }}
               </p>
             </div>
 
@@ -1685,25 +1699,25 @@ onUnmounted(() => {
               @click="resetTemplateConfig"
               class="px-4 py-2 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200/90 disabled:opacity-50 transition cursor-pointer shrink-0"
             >
-              {{ busyKey === 'reset-template' ? '正在恢复默认配置…' : '恢复默认配置' }}
+              {{ busyKey === 'reset-template' ? t('正在恢复默认配置…') : t('恢复默认配置') }}
             </button>
           </div>
 
           <!-- 证书路径提示与说明 -->
           <div class="rounded-2xl bg-amber-50/90 border border-amber-200/90 p-4 text-xs text-amber-950 leading-relaxed space-y-1.5">
-            <div class="font-bold text-amber-900">⚠️ 醒目提醒：Mihomo 证书目录与相对路径说明</div>
+            <div class="font-bold text-amber-900">{{ t('⚠️ 醒目提醒：Mihomo 证书目录与相对路径说明') }}</div>
             <div>
-              1. 本系统已将 Mihomo 运行目录（<code class="font-mono font-semibold">-d</code>）、配置文件与证书统一收纳在
-              <code class="font-mono font-semibold">/etc/clashgate</code>，证书实际位于
-              <code class="font-mono font-semibold">/etc/clashgate/certs/fullchain.pem</code> 与
-              <code class="font-mono font-semibold">/etc/clashgate/certs/privkey.pem</code>（相对路径即
-              <code class="font-mono font-semibold">certs/fullchain.pem</code> 与
+              {{ t('1. 本系统已将 Mihomo 运行目录（') }}<code class="font-mono font-semibold">-d</code>{{ t('）、配置文件与证书统一收纳在') }}
+              <code class="font-mono font-semibold">/etc/clashgate</code>{{ t('，证书实际位于') }}
+              <code class="font-mono font-semibold">/etc/clashgate/certs/fullchain.pem</code> {{ t('与') }}
+              <code class="font-mono font-semibold">/etc/clashgate/certs/privkey.pem</code>{{ t('（相对路径即') }}
+              <code class="font-mono font-semibold">certs/fullchain.pem</code> {{ t('与') }}
               <code class="font-mono font-semibold">certs/privkey.pem</code>）。
             </div>
             <div>
-              2. 若您的自备配置中填写了其他证书路径或相对路径，请点击下方
-              <b class="font-semibold">「自动修改证书路径」</b> 按钮一键修正为本机证书路径，随后点击
-              <b class="font-semibold">「更新 mihomo 服务端配置」</b> 校验并生效。
+              {{ t('2. 若您的自备配置中填写了其他证书路径或相对路径，请点击下方') }}
+              <b class="font-semibold">{{ t('「自动修改证书路径」') }}</b> {{ t('按钮一键修正为本机证书路径，随后点击') }}
+              <b class="font-semibold">{{ t('「更新 mihomo 服务端配置」') }}</b> {{ t('校验并生效。') }}
             </div>
           </div>
 
@@ -1713,7 +1727,7 @@ onUnmounted(() => {
               v-model="customConfigText"
               name="custom_config_raw"
               rows="16"
-              placeholder="在此粘贴完整的 mihomo 服务端 YAML 配置…"
+              :placeholder="t('在此粘贴完整的 mihomo 服务端 YAML 配置…')"
               class="w-full p-4 rounded-2xl border border-slate-200 bg-[#f8faf9] text-slate-800 font-mono text-xs leading-relaxed focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
             ></textarea>
             <div class="flex items-center gap-2.5 flex-wrap">
@@ -1722,19 +1736,19 @@ onUnmounted(() => {
                 @click="autoFixCertPaths"
                 class="px-4 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-semibold transition cursor-pointer"
               >
-                自动修改证书路径
+                {{ t('自动修改证书路径') }}
               </button>
               <button
                 type="submit"
                 :disabled="busyKey === 'save-custom'"
                 class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold shadow-xs shadow-emerald-600/15 transition cursor-pointer"
               >
-                {{ busyKey === 'save-custom' ? '正在校验并更新…' : '更新 mihomo 服务端配置' }}
+                {{ busyKey === 'save-custom' ? t('正在校验并更新…') : t('更新 mihomo 服务端配置') }}
               </button>
               <label
                 class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-medium transition cursor-pointer"
               >
-                从本地文件载入
+                {{ t('从本地文件载入') }}
                 <input
                   type="file"
                   accept=".yaml,.yml,.txt"

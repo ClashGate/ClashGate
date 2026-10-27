@@ -1,0 +1,226 @@
+第 %s 行执行失败：%s	Line %s failed: %s
+请以 root 身份运行（可先执行 sudo -i 再运行安装命令）	Please run as root (e.g. run sudo -i first, then the install command)
+仅支持 Linux 系统（当前：%s）	Linux only (current: %s)
+无法识别操作系统（缺少 /etc/os-release）	Cannot identify the OS (missing /etc/os-release)
+不支持当前系统（%s）：需要 systemd 作为服务管理器	Unsupported system (%s): systemd is required
+不支持当前系统（%s）：需要支持 apt / dnf / yum 的主流服务端发行版（Ubuntu / Debian / Rocky / AlmaLinux / Fedora / CentOS 等）	Unsupported system (%s): a mainstream server distro with apt / dnf / yum is required (Ubuntu / Debian / Rocky / AlmaLinux / Fedora / CentOS, etc.)
+不支持的 CPU 架构：%s	Unsupported CPU architecture: %s
+尚未安装，请先运行一键安装命令	Not installed yet. Run the one-click install command first
+该功能仅在自动证书或手动证书模式下提供（当前：无证书模式）	This feature is only available in auto-certificate or manual-certificate mode (current: no-certificate mode)
+用户自备证书%s	User-provided certificate%s
+Let's Encrypt 测试证书（staging）	Let's Encrypt test certificate (staging)
+自签证书（仅开发调试）	Self-signed certificate (dev only)
+Let's Encrypt 证书	Let's Encrypt certificate
+DNS API 模式	DNS API mode
+手动证书模式	Manual certificate mode
+端口模式	Port mode
+自动证书模式（%s）	Auto-certificate mode (%s)
+无证书模式	No-certificate mode
+正在从 GitHub (%s) 下载安装文件……\n	Downloading install files from GitHub (%s)...\n
+正在从 GitHub (%s) 下载安装文件……	Downloading install files from GitHub (%s)...
+下载失败：%s（请确认服务器可以访问 GitHub）	Download failed: %s (make sure the server can reach GitHub)
+下载的文件不完整	The downloaded files are incomplete
+\033[1;32m运行中\033[0m	\033[1;32mrunning\033[0m
+\033[1;31m已停止\033[0m	\033[1;31mstopped\033[0m
+\033[1;31m失败\033[0m	\033[1;31mfailed\033[0m
+未知	unknown
+错误：	Error: 
+警告：	Warning: 
+\n\033[1mClashGate v%s 一键安装\033[0m\n\n	\n\033[1mClashGate v%s one-click install\033[0m\n\n
+请选择安装模式：\n	Choose an install mode:\n
+  1) 无证书模式（默认）：仅 VLESS Reality 节点，安装后输出客户端配置\n	  1) No-certificate mode (default): VLESS Reality nodes only; client config is printed after install\n
+  2) 自动证书模式：自动申请 Let's Encrypt 证书（端口模式 / DNS API），提供 HTTPS 管理面板和订阅链接\n	  2) Auto-certificate mode: automatically obtain a Let's Encrypt certificate (port mode / DNS API); provides an HTTPS admin panel and subscription link\n
+  3) 手动证书模式：使用自备域名证书，校验通过后提供 HTTPS 管理面板和订阅链接\n	  3) Manual certificate mode: use your own domain certificate; after validation provides an HTTPS admin panel and subscription link\n
+请输入 [1/2/3]（回车默认 1）：	Enter [1/2/3] (Enter = 1): 
+请输入 1、2 或 3\n	Please enter 1, 2 or 3\n
+\n请选择证书方式：\n	\nChoose a certificate method:\n
+  1) 端口模式（默认）：申请/续期时临时占用 80 端口（需将域名解析到本机并放行 TCP 80）\n	  1) Port mode (default): temporarily uses port 80 when issuing/renewing (point the domain to this host and open TCP 80)\n
+  2) DNS API 模式：使用 Cloudflare API Token 验证（无需占用 80/443 端口，支持 *.泛域名）\n	  2) DNS API mode: validate with a Cloudflare API Token (no need for ports 80/443; wildcard *.domain supported)\n
+请输入 [1/2]（回车默认 1）：	Enter [1/2] (Enter = 1): 
+请输入 1 或 2\n	Please enter 1 or 2\n
+域名格式不正确：%s\n	Invalid domain format: %s\n
+域名格式不正确：%s	Invalid domain format: %s
+请输入证书对应的域名（如 example.com）：	Enter the domain for the certificate (e.g. example.com): 
+手动证书目录路径：\033[1;36m%s/certs/\033[0m（安装过程中将提示放入 fullchain.pem 与 privkey.pem 并检测有效性）\n	Manual certificate directory: \033[1;36m%s/certs/\033[0m (during install you will be asked to place fullchain.pem and privkey.pem there and they will be validated)\n
+请输入域名（如 example.com 或 *.example.com）：	Enter the domain (e.g. example.com or *.example.com): 
+API Token 不能包含空格或引号\n	The API Token must not contain spaces or quotes\n
+请输入 Cloudflare API Token（需具备该域名的 DNS 编辑权限）：	Enter the Cloudflare API Token (needs DNS edit permission for the domain): 
+通配符域名仅支持「DNS API 模式」或「手动证书模式」，请输入具体域名\n	Wildcard domains are only supported in "DNS API mode" or "Manual certificate mode"; please enter a specific domain\n
+请输入域名（需已将 A 记录解析到本机）：	Enter the domain (its A record must already point to this host): 
+已分配管理面板随机空闲高端口：%s\n	Assigned a random free high port for the admin panel: %s\n
+已分配 Zashboard 控制接口随机空闲高端口：%s\n	Assigned a random free high port for the Zashboard controller: %s\n
+检测到已安装 ClashGate，是否卸载后重新安装？节点和密钥都会重新生成 [y/N]：	ClashGate is already installed. Uninstall and reinstall? Nodes and keys will be regenerated [y/N]: 
+已取消。查看现有节点：clashgate info\n	Cancelled. View existing nodes: clashgate info\n
+已安装（存在 %s）。查看节点：clashgate info；如需重装请在终端中运行 clashgate install	Already installed (%s exists). View nodes: clashgate info; to reinstall, run clashgate install in a terminal
+正在卸载旧的安装……\n	Uninstalling the previous installation...\n
+检查运行状态	Checking status
+mihomo 服务未能启动	The mihomo service failed to start
+节点 %s 未在端口 %s 监听	Node %s is not listening on port %s
+监听中：%s :%s	Listening: %s :%s
+Mihomo 控制接口未在端口 %s 监听	The Mihomo controller is not listening on port %s
+Zashboard：%s 正常	Zashboard: %s OK
+面板未在 %s 端口响应 HTTPS	The panel does not respond to HTTPS on port %s
+面板：%s（端口 %s）正常（面板自身 HTTPS，证书与 Mihomo 共用）	Panel: %s (port %s) OK (panel serves HTTPS itself; certificate shared with Mihomo)
+订阅接口没有返回 mihomo 配置	The subscription endpoint did not return a mihomo config
+订阅接口未拒绝错误的 token	The subscription endpoint did not reject a wrong token
+订阅链接：%s 正常	Subscription link: %s OK
+\n\033[1;32m✔ 安装完成！（ClashGate v%s）\033[0m\n\n	\n\033[1;32m✔ Install complete! (ClashGate v%s)\033[0m\n\n
+请在云服务商的防火墙 / 安全组放行以下 TCP 端口：	Open these TCP ports in your cloud provider firewall / security group: 
+\n\033[1mmihomo 订阅链接\033[0m（导入 mihomo / Clash 客户端即可；链接即凭证，泄露后执行 clashgate reset-sub 更换）：\n	\n\033[1mmihomo subscription link\033[0m (import into a mihomo / Clash client; the link is a credential — run clashgate reset-sub if it leaks):\n
+  注意：当前为%s，客户端可能拒绝下载订阅\n	  Note: the current certificate is %s; clients may refuse to download the subscription\n
+\n\033[1m管理面板\033[0m\n	\n\033[1mAdmin panel\033[0m\n
+  地址：%s\n  端口：%s（随机空闲高端口，请确保防火墙已放行 TCP %s）\n  用户名：admin\n	  URL: %s\n  Port: %s (random free high port; make sure TCP %s is open in the firewall)\n  Username: admin\n
+  密码：%s（仅显示一次；可用 clashgate passwd 修改）\n	  Password: %s (shown once; change it with clashgate passwd)\n
+  证书方式：%s\n	  Certificate method: %s\n
+  证书：%s\n	  Certificate: %s\n
+  \033[1;33m证书尚未签发成功，当前为临时自签证书；检查配置后可执行 clashgate cert 立即重试\033[0m\n	  \033[1;33mThe certificate has not been issued yet; a temporary self-signed certificate is in use. Check the config and run clashgate cert to retry\033[0m\n
+\n统一安装目录：%s（本地客户端备份：%s）\n	\nInstall directory: %s (local client backup: %s)\n
+\n\033[1m客户端 proxies 片段\033[0m\n	\n\033[1mClient proxies snippet\033[0m\n
+\n\033[1m客户端配置目录\033[0m：%s\n	\n\033[1mClient config directory\033[0m: %s\n
+  - mihomo-client.yaml（完整 mihomo 客户端配置）\n  - proxies.yaml（仅节点片段）\n	  - mihomo-client.yaml (full mihomo client config)\n  - proxies.yaml (node snippet only)\n
+\n管理：运行 \033[1mclashgate\033[0m 打开中文管理菜单（clashgate help 查看全部子命令）\n	\nManage: run \033[1mclashgate\033[0m to open the management menu (clashgate help lists all subcommands)\n
+\n\033[1;33m需要注意：\033[0m\n	\n\033[1;33mNotes:\033[0m\n
+安装 ClashGate 文件	Installing ClashGate files
+重启服务	Restarting services
+配置未通过校验（mihomo -t），未重启	The config failed validation (mihomo -t); not restarted
+Mihomo：%s	Mihomo: %s
+更新 ClashGate 脚本与面板	Updating ClashGate scripts and panel
+新模板生成的配置未通过校验，已保留原配置	The config from the new template failed validation; the original config was kept
+ClashGate 已更新到 GitHub main 最新版	ClashGate updated to the latest GitHub main
+正在校验手动证书（%s/certs/）……\n	Validating the manual certificate (%s/certs/)...\n
+手动证书正常：%s，到期 %s（剩余 %s 天）\n	Manual certificate OK: %s, expires %s (%s days left)\n
+正在申请 / 续期证书（%s，%s，%s）……\n	Requesting / renewing the certificate (%s, %s, %s)...\n
+\033[1;31m申请 / 续期失败\033[0m：请确认 Cloudflare API Token 具备 %s 的 DNS 编辑权限\n	\033[1;31mRequest / renewal failed\033[0m: make sure the Cloudflare API Token has DNS edit permission for %s\n
+\033[1;31m申请 / 续期失败\033[0m：请确认域名 A 记录指向 %s（没有指向别处的 AAAA 记录）、云防火墙放行 TCP 80、80 端口未被占用\n	\033[1;31mRequest / renewal failed\033[0m: make sure the domain A record points to %s (no AAAA record pointing elsewhere), the cloud firewall allows TCP 80, and port 80 is free\n
+\033[1;31m证书仍未签发\033[0m，请检查配置后重试\n	\033[1;31mThe certificate is still not issued\033[0m; check the config and retry\n
+证书正常：%s，到期 %s（剩余 %s 天；到期前 30 天内自动续期）\n	Certificate OK: %s, expires %s (%s days left; auto-renews within 30 days of expiry)\n
+\033[1m运行状态（ClashGate v%s）\033[0m\n	\033[1mStatus (ClashGate v%s)\033[0m\n
+  安装模式：%s\n	  Install mode: %s\n
+  统一目录：%s\n	  Directory: %s\n
+  面板：%s（%s，端口 %s）\n	  Panel: %s (%s, port %s)\n
+  面板：%s（%s，端口 %s）    证书自动续期：%s\n	  Panel: %s (%s, port %s)    Auto-renewal: %s\n
+  Zashboard：%s（端口 %s，API 密钥：%s）\n	  Zashboard: %s (port %s, API secret: %s)\n
+  域名：%s（证书：%s）\n	  Domain: %s (certificate: %s)\n
+  证书：\033[1;31m尚未签发\033[0m（临时自签证书；可执行 clashgate cert 重试）\n	  Certificate: \033[1;31mnot issued\033[0m (temporary self-signed; run clashgate cert to retry)\n
+  证书到期：%s（%s，剩余 %s 天）\n	  Certificate expires: %s (%s, %s days left)\n
+  \033[1;33m证书即将到期\033[0m：请及时续期或更新证书（clashgate cert）\n	  \033[1;33mCertificate expiring soon\033[0m: renew or update it (clashgate cert)\n
+  证书：\033[1;31m缺失\033[0m（执行 clashgate cert）\n	  Certificate: \033[1;31mmissing\033[0m (run clashgate cert)\n
+  上次自动续期：%s\n	  Last auto-renewal: %s\n
+  节点端口：\n	  Node ports:\n
+    %-18s %-6s \033[1;32m监听中\033[0m\n	    %-18s %-6s \033[1;32mlistening\033[0m\n
+    %-18s %-6s \033[1;31m未监听\033[0m\n	    %-18s %-6s \033[1;31mnot listening\033[0m\n
+尚未安装	Not installed yet
+客户端配置目录：%s\n	Client config directory: %s\n
+管理面板：%s（端口 %s，用户名 admin）\n	Admin panel: %s (port %s, username admin)\n
+Zashboard：%s（端口 %s，API 密钥：%s）\n	Zashboard: %s (port %s, API secret: %s)\n
+订阅链接：%s\n	Subscription link: %s\n
+未找到订阅 token，可执行 clashgate reset-sub 生成	Subscription token not found; run clashgate reset-sub to generate one
+mihomo 订阅链接（链接即凭证，请勿外泄）：\n  %s\n	mihomo subscription link (the link is a credential; do not leak it):\n  %s\n
+订阅链接仅在自动证书或手动证书模式下提供	The subscription link is only available in auto-certificate or manual-certificate mode
+新的订阅链接（旧链接已失效）：\n  %s\n	New subscription link (the old link is now invalid):\n  %s\n
+需要在终端中运行；或使用 clashgate reset-password 随机重置	Must be run in a terminal; or use clashgate reset-password for a random reset
+请输入新密码（至少 8 位）：	Enter a new password (at least 8 characters): 
+请再次输入：	Enter it again: 
+两次输入不一致，请重试\n	The two entries do not match, try again\n
+密码太短，至少 8 位\n	Password too short; at least 8 characters\n
+面板密码已修改。登录地址：%s（用户名 admin）\n	Panel password changed. Login URL: %s (username admin)\n
+未安装管理面板（仅证书模式提供）	The admin panel is not installed (certificate modes only)
+管理面板：%s\n用户名：admin\n新密码：%s\n	Admin panel: %s\nUsername: admin\nNew password: %s\n
+当前配置未通过校验（mihomo -t），未重启	The current config failed validation (mihomo -t); not restarted
+Zashboard：%s\n新的 API 密钥（Secret）：%s\n	Zashboard: %s\nNew API secret: %s\n
+查看运行状态	View status
+查看节点配置	View node config
+查看订阅链接	View subscription link
+更换订阅链接	Change subscription link
+修改面板密码（自定义）	Change panel password (custom)
+重置面板密码（随机）	Reset panel password (random)
+重置 Zashboard 密钥（随机）	Reset Zashboard secret (random)
+立即申请 / 续期 / 校验证书	Request / renew / validate certificate now
+重启 Mihomo	Restart Mihomo
+查看日志	View logs
+更新（内核 + 脚本）	Update (core + scripts)
+卸载	Uninstall
+\n\033[1mClashGate v%s 管理菜单\033[0m（%s	\n\033[1mClashGate v%s menu\033[0m (%s
+）  Mihomo：%s\n	)  Mihomo: %s\n
+  0) 退出\n	  0) Exit\n
+请选择：	Choose: 
+按回车返回菜单……	Press Enter to return to the menu...
+无效选项：%s\n	Invalid option: %s\n
+确定卸载 ClashGate？所有节点、证书和配置都会被删除 [y/N]：	Uninstall ClashGate? All nodes, certificates and config will be deleted [y/N]: 
+已取消	Cancelled
+已卸载：Mihomo、管理面板、证书（含 acme.sh）、配置和客户端文件。	Uninstalled: Mihomo, admin panel, certificates (incl. acme.sh), config and client files.
+未知参数：%s	Unknown argument: %s
+缺少域名	missing domain
+缺少 Cloudflare API Token	missing Cloudflare API Token
+缺少面板端口	missing panel port
+缺少控制端口	missing controller port
+未知证书方式：%s（可选 port|dns|manual）	Unknown certificate method: %s (choose port|dns|manual)
+未知参数：%s（查看帮助：-h）	Unknown argument: %s (see help: -h)
+安装依赖	Installing dependencies
+未检测到受支持的包管理器（需要 apt / dnf / yum）	No supported package manager found (apt / dnf / yum required)
+%s 安装：%s	%s install: %s
+apt-get update 失败，请检查软件源和网络	apt-get update failed; check your package sources and network
+依赖安装失败：%s	Dependency installation failed: %s
+依赖安装失败（%s）：%s	Dependency installation failed (%s): %s
+安装最新稳定版 Mihomo 内核	Installing the latest stable Mihomo core
+无法获取 Mihomo 版本信息（请确认服务器可以访问 GitHub）	Cannot fetch Mihomo release info (make sure the server can reach GitHub)
+版本 %s 中没有找到 mihomo-linux-%s-%s.gz	mihomo-linux-%s-%s.gz not found in release %s
+下载失败：%s	Download failed: %s
+下载的 Mihomo 无法运行	The downloaded Mihomo cannot run
+已安装 %s -> %s	Installed %s -> %s
+无法自动探测公网 IP，请手动输入本机公网 IPv4：	Cannot detect the public IP automatically; enter this host's public IPv4: 
+无法探测公网 IP，请检查服务器网络	Cannot detect the public IP; check the server network
+生成 %s 个 VLESS Reality 节点	Generating %s VLESS Reality node(s)
+Reality 密钥对生成失败	Failed to generate the Reality key pair
+VLESS Encryption 密钥生成失败	Failed to generate the VLESS Encryption keys
+写入服务端配置	Writing the server config
+生成的服务端配置未通过校验（mihomo -t）	The generated server config failed validation (mihomo -t)
+生成客户端配置	Generating the client config
+检测到 ufw 已启用，已放行：%s	ufw is enabled; opened: %s
+检测到 firewalld 已启用，已放行：%s	firewalld is enabled; opened: %s
+配置 systemd 服务	Configuring the systemd service
+配置管理面板	Configuring the admin panel
+证书模式需要域名	Certificate mode requires a domain
+管理面板端口无效：%s	Invalid admin panel port: %s
+Mihomo 控制端口无效：%s	Invalid Mihomo controller port: %s
+管理面板端口不能与 Mihomo 控制端口（%s）相同	The admin panel port must differ from the Mihomo controller port (%s)
+DNS API 模式需要提供 Cloudflare API Token	DNS API mode requires a Cloudflare API Token
+通配符域名（%s）仅支持「DNS API 模式」或「手动证书模式」	Wildcard domain (%s) is only supported in "DNS API mode" or "Manual certificate mode"
+域名 %s 无法解析。请添加 A 记录指向 %s（Cloudflare 请设为灰云 DNS only）	Domain %s does not resolve. Add an A record pointing to %s (in Cloudflare set it to grey cloud / DNS only)
+域名 %s 解析到 %s，而不是本机 %s。若是 Cloudflare 橙云请改为灰云，否则端口模式无法申请证书	Domain %s resolves to %s, not this host %s. If it is Cloudflare orange cloud, switch to grey cloud, otherwise port mode cannot obtain a certificate
+域名 %s 有 AAAA 记录 %s，但它不是本机的 IPv6 地址。Let's Encrypt 会优先用 IPv6 验证，请删除该 AAAA 记录（或改为本机 IPv6）	Domain %s has an AAAA record %s that is not this host's IPv6 address. Let's Encrypt prefers IPv6 for validation; delete that AAAA record (or point it to this host's IPv6)
+域名解析正常：%s -> %s	Domain resolves correctly: %s -> %s
+域名解析不正确，仍要继续安装吗？（继续则先用临时证书，解析生效后每小时自动重试签发）[Y/n]：	DNS is not correct. Continue installing anyway? (a temporary certificate is used first, and issuance is retried hourly once DNS takes effect) [Y/n]: 
+已取消。请先把域名 A 记录指向 %s，再重新运行安装命令。\n	Cancelled. Point the domain A record to %s first, then rerun the install command.\n
+未找到有效的证书文件，请将证书放入 %s：\n  - 证书链：%s\n  - 私钥：  %s\n	No valid certificate files found; place them in %s:\n  - Certificate chain: %s\n  - Private key:       %s\n
+证书无效或已过期：%s\n	Certificate invalid or expired: %s\n
+证书不包含域名 %s（请检查证书与所填域名是否一致）：%s\n	The certificate does not cover domain %s (check that the certificate matches the domain): %s\n
+证书与私钥不匹配：%s 与 %s\n	Certificate and private key do not match: %s and %s\n
+mihomo 用户无法读取证书私钥：%s\n	The mihomo user cannot read the private key: %s\n
+配置并校验手动证书（%s）	Configuring and validating the manual certificate (%s)
+证书存放目录：%s/certs/	Certificate directory: %s/certs/
+  证书文件：%s/certs/fullchain.pem（或放入 *.crt / *.pem）	  Certificate file: %s/certs/fullchain.pem (or place *.crt / *.pem)
+  私钥文件：%s/certs/privkey.pem  （或放入 *.key）	  Private key file: %s/certs/privkey.pem  (or place *.key)
+证书校验通过：%s/certs/（颁发者：%s，到期：%s）	Certificate validated: %s/certs/ (issuer: %s, expires: %s)
+\n请将证书与私钥放入 \033[1;36m%s/certs/\033[0m（fullchain.pem 与 privkey.pem）\n	\nPlace the certificate and private key in \033[1;36m%s/certs/\033[0m (fullchain.pem and privkey.pem)\n
+放好后按回车键开始检测证书有效性（输入 q 取消安装）：	Press Enter once they are in place to validate (type q to cancel the install): 
+已取消安装。\n	Install cancelled.\n
+\033[1;33m请检查证书文件后重试。\033[0m\n	\033[1;33mPlease check the certificate files and retry.\033[0m\n
+手动证书校验未通过（请先将 fullchain.pem 与 privkey.pem 放入 %s/certs/）	Manual certificate validation failed (place fullchain.pem and privkey.pem in %s/certs/ first)
+安装证书申请工具 acme.sh	Installing the certificate tool acme.sh
+开发模式（自签证书），跳过	Dev mode (self-signed certificate); skipped
+已存在 acme.sh v%s	acme.sh v%s already present
+下载 acme.sh 失败：%s	Failed to download acme.sh: %s
+acme.sh 安装失败	acme.sh installation failed
+已安装 acme.sh v%s -> %s（续期由 clashgate-cert.timer 负责）	Installed acme.sh v%s -> %s (renewal is handled by clashgate-cert.timer)
+申请证书（%s，%s，%s）	Requesting certificate (%s, %s, %s)
+证书已就绪：%s/certs/（%s，到期 %s；Mihomo 与面板共用）	Certificate ready: %s/certs/ (%s, expires %s; shared by Mihomo and the panel)
+证书申请失败，已先用临时自签证书启动。请检查 Cloudflare API Token 是否具备 %s 的 DNS 编辑权限；系统每小时自动重试，也可执行 clashgate cert 立即重试	Certificate request failed; started with a temporary self-signed certificate. Check that the Cloudflare API Token has DNS edit permission for %s; the system retries hourly, or run clashgate cert to retry now
+证书申请失败，已先用临时自签证书启动。请检查：域名 A 记录是否指向 %s、80 端口是否放行；系统每小时自动重试，也可执行 clashgate cert 立即重试	Certificate request failed; started with a temporary self-signed certificate. Check that the domain A record points to %s and port 80 is open; the system retries hourly, or run clashgate cert to retry now
+mihomo 用户无法读取证书私钥	The mihomo user cannot read the private key
+尚未运行	not run yet
+成功（%s）	success (%s)
+\033[1;31m失败\033[0m（%s，clashgate log 查看原因）	\033[1;31mfailed\033[0m (%s; see clashgate log)
+端口 %s / %s 已被占用，请先停止占用程序：	Ports %s / %s are already in use; stop the occupying program first:
+80 端口已被其他程序占用（端口模式申请证书需要临时占用 80 端口），请先停止占用程序或改用「DNS API 模式」/「手动证书模式」：	Port 80 is in use by another program (port mode needs port 80 temporarily); stop it or switch to "DNS API mode" / "Manual certificate mode":
+%s 安装：%s	%s install: %s

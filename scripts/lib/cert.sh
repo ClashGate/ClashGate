@@ -12,8 +12,7 @@ preflight_cert() {
   [[ $PANEL_PORT != "$CONTROLLER_PORT" ]] || die "管理面板端口不能与 Mihomo 控制端口（$CONTROLLER_PORT）相同"
   local busy
   busy=$(ss -Hltnp "sport = :$PANEL_PORT or sport = :$CONTROLLER_PORT" 2>/dev/null || true)
-  [[ -z $busy ]] || die "端口 $PANEL_PORT / $CONTROLLER_PORT 已被占用，请先停止占用程序：
-$busy"
+  [[ -z $busy ]] || die "端口 $PANEL_PORT / $CONTROLLER_PORT 已被占用，请先停止占用程序：" "$busy"
   if [[ ${CERT_MODE:-port} == manual ]]; then
     [[ $DOMAIN =~ $WILDCARD_DOMAIN_RE ]] || die "域名格式不正确：$DOMAIN"
   elif [[ ${CERT_MODE:-port} == dns ]]; then
@@ -23,8 +22,7 @@ $busy"
     [[ $DOMAIN != \*.* ]] || die "通配符域名（$DOMAIN）仅支持「DNS API 模式」或「手动证书模式」"
     [[ $DOMAIN =~ $DOMAIN_RE ]] || die "域名格式不正确：$DOMAIN"
     busy=$(ss -Hltnp 'sport = :80' 2>/dev/null || true)
-    [[ -z $busy ]] || die "80 端口已被其他程序占用（端口模式申请证书需要临时占用 80 端口），请先停止占用程序或改用「DNS API 模式」/「手动证书模式」：
-$busy"
+    [[ -z $busy ]] || die "80 端口已被其他程序占用（端口模式申请证书需要临时占用 80 端口），请先停止占用程序或改用「DNS API 模式」/「手动证书模式」：" "$busy"
   fi
 }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # clashgate 管理命令（安装后链接为 /usr/local/bin/clashgate）
-# 不带参数：已安装 -> 中文管理菜单；未安装 -> 安装。clashgate help 查看全部子命令。
+# 不带参数：已安装 -> 管理菜单（中文/English）；未安装 -> 安装。clashgate help 查看全部子命令。
 set -Eeuo pipefail
 
 ORIG_ARGS=("$@")
@@ -13,11 +13,37 @@ trap 'die "第 $LINENO 行执行失败：$BASH_COMMAND"' ERR
 if [[ -n ${CS_BOOTSTRAP_TMP:-} ]]; then trap 'rm -rf "$CS_BOOTSTRAP_TMP"' EXIT; fi
 
 usage() {
+  if [[ $CS_LANG == en ]]; then
+    cat <<EOF
+ClashGate (clashgate) - proxy server management command (v$CS_VERSION)
+
+Usage: clashgate [subcommand]
+  (no argument)     open the interactive menu
+  status            show status (services, ports, certificate)
+  info              show node config (proxies snippet, client config dir, subscription link)
+  sub               show the subscription link (certificate modes)
+  reset-sub         change the subscription link; the old link stops working immediately
+  passwd            change the panel password (custom)
+  reset-password    reset the panel password (random)
+  reset-secret      reset the Zashboard API secret (random)
+  cert              request / renew / validate the certificate now
+  restart           restart the core
+  update            update core + scripts and panel (update core / update self updates only one)
+  log               show recent logs
+  uninstall         uninstall
+  install           reinstall (choose the mode when prompted)
+  help              show this help
+
+Language: set CLASHGATE_LANG=en|zh (default: zh, or en when LANG starts with en)
+One-click install: curl -fsSL $INSTALL_RAW_URL | bash
+EOF
+    return 0
+  fi
   cat <<EOF
 ClashGate (clashgate) —— 代理服务端管理命令 (v$CS_VERSION)
 
 用法：clashgate [子命令]
-  （不带参数）       打开中文交互菜单
+  （不带参数）       打开交互菜单
   status            查看运行状态（服务、端口、证书）
   info              查看节点配置（proxies 片段、客户端配置目录、订阅链接）
   sub               查看订阅链接（证书模式）
@@ -33,6 +59,7 @@ ClashGate (clashgate) —— 代理服务端管理命令 (v$CS_VERSION)
   install           重新安装（按提示选择模式）
   help              显示本帮助
 
+语言：CLASHGATE_LANG=en|zh（默认中文；LANG 以 en 开头时为英文）
 一键安装：curl -fsSL $INSTALL_RAW_URL | bash
 EOF
 }

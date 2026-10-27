@@ -1,20 +1,22 @@
 <h1 align="center">ClashGate</h1>
 
+<p align="center"><b>中文</b> · <a href="README.en.md">English: see README.en.md</a></p>
+
 <p align="center">
-  ClashGate · 轻量现代的 VPS 代理服务端与管理控制台 (v0.96)
+  ClashGate · 轻量现代的 VPS 代理服务端与管理控制台 (v0.97)
 </p>
 
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v0.96" src="https://img.shields.io/badge/version-v0.96-10b981" />
+  <img alt="Version: v0.97" src="https://img.shields.io/badge/version-v0.97-10b981" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
 ## ✨ 核心特性
 
 - **三种安装模式**：**无证书模式**（默认直出 VLESS Reality 节点）、**自动证书模式**（自动申请 Let's Encrypt 证书，支持端口验证与 Cloudflare DNS API 验证及自动续期）、**手动证书模式**（自备 `/etc/clashgate/certs/` 证书）。
-- **HTTPS 管理面板（v0.96）**：
+- **HTTPS 管理面板（v0.97）**：
   - **开箱即用**：支持 12 种入站协议（VLESS Reality、Hysteria2、Snell V5、Shadowsocks、AnyTLS、TUIC v5、TrustTunnel、ShadowQUIC、Mieru、Sudoku、HTTP、SOCKS5），安全参数（加密方式、混淆、SNI 池、指纹等）全部内置锁定，支持一键**重置密码/密钥**。
   - **首页直达**：实时流量统计（已代理流量 GB）、订阅链接（支持一键更换）、入站节点、Zashboard 控制台（含免填直连地址与 API 密钥）常驻首页；顶栏支持一键更新内核与检查版本更新。
   - **双向实时同步**：支持外部订阅（`proxy-providers`）、出站节点（含 `easytier` / `tailscale`）、易读配置转换，以及自定义服务端配置（支持自动修正证书路径与一键恢复默认 VlessReality 配置），所有改动经配置校验后同步至服务端与客户端订阅。
@@ -29,10 +31,19 @@ curl -fsSL https://raw.githubusercontent.com/ClashGate/ClashGate/main/install.sh
 
 ## ⌨️ 常用命令
 
-直接执行 `clashgate` 打开中文交互菜单，或使用子命令：
+直接执行 `clashgate` 打开交互菜单，或使用子命令：
 
 ```text
 clashgate [status | info | sub | reset-sub | passwd | reset-password | reset-secret | cert | restart | log | update | uninstall | install | help]
+```
+
+## 🌐 语言 / Language
+
+- **默认中文**。面板右上角（登录页与顶栏）可一键切换 `中文` / `English`，选择保存在浏览器 `localStorage` 与 cookie（`clashgate_lang`），刷新保持；后端提示同步使用所选语言。
+- **安装与 `clashgate` 命令**：设置环境变量 `CLASHGATE_LANG=en`（或 `zh`）即可切换提示语言；未设置时若 `LC_ALL` / `LANG` 以 `en` 开头则为英文，否则为中文。例如：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ClashGate/ClashGate/main/install.sh | CLASHGATE_LANG=en bash
 ```
 
 ## 📂 核心目录

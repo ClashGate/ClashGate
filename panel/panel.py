@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v0.96 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
+"""ClashGate v0.97 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -35,7 +35,10 @@ import uuid as uuidlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse, quote
 
-VERSION = "0.96"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
+
+VERSION = "0.97"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -2770,6 +2773,7 @@ def render_spa_html(title: str, boot_data: dict, fallback_html: str = "") -> str
         "<!doctype html><html lang=zh-CN><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{html.escape(title)}</title>"
+        "<link rel=icon type=image/png href=/favicon.png><link rel='shortcut icon' href=/favicon.ico>"
         f"<style>{css}</style>"
         f"<script>window.__CS_BOOT__ = {boot_json};</script>"
         "</head>"
@@ -2830,7 +2834,21 @@ class Panel(BaseHTTPRequestHandler):
                 pass
         return self.cfg.get("sub_token", "")
 
+    def lang(self):
+        return _detect_lang(self.headers.get("Cookie") or "", self.headers.get("Accept-Language") or "")
+
+    def tr(self, msg):
+        return _tr_msg(msg, self.lang())
+
     def send(self, code, body, ctype="text/html; charset=utf-8", headers=None):
+        if ctype.startswith("application/json") and isinstance(body, str) and self.lang() == "en":
+            try:
+                obj = json.loads(body)
+                if isinstance(obj, dict) and isinstance(obj.get("msg"), str):
+                    obj["msg"] = _tr_msg(obj["msg"], "en")
+                    body = json.dumps(obj, ensure_ascii=False)
+            except ValueError:
+                pass
         data = body.encode() if isinstance(body, str) else body
         try:
             self.send_response(code)
@@ -2854,7 +2872,7 @@ class Panel(BaseHTTPRequestHandler):
         self.send(303, "", headers=h)
 
     def flash(self, msg, ok=True):
-        self.redirect(f"/?ok={1 if ok else 0}&msg=" + quote(msg[:600]))
+        self.redirect(f"/?ok={1 if ok else 0}&msg=" + quote(self.tr(msg)[:600]))
 
     def build_client_state(self, s: dict, env: dict = None, st: dict = None) -> dict:
         if env is None:
@@ -3009,11 +3027,12 @@ class Panel(BaseHTTPRequestHandler):
 
     def simple(self, code, title, text):
         e = html.escape
+        title, text = self.tr(title), self.tr(text)
         body = (f"<div class='min-h-screen flex items-center justify-center p-6'>"
                 f"<div class='max-w-md w-full bg-white rounded-2xl border p-8 shadow-sm'>"
                 f"<h1 class='text-lg font-bold'>{e(title)}</h1>"
                 f"<p class='text-sm text-slate-600 mt-2 mb-4'>{e(text)}</p>"
-                f"<a class='inline-block px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm' href=/>返回控制台</a>"
+                f"<a class='inline-block px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm' href=/>{e(self.tr('返回控制台'))}</a>"
                 f"</div></div>")
         self.send(code, render_spa_html(title, {"page": "error", "version": VERSION}, body))
 
@@ -3055,10 +3074,18 @@ class Panel(BaseHTTPRequestHandler):
                 fp = resolve_dist_file(rel)
                 if os.path.isfile(fp):
                     ctype = "application/javascript; charset=utf-8" if fp.endswith(".js") else (
-                        "text/css; charset=utf-8" if fp.endswith(".css") else "application/octet-stream"
+                        "text/css; charset=utf-8" if fp.endswith(".css") else (
+                            "image/png" if fp.endswith(".png") else "application/octet-stream")
                     )
                     with open(fp, "rb") as f:
                         return self.send(200, f.read(), ctype)
+            return self.send(404, "not found", "text/plain")
+        if path in ("/favicon.ico", "/favicon.png", "/logo.png"):
+            fp = resolve_dist_file("favicon.ico" if path == "/favicon.ico" else ("assets/logo.png" if path == "/logo.png" else "favicon.png"))
+            if os.path.isfile(fp):
+                with open(fp, "rb") as f:
+                    return self.send(200, f.read(), "image/x-icon" if fp.endswith(".ico") else "image/png",
+                                     {"Cache-Control": "public, max-age=86400"})
             return self.send(404, "not found", "text/plain")
         if path == "/login":
             return self.send(200, self.login_page())
@@ -3583,6 +3610,7 @@ class Panel(BaseHTTPRequestHandler):
     # -- views
     def login_page(self, err=""):
         e = html.escape
+        err = self.tr(err)
         mver = get_mihomo_version_num()
         boot = {"page": "login", "version": VERSION, "mihomo_version": mver, "login_error": err}
         err_html = f"<div class=err>{e(err)}</div>" if err else ""
@@ -3591,9 +3619,9 @@ class Panel(BaseHTTPRequestHandler):
             f"<form method=post action=/login>"
             f"<input id=u name=username value=admin required>"
             f"<input id=p name=password type=password required>"
-            f"<button type=submit>登 录</button></form></div>"
+            f"<button type=submit>{e(self.tr('登 录'))}</button></form></div>"
         )
-        return render_spa_html("登录 · ClashGate", boot, fallback)
+        return render_spa_html(self.tr("登录 · ClashGate"), boot, fallback)
 
     def dashboard(self, s, initial_tab="inbounds"):
         q = parse_qs(urlparse(self.path).query)
