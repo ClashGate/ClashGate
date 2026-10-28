@@ -123,6 +123,13 @@ TABLE = [
     ("恢复默认配置失败：{}", "Failed to restore the default config: {}"),
     ("已恢复默认服务端配置，并生成默认 VlessReality 节点。", "Default server config restored and a default VlessReality node generated."),
     ("请先在服务器上执行 clashgate", "Run clashgate on the server first"),
+    ("已丢弃待重载草稿", "Discarded pending draft"),
+    ("丢弃草稿失败：{}", "Failed to discard draft: {}"),
+    ("当前密码错误", "Current password is incorrect"),
+    ("新密码长度至少 8 位", "New password must be at least 8 characters"),
+    ("两次输入的新密码不一致", "The two new passwords do not match"),
+    ("面板密码已修改", "Panel password updated"),
+    ("密码太短（至少 8 位）", "Password too short (at least 8 characters)"),
 ]
 
 _COMPILED = []

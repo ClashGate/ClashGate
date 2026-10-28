@@ -1,12 +1,203 @@
 @import "tailwindcss";
 
 @layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", sans-serif;
-    background-color: #f6faf8;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", sans-serif;
+    background-color: #f5faf7;
+    background-image: radial-gradient(1100px 380px at 50% -110px, rgba(16, 185, 129, 0.085), transparent 70%);
+    background-repeat: no-repeat;
     color: #0f172a;
   }
+
+  ::selection {
+    background-color: rgba(16, 185, 129, 0.16);
+    color: #064e3b;
+  }
+
   code, pre, textarea.font-mono, .font-mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-feature-settings: "liga" 0;
+  }
+}
+
+/* Linear / Stripe / Vercel inspired light-green SaaS surfaces */
+.cg-surface {
+  background-color: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.025),
+    0 8px 24px -10px rgba(15, 23, 42, 0.045),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+}
+
+.cg-surface-emerald {
+  background-color: #ffffff;
+  border: 1px solid rgba(167, 243, 208, 0.85);
+  box-shadow:
+    0 1px 2px rgba(16, 185, 129, 0.04),
+    0 12px 28px -12px rgba(16, 185, 129, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+}
+
+.cg-surface-emerald:hover {
+  border-color: rgba(110, 231, 183, 0.95);
+  box-shadow:
+    0 2px 4px rgba(16, 185, 129, 0.05),
+    0 14px 32px -12px rgba(16, 185, 129, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.cg-btn-primary {
+  background: linear-gradient(180deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  box-shadow:
+    0 1px 2px rgba(5, 150, 105, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: filter 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+}
+
+.cg-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+  box-shadow:
+    0 2px 6px rgba(5, 150, 105, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.cg-input {
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.cg-input:focus {
+  outline: none;
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.14);
+}
+
+/* Custom subtle scrollbars */
+textarea::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+textarea::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
+textarea::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.55);
+}
+
+/* Keyframes & Vue Transitions (150ms - 260ms, crisp ease-out) */
+@keyframes cgStatFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.cg-stat-card {
+  animation: cgStatFadeIn 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.cg-stat-delay-1 { animation-delay: 0ms; }
+.cg-stat-delay-2 { animation-delay: 45ms; }
+.cg-stat-delay-3 { animation-delay: 90ms; }
+.cg-stat-delay-4 { animation-delay: 135ms; }
+
+.cg-login-card {
+  animation: cgStatFadeIn 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Tab Content Transition */
+.cg-tab-enter-active {
+  transition: opacity 190ms cubic-bezier(0.16, 1, 0.3, 1), transform 190ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cg-tab-leave-active {
+  transition: opacity 120ms ease-in;
+}
+.cg-tab-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.cg-tab-leave-to {
+  opacity: 0;
+}
+
+/* Collapsible Drawer Transition (Pending Reload Diff & Subscription Import) */
+.cg-collapse-enter-active {
+  transition: max-height 220ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease-out, transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+.cg-collapse-leave-active {
+  transition: max-height 160ms ease-in, opacity 140ms ease-in, transform 150ms ease-in;
+  overflow: hidden;
+}
+.cg-collapse-enter-from,
+.cg-collapse-leave-to {
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.cg-collapse-enter-to,
+.cg-collapse-leave-from {
+  max-height: 520px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Modal Transition */
+.cg-modal-enter-active {
+  transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cg-modal-leave-active {
+  transition: opacity 150ms ease-in;
+}
+.cg-modal-enter-from,
+.cg-modal-leave-to {
+  opacity: 0;
+}
+.cg-modal-enter-active .cg-modal-panel {
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cg-modal-leave-active .cg-modal-panel {
+  transition: transform 150ms ease-in, opacity 150ms ease-in;
+}
+.cg-modal-enter-from .cg-modal-panel,
+.cg-modal-leave-to .cg-modal-panel {
+  opacity: 0;
+  transform: translateY(4px) scale(0.985);
+}
+
+/* Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-delay: 0ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 100ms !important;
+    scroll-behavior: auto !important;
+  }
+  .cg-stat-card,
+  .cg-login-card,
+  .cg-tab-enter-from,
+  .cg-tab-leave-to,
+  .cg-collapse-enter-from,
+  .cg-collapse-leave-to,
+  .cg-modal-enter-from .cg-modal-panel,
+  .cg-modal-leave-to .cg-modal-panel {
+    transform: none !important;
   }
 }

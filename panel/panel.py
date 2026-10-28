@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v0.99 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
+"""ClashGate v1.0 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -40,7 +40,7 @@ from urllib.parse import parse_qs, urlparse, quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 
-VERSION = "0.99"
+VERSION = "1.0"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -50,6 +50,7 @@ INBOUNDS = CS_ROOT + "/inbounds.json"
 PROXIES_JSON = CS_ROOT + "/proxies.json"
 PROVIDERS_JSON = CS_ROOT + "/providers.json"
 PENDING_RELOAD_JSON = CS_ROOT + "/pending_reload.json"
+PENDING_BASELINE_JSON = CS_ROOT + "/pending_baseline.json"
 TRAFFIC_JSON = CS_ROOT + "/traffic.json"
 MIHOMO_DIR = CS_ROOT
 CONF = MIHOMO_DIR + "/config.yaml"
@@ -2228,12 +2229,149 @@ def save_pending_reload(state: dict):
     atomic_write(PENDING_RELOAD_JSON, json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n", 0o600)
 
 
-def clear_pending_reload():
+_TRACKED_DRAFT_FILES = (
+    NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON,
+    FRAG_REALITY, FRAG_EXTRA, FRAG_PROXIES, FRAG_PROVIDERS,
+    FRAG_CONTROLLER, CUSTOM_CONF,
+)
+
+
+def _conf_digest() -> str:
     try:
-        if os.path.exists(PENDING_RELOAD_JSON):
-            os.remove(PENDING_RELOAD_JSON)
+        with open(CONF, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
     except OSError:
+        return ""
+
+
+def _ensure_pending_baseline():
+    """Capture a snapshot of live draft files right before the first pending mutation."""
+    st = load_pending_reload()
+    has_pending = bool(st.get("items") or st.get("sub_token") or st.get("mihomo_secret"))
+    if has_pending and os.path.isfile(PENDING_BASELINE_JSON):
+        return
+    files = {}
+    for p in _TRACKED_DRAFT_FILES:
+        try:
+            with open(p) as f:
+                files[p] = f.read()
+        except FileNotFoundError:
+            files[p] = None
+    snap = {"conf_sha256": _conf_digest(), "files": files}
+    atomic_write(PENDING_BASELINE_JSON, json.dumps(snap, ensure_ascii=False) + "\n", 0o600)
+
+
+def clear_pending_reload():
+    for p in (PENDING_RELOAD_JSON, PENDING_BASELINE_JSON):
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except OSError:
+            pass
+
+
+def _reconstruct_draft_from_live_conf():
+    """Fallback reconstruction of draft files directly from live CONF + ENV_FILE + client/proxies.yaml."""
+    env = read_env()
+    atomic_write(FRAG_CONTROLLER, render_controller_fragment(env), 0o640)
+    if not os.path.isfile(CONF):
+        return
+    with open(CONF) as f:
+        conf_raw = f.read()
+    live_clients_by_name = {}
+    try:
+        with open(CLIENT_DIR + "/proxies.yaml") as f:
+            for cp in parse_mihomo_proxies(f.read()):
+                if isinstance(cp, dict) and cp.get("name"):
+                    live_clients_by_name[str(cp["name"])] = cp
+    except Exception:
         pass
+    new_inbounds, new_proxies, new_providers = parse_custom_config_state(conf_raw, env)
+    for inb in new_inbounds:
+        nm = inb.get("name")
+        if nm in live_clients_by_name:
+            inb["client"] = live_clients_by_name[nm]
+    if is_custom_config_mode():
+        atomic_write(CUSTOM_CONF, conf_raw, 0o640)
+        atomic_write(NODES_TSV, "", 0o640)
+        atomic_write(INBOUNDS, json.dumps(new_inbounds, indent=2, ensure_ascii=False), 0o600)
+        atomic_write(PROXIES_JSON, json.dumps(new_proxies, indent=2, ensure_ascii=False), 0o600)
+        atomic_write(PROVIDERS_JSON, json.dumps(new_providers, indent=2, ensure_ascii=False), 0o600)
+        return
+    reality_yaml_names = set(re.findall(r"^  - name:\s*(\S+)\s*$", conf_raw, re.M))
+    restored_nodes = []
+    restored_inbs = []
+    for inb in new_inbounds:
+        nm = inb.get("name", "")
+        lst = inb.get("listener") or {}
+        cli = inb.get("client") or {}
+        rcfg = lst.get("reality-config") if isinstance(lst.get("reality-config"), dict) else None
+        if nm in reality_yaml_names and rcfg:
+            ropts = cli.get("reality-opts") if isinstance(cli.get("reality-opts"), dict) else {}
+            sids = rcfg.get("short-id")
+            sid = str(sids[0] if isinstance(sids, list) and sids else (sids or ropts.get("short-id") or ""))
+            snames = rcfg.get("server-names")
+            sni = str(snames[0] if isinstance(snames, list) and snames else cli.get("servername") or "")
+            priv = str(rcfg.get("private-key") or "")
+            pub = str(ropts.get("public-key") or x25519_pub_from_priv(priv))
+            dec = str(lst.get("decryption") or "")
+            enc = str(cli.get("encryption") or derive_vless_encryption(dec))
+            restored_nodes.append({
+                "name": nm,
+                "port": int(inb["port"]),
+                "uuid": str(cli.get("uuid") or ""),
+                "priv": priv,
+                "pub": pub,
+                "sid": sid,
+                "sni": sni,
+                "dec": dec,
+                "enc": enc,
+            })
+        else:
+            restored_inbs.append(inb)
+    cleaned_inbs = _dedup_inbounds(restored_inbs)
+    atomic_write(NODES_TSV, render_nodes_tsv(restored_nodes), 0o640)
+    atomic_write(FRAG_REALITY, render_reality(restored_nodes), 0o640)
+    atomic_write(INBOUNDS, json.dumps(cleaned_inbs, indent=2, ensure_ascii=False), 0o600)
+    atomic_write(FRAG_EXTRA, render_extra(cleaned_inbs), 0o640)
+    atomic_write(PROXIES_JSON, json.dumps(new_proxies, indent=2, ensure_ascii=False), 0o600)
+    atomic_write(FRAG_PROXIES, dump_yaml_proxies(new_proxies), 0o640)
+    atomic_write(PROVIDERS_JSON, json.dumps(new_providers, indent=2, ensure_ascii=False), 0o600)
+    atomic_write(FRAG_PROVIDERS, dump_yaml_providers(new_providers), 0o640)
+
+
+def discard_pending_reload():
+    """Roll back all draft files to match current live CONF without reloading Mihomo or touching CONF."""
+    global _PENDING_UFW_BASELINE
+    restored = False
+    if os.path.isfile(PENDING_BASELINE_JSON):
+        try:
+            with open(PENDING_BASELINE_JSON) as f:
+                snap = json.load(f)
+            if isinstance(snap, dict) and isinstance(snap.get("files"), dict):
+                cur_digest = _conf_digest()
+                if not cur_digest or snap.get("conf_sha256") == cur_digest:
+                    for p, data in snap["files"].items():
+                        if p not in _TRACKED_DRAFT_FILES:
+                            continue
+                        if data is None:
+                            if os.path.exists(p):
+                                os.remove(p)
+                        else:
+                            atomic_write(p, data, 0o600 if p.endswith(".json") else 0o640)
+                    restored = True
+        except Exception:
+            restored = False
+    if not restored:
+        _reconstruct_draft_from_live_conf()
+    else:
+        # Ensure controller fragment also matches live env
+        env = read_env()
+        if os.path.exists(FRAG_CONTROLLER) or env.get("MODE") == "auto-cert":
+            atomic_write(FRAG_CONTROLLER, render_controller_fragment(env), 0o640)
+    _PENDING_UFW_BASELINE = None
+    _RECENT_ADD_REQS.clear()
+    clear_pending_reload()
 
 
 def record_pending_reload(op: str, name: str = "", port: int = None, kind: str = "", detail: str = "",
@@ -2302,6 +2440,7 @@ def _dedup_inbounds(items: list) -> list:
 def save_inbounds(new: list):
     """Persist inbounds.json and server/client config fragments to disk without reloading Mihomo."""
     global _PENDING_UFW_BASELINE
+    _ensure_pending_baseline()
     cur_nodes = read_nodes()
     if _PENDING_UFW_BASELINE is None:
         _PENDING_UFW_BASELINE = collect_ufw_specs(cur_nodes, load_inbounds())
@@ -2315,6 +2454,7 @@ def save_inbounds(new: list):
 def save_nodes(new_nodes: list):
     """Persist install-time VLESS Reality nodes (nodes.tsv) and config fragments to disk without reloading Mihomo."""
     global _PENDING_UFW_BASELINE
+    _ensure_pending_baseline()
     cur_inbs = load_inbounds()
     if _PENDING_UFW_BASELINE is None:
         _PENDING_UFW_BASELINE = collect_ufw_specs(read_nodes(), cur_inbs)
@@ -2401,6 +2541,7 @@ def apply_nodes(new_nodes: list):
 
 def save_server_proxies(new_proxies: list):
     """Persist server outbound proxies to disk ONLY (proxies.json + proxies.extra.yaml) without writing live CONF or reloading Mihomo."""
+    _ensure_pending_baseline()
     files = (PROXIES_JSON, FRAG_PROXIES, CUSTOM_CONF) if is_custom_config_mode() else (PROXIES_JSON, FRAG_PROXIES)
     backup = {}
     for p in files:
@@ -2458,6 +2599,7 @@ def apply_server_proxies(new_proxies: list):
 
 def save_proxy_providers(new_providers: dict):
     """Persist server proxy-providers to disk ONLY (providers.json + providers.extra.yaml) without writing live CONF or reloading Mihomo."""
+    _ensure_pending_baseline()
     files = (PROVIDERS_JSON, FRAG_PROVIDERS, CUSTOM_CONF) if is_custom_config_mode() else (PROVIDERS_JSON, FRAG_PROVIDERS)
     backup = {}
     for p in files:
@@ -3497,6 +3639,10 @@ class Panel(BaseHTTPRequestHandler):
             return self.redirect("/login", "cs_session=; Max-Age=0; Path=/")
         if path in ("/action/restart", "/action/reload"):
             return self.do_action(s, path.rsplit("/", 1)[1])
+        if path == "/action/discard-pending":
+            return self.do_discard_pending(s)
+        if path == "/action/change-password":
+            return self.do_change_password(s, form)
         if path == "/action/update-core":
             return self.do_update_core(s, form)
         if path == "/action/check-update":
@@ -3585,6 +3731,14 @@ class Panel(BaseHTTPRequestHandler):
         recent = [t for t in self.fails.get(ip, []) if now - t < 600]
         if len(recent) >= 5:
             return self.send(429, self.login_page("尝试次数过多，请 10 分钟后再试。"))
+        if self.cfg_path and os.path.isfile(self.cfg_path):
+            try:
+                with open(self.cfg_path) as f:
+                    d = json.load(f)
+                if isinstance(d, dict) and d.get("password_hash"):
+                    self.cfg["password_hash"] = d["password_hash"]
+            except Exception:
+                pass
         user, pw = form.get("username", ""), form.get("password", "")
         if hmac.compare_digest(user, self.cfg["username"]) and verify_password(pw, self.cfg["password_hash"]):
             self.fails.pop(ip, None)
@@ -3597,6 +3751,43 @@ class Panel(BaseHTTPRequestHandler):
         recent.append(now)
         self.fails[ip] = recent
         self.send(401, self.login_page("用户名或密码错误。"))
+
+    def do_discard_pending(self, s):
+        with LOCK:
+            try:
+                discard_pending_reload()
+            except Exception as e:
+                return self.respond_mutation(s, f"丢弃草稿失败：{e}", False)
+        return self.respond_mutation(s, "已丢弃待重载草稿", True)
+
+    def do_change_password(self, s, form):
+        cur_pw = form.get("current_password", "")
+        new_pw = form.get("new_password", "")
+        confirm_pw = form.get("confirm_password", "")
+        with LOCK:
+            disk_cfg = dict(self.cfg)
+            cfg_file = self.cfg_path or (CS_ROOT + "/panel.json" if os.path.isfile(CS_ROOT + "/panel.json") else "")
+            if cfg_file and os.path.isfile(cfg_file):
+                try:
+                    with open(cfg_file) as f:
+                        loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        disk_cfg.update(loaded)
+                        self.cfg.update(loaded)
+                except Exception:
+                    pass
+            if not cur_pw or not verify_password(cur_pw, disk_cfg.get("password_hash", "")):
+                return self.respond_mutation(s, "当前密码错误", False)
+            if len(new_pw) < 8:
+                return self.respond_mutation(s, "新密码长度至少 8 位", False)
+            if confirm_pw and new_pw != confirm_pw:
+                return self.respond_mutation(s, "两次输入的新密码不一致", False)
+            new_hash = hash_password(new_pw)
+            self.cfg["password_hash"] = new_hash
+            disk_cfg["password_hash"] = new_hash
+            if cfg_file:
+                atomic_write(cfg_file, json.dumps(disk_cfg, indent=2, ensure_ascii=False) + "\n", 0o600)
+        return self.respond_mutation(s, "面板密码已修改", True)
 
     def do_action(self, s, action):
         global _PENDING_UFW_BASELINE
@@ -3666,6 +3857,7 @@ class Panel(BaseHTTPRequestHandler):
     def do_reset_sub(self, s):
         new_token = secrets.token_hex(24)
         with LOCK:
+            _ensure_pending_baseline()
             record_pending_reload(
                 op="reset-sub",
                 kind="sub",
@@ -3680,6 +3872,7 @@ class Panel(BaseHTTPRequestHandler):
         new_secret = "".join(secrets.choice(alphabet) for _ in range(20))
         with LOCK:
             try:
+                _ensure_pending_baseline()
                 env = read_env()
                 env_draft = dict(env)
                 env_draft["MIHOMO_SECRET"] = new_secret
@@ -4063,21 +4256,18 @@ class Panel(BaseHTTPRequestHandler):
         )
         zb_sec = (
             f"<section id=zashboard-card><h2>Zashboard 控制面板</h2>"
-            f"<div id=zb-url>{e(state['zb_url'])}</div>"
-            f"<div id=zb-secret>{e(state.get('mihomo_secret', ''))}</div>"
+            f"<div id=zb-url>••••••••••••••••••••••••</div>"
+            f"<div id=zb-secret>••••••••••••</div>"
             f"<a href='{e(state['zb_url'] or '#')}' target=_blank rel=noopener>打开 Zashboard</a>"
             f"<button type=button>复制地址</button>"
             f"<form method=post action=/action/reset-secret>{hid}<button type=submit>重置 API 密钥</button></form></section>"
         )
-        sub_qr_img = (
-            f"<img id=sub-qr src='{e(state.get('sub_qr_data_url', ''))}' alt='订阅二维码'>"
-            if state.get("sub_qr_data_url") else ""
-        )
         sub_sec = (
-            f"<section><h2>客户端订阅链接</h2><div id=sub-url>{e(state['sub_url'])}</div>"
-            f"<div><span>订阅二维码</span>{sub_qr_img}</div>"
+            f"<section id=sub-card><h2>客户端订阅链接</h2>"
             f"<button type=button>复制订阅链接</button>"
-            f"<form method=post action=/action/reset-sub>{hid}<button type=submit>更换订阅链接</button></form></section>"
+            f"<button type=button>二维码</button>"
+            f"<form method=post action=/action/reset-sub>{hid}<button type=submit>更换订阅链接</button></form>"
+            f"<button type=button>导入连接</button></section>"
             if state["sub_url"] else ""
         )
         mver = state.get("mihomo_version", "")

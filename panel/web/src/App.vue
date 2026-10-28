@@ -1,11 +1,11 @@
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { t, lang, setLang } from './i18n.js'
 
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '0.99',
+  version: '1.0',
   mihomo_version: '',
   csrf: '',
   login_error: '',
@@ -51,7 +51,7 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '0.99',
+  version: boot.version || '1.0',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
@@ -75,6 +75,105 @@ const state = reactive({
 
 const showPendingDiff = ref(false)
 const showSubQrModal = ref(false)
+const showSubImport = ref(false)
+
+// Zashboard sensitive fields: masked by default, click to reveal, auto-mask on blur / tab switch / outside click
+const zbUrlRevealed = ref(false)
+const zbSecretRevealed = ref(false)
+const zbUrlEl = ref(null)
+const zbSecretEl = ref(null)
+
+function revealZbUrl() {
+  if (!state.zb_url) return
+  zbUrlRevealed.value = true
+  nextTick(() => {
+    if (zbUrlEl.value && typeof zbUrlEl.value.focus === 'function') {
+      zbUrlEl.value.focus()
+    }
+  })
+}
+
+function revealZbSecret() {
+  if (!state.mihomo_secret) return
+  zbSecretRevealed.value = true
+  nextTick(() => {
+    if (zbSecretEl.value && typeof zbSecretEl.value.focus === 'function') {
+      zbSecretEl.value.focus()
+    }
+  })
+}
+
+function maskAllSensitive() {
+  zbUrlRevealed.value = false
+  zbSecretRevealed.value = false
+}
+
+function handleDocumentPointerDown(ev) {
+  const target = ev && ev.target
+  if (zbUrlRevealed.value && zbUrlEl.value && target && !zbUrlEl.value.contains(target)) {
+    zbUrlRevealed.value = false
+  }
+  if (zbSecretRevealed.value && zbSecretEl.value && target && !zbSecretEl.value.contains(target)) {
+    zbSecretRevealed.value = false
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    maskAllSensitive()
+  }
+}
+
+// Change Password Modal state
+const showPasswordModal = ref(false)
+const passwordForm = reactive({
+  current_password: '',
+  new_password: '',
+  confirm_password: '',
+})
+
+function openPasswordModal() {
+  passwordForm.current_password = ''
+  passwordForm.new_password = ''
+  passwordForm.confirm_password = ''
+  showPasswordModal.value = true
+}
+
+function closePasswordModal() {
+  showPasswordModal.value = false
+  passwordForm.current_password = ''
+  passwordForm.new_password = ''
+  passwordForm.confirm_password = ''
+}
+
+async function submitChangePassword() {
+  if (busyKey.value) return
+  if (!passwordForm.current_password) {
+    showToast(t('请输入当前密码'), false)
+    return
+  }
+  if (!passwordForm.new_password || passwordForm.new_password.length < 8) {
+    showToast(t('新密码长度至少 8 位'), false)
+    return
+  }
+  if (passwordForm.new_password !== passwordForm.confirm_password) {
+    showToast(t('两次输入的新密码不一致'), false)
+    return
+  }
+  const res = await postAction(
+    '/action/change-password',
+    {
+      current_password: passwordForm.current_password,
+      new_password: passwordForm.new_password,
+      confirm_password: passwordForm.confirm_password,
+    },
+    '/action/change-password'
+  )
+  if (res && res.ok) {
+    closePasswordModal()
+  }
+}
+
 const confirmDialog = reactive({
   show: false,
   title: '',
@@ -104,6 +203,17 @@ async function acceptConfirmDialog() {
   if (typeof fn === 'function') {
     await fn()
   }
+}
+
+function confirmDiscardPending() {
+  if (state.pending_reload_count <= 0) return
+  openConfirmDialog({
+    title: t('丢弃草稿'),
+    message: t('确定丢弃所有待重载草稿？丢弃后未生效的变更将全部撤销，回到当前线上配置。'),
+    confirmText: t('确认丢弃'),
+    tone: 'rose',
+    onConfirm: () => postAction('/action/discard-pending', {}, '/action/discard-pending'),
+  })
 }
 
 function formatPendingItem(item) {
@@ -172,6 +282,10 @@ function detectInitialTab() {
 }
 
 const activeTab = ref(detectInitialTab())
+watch(activeTab, () => {
+  maskAllSensitive()
+})
+
 const busyKey = ref('')
 const copiedKey = ref('')
 const toast = reactive({ show: false, msg: '', ok: true })
@@ -349,14 +463,13 @@ async function updateCoreDirect() {
       return
     }
     const startData = await startRes.json().catch(() => null)
-    // If server finished synchronously (e.g. direct response with running === false)
     if (startData && startData.running === false) {
       if (startData.state) applyServerState(startData.state)
       showToast(startData.msg || (startData.ok ? t('内核更新成功') : t('更新内核失败')), !!startData.ok)
       return
     }
   } catch {
-    // Even if starting the update blips the network, fall through to poll /api/update-core-status
+    // Fall through to poll /api/update-core-status
   }
 
   const deadline = Date.now() + 180000
@@ -441,8 +554,14 @@ function applyServerState(newState) {
   if (newState.sub_url !== undefined) state.sub_url = newState.sub_url
   if (newState.sub_qr_data_url !== undefined) state.sub_qr_data_url = newState.sub_qr_data_url
   if (!state.sub_url || !state.sub_qr_data_url) showSubQrModal.value = false
-  if (newState.zb_url !== undefined) state.zb_url = newState.zb_url
-  if (newState.mihomo_secret !== undefined) state.mihomo_secret = newState.mihomo_secret
+  if (newState.zb_url !== undefined) {
+    if (newState.zb_url !== state.zb_url) zbUrlRevealed.value = false
+    state.zb_url = newState.zb_url
+  }
+  if (newState.mihomo_secret !== undefined) {
+    if (newState.mihomo_secret !== state.mihomo_secret) zbSecretRevealed.value = false
+    state.mihomo_secret = newState.mihomo_secret
+  }
   if (newState.srv_cfg_url !== undefined) state.srv_cfg_url = newState.srv_cfg_url
   if (newState.controller_port !== undefined) state.controller_port = newState.controller_port
   if (newState.controller_listening !== undefined) state.controller_listening = newState.controller_listening
@@ -522,7 +641,6 @@ async function postAction(url, params = {}, key = url) {
       showToast(t('请求超时（120s），请稍后刷新查看状态'), false)
       return null
     }
-    // If reload / restart momentarily dropped proxy connection, re-sync state via GET /api/state
     try {
       await new Promise((r) => setTimeout(r, 900))
       const stRes = await fetch('/api/state', {
@@ -627,7 +745,11 @@ function resetZbSecret() {
     message: t('确定重置 Zashboard API 密钥？需点击顶部「重载配置」后直连地址才会更新。'),
     confirmText: t('确认重置'),
     tone: 'amber',
-    onConfirm: () => postAction('/action/reset-secret', {}, 'reset-secret'),
+    onConfirm: async () => {
+      maskAllSensitive()
+      await postAction('/action/reset-secret', {}, 'reset-secret')
+      maskAllSensitive()
+    },
   })
 }
 
@@ -818,6 +940,9 @@ onMounted(() => {
   window.addEventListener('popstate', () => {
     activeTab.value = detectInitialTab()
   })
+  window.addEventListener('blur', maskAllSensitive)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  document.addEventListener('pointerdown', handleDocumentPointerDown)
   if (pageMode.value === 'dashboard') {
     statePollTimer = setInterval(refreshServerStateSilent, 15000)
   }
@@ -825,47 +950,56 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (statePollTimer) clearInterval(statePollTimer)
+  window.removeEventListener('blur', maskAllSensitive)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
 })
 </script>
 
 <template>
-  <!-- Login View (Bright, clean, welcoming light-green SaaS style) -->
+  <!-- Login View: Bright, refined Linear/Stripe-inspired light-green SaaS sign-in -->
   <div
     v-if="pageMode === 'login'"
-    class="min-h-screen flex items-center justify-center p-6 bg-gradient-to-br from-[#f0fdf6] via-[#f8fcf9] to-[#e6faef]"
+    class="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#f1fbf6] via-[#f7fbf9] to-[#edf8f2]"
   >
     <div
-      class="w-full max-w-md bg-white rounded-3xl shadow-[0_12px_40px_-10px_rgba(16,185,129,0.14)] border border-emerald-100 p-8 sm:p-9"
+      class="cg-login-card relative overflow-hidden w-full max-w-[420px] bg-white rounded-3xl shadow-[0_2px_6px_rgba(15,23,42,0.03),0_20px_48px_-12px_rgba(16,185,129,0.14)] border border-emerald-100/90 p-8 sm:p-9"
     >
-      <div class="flex justify-end -mt-2 mb-2">
+      <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 via-emerald-500 to-teal-500"></div>
+      <div class="flex justify-end -mt-1 mb-3">
         <button
           type="button"
           @click="setLang(lang === 'zh' ? 'en' : 'zh')"
-          class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-emerald-50 border border-slate-200 text-slate-600 transition cursor-pointer"
+          class="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-50 hover:bg-emerald-50 hover:text-emerald-800 border border-slate-200/80 text-slate-600 transition cursor-pointer"
         >
           {{ lang === 'zh' ? 'English' : '中文' }}
         </button>
       </div>
       <div class="flex items-center gap-3.5 mb-7">
-        <img src="/assets/logo.png" alt="ClashGate" class="w-12 h-12 rounded-2xl object-cover shadow-md shadow-emerald-500/20 bg-white" />
+        <img
+          src="/assets/logo.png"
+          alt="ClashGate"
+          class="w-12 h-12 rounded-2xl object-cover shadow-md shadow-emerald-500/15 ring-1 ring-emerald-500/10 bg-white"
+        />
         <div>
           <div class="flex items-center gap-2">
             <h1 class="text-xl font-bold text-slate-900 tracking-tight">ClashGate</h1>
             <span
-              class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80"
+              class="px-2.5 py-0.5 text-[11px] font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80 tabular-nums"
             >
               {{ topbarVersionText }}
             </span>
           </div>
-          <p class="text-xs text-slate-500 mt-0.5">{{ t('服务端管理控制台 · 请登录') }}</p>
+          <p class="text-xs text-slate-500 mt-1">{{ t('服务端管理控制台 · 请登录') }}</p>
         </div>
       </div>
 
       <div
         v-if="boot.login_error"
-        class="mb-5 rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-700 font-medium"
+        class="mb-5 rounded-xl bg-rose-50/90 border border-rose-200/90 px-4 py-3 text-xs text-rose-700 font-medium flex items-center gap-2"
       >
-        {{ boot.login_error }}
+        <span class="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center shrink-0">!</span>
+        <span>{{ boot.login_error }}</span>
       </div>
 
       <form method="post" action="/login" class="space-y-4">
@@ -877,7 +1011,7 @@ onUnmounted(() => {
             value="admin"
             autocomplete="username"
             required
-            class="w-full h-10 px-3.5 rounded-xl border border-slate-200 bg-slate-50/60 focus:bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15 transition"
+            class="cg-input w-full h-10 px-3.5 rounded-xl border border-slate-200/90 bg-slate-50/50 focus:bg-white text-sm text-slate-900"
           />
         </div>
         <div>
@@ -890,12 +1024,12 @@ onUnmounted(() => {
             :placeholder="t('请输入面板密码')"
             required
             autofocus
-            class="w-full h-10 px-3.5 rounded-xl border border-slate-200 bg-slate-50/60 focus:bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15 transition"
+            class="cg-input w-full h-10 px-3.5 rounded-xl border border-slate-200/90 bg-slate-50/50 focus:bg-white text-sm text-slate-900"
           />
         </div>
         <button
           type="submit"
-          class="w-full h-10 mt-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-sm shadow-emerald-600/20 transition cursor-pointer"
+          class="cg-btn-primary w-full h-10 mt-2 rounded-xl font-semibold text-sm cursor-pointer"
         >
           {{ t('登 录') }}
         </button>
@@ -903,8 +1037,8 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <!-- Dashboard View (Bright, airy, light-green modern SaaS console) -->
-  <div v-else class="min-h-screen bg-[#f6faf8] text-slate-900 flex flex-col">
+  <!-- Dashboard View: Bright, airy, high-craft light-green SaaS console -->
+  <div v-else class="min-h-screen text-slate-900 flex flex-col">
     <!-- Toast Notification -->
     <transition
       enter-active-class="transition duration-200 ease-out"
@@ -916,11 +1050,11 @@ onUnmounted(() => {
     >
       <div
         v-if="toast.show"
-        class="fixed top-18 right-6 z-50 max-w-md rounded-2xl px-4 py-3 shadow-lg border flex items-center gap-2.5 text-sm font-medium bg-white"
+        class="fixed top-18 right-6 z-50 max-w-md rounded-2xl px-4 py-3 shadow-[0_10px_30px_-8px_rgba(15,23,42,0.14)] border flex items-center gap-2.5 text-sm font-medium bg-white/95 backdrop-blur-md"
         :class="
           toast.ok
-            ? 'border-emerald-200 text-emerald-950 shadow-emerald-500/10'
-            : 'border-rose-200 text-rose-950 shadow-rose-500/10'
+            ? 'border-emerald-200/90 text-emerald-950'
+            : 'border-rose-200/90 text-rose-950'
         "
       >
         <span
@@ -929,113 +1063,207 @@ onUnmounted(() => {
         >
           {{ toast.ok ? '✓' : '!' }}
         </span>
-        <span class="break-all">{{ toast.msg }}</span>
+        <span class="break-all leading-snug">{{ toast.msg }}</span>
       </div>
     </transition>
 
     <!-- In-Panel Confirmation Modal -->
-    <div
-      v-if="confirmDialog.show"
-      id="confirm-modal"
-      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/30 backdrop-blur-xs"
-      @click.self="closeConfirmDialog"
-    >
+    <Transition name="cg-modal">
       <div
-        class="w-full max-w-md bg-white rounded-2xl border border-emerald-100 p-6 shadow-xl space-y-4"
+        v-if="confirmDialog.show"
+        id="confirm-modal"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/25 backdrop-blur-[2px]"
+        @click.self="closeConfirmDialog"
       >
-        <div class="flex items-center justify-between gap-2">
-          <h3 class="text-base font-bold text-slate-900">{{ confirmDialog.title }}</h3>
-          <button
-            type="button"
-            @click="closeConfirmDialog"
-            class="text-slate-400 hover:text-slate-600 text-sm px-2 py-0.5 rounded-lg cursor-pointer"
-          >
-            ✕
-          </button>
-        </div>
-        <p class="text-sm text-slate-600 leading-relaxed">{{ confirmDialog.message }}</p>
-        <div class="flex items-center justify-end gap-2.5 pt-1">
-          <button
-            type="button"
-            @click="closeConfirmDialog"
-            class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
-          >
-            {{ t('取消') }}
-          </button>
-          <button
-            type="button"
-            @click="acceptConfirmDialog"
-            class="px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
-            :class="
-              confirmDialog.tone === 'rose'
-                ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-xs'
-                : confirmDialog.tone === 'emerald'
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
-                  : 'bg-amber-500 hover:bg-amber-400 text-white shadow-xs'
-            "
-          >
-            {{ confirmDialog.confirmText || t('确认') }}
-          </button>
+        <div
+          class="cg-modal-panel w-full max-w-md bg-white rounded-2xl border border-slate-200/90 p-6 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18)] space-y-4"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="text-base font-bold text-slate-900 tracking-tight">{{ confirmDialog.title }}</h3>
+            <button
+              type="button"
+              @click="closeConfirmDialog"
+              class="text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-sm w-7 h-7 flex items-center justify-center rounded-lg transition cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+          <p class="text-sm text-slate-600 leading-relaxed">{{ confirmDialog.message }}</p>
+          <div class="flex items-center justify-end gap-2.5 pt-2">
+            <button
+              type="button"
+              @click="closeConfirmDialog"
+              class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition cursor-pointer"
+            >
+              {{ t('取消') }}
+            </button>
+            <button
+              type="button"
+              @click="acceptConfirmDialog"
+              class="px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+              :class="
+                confirmDialog.tone === 'rose'
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-xs'
+                  : confirmDialog.tone === 'emerald'
+                    ? 'cg-btn-primary'
+                    : 'bg-amber-500 hover:bg-amber-400 text-white shadow-xs'
+              "
+            >
+              {{ confirmDialog.confirmText || t('确认') }}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
+
+    <!-- Change Password Modal -->
+    <Transition name="cg-modal">
+      <div
+        v-if="showPasswordModal"
+        id="change-password-modal"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/25 backdrop-blur-[2px]"
+        @click.self="closePasswordModal"
+      >
+        <div
+          class="cg-modal-panel w-full max-w-md bg-white rounded-2xl border border-emerald-100/90 p-6 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18)] space-y-4"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <h3 class="text-base font-bold text-slate-900 tracking-tight">{{ t('修改面板密码') }}</h3>
+              <p class="text-xs text-slate-500 mt-1">{{ t('更新管理员账号 admin 的登录密码，修改后当前会话保持有效。') }}</p>
+            </div>
+            <button
+              type="button"
+              @click="closePasswordModal"
+              class="text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-sm w-7 h-7 flex items-center justify-center rounded-lg transition cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+
+          <form @submit.prevent="submitChangePassword" class="space-y-3.5 pt-1">
+            <div>
+              <label for="cp-current" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('当前密码') }}</label>
+              <input
+                id="cp-current"
+                v-model="passwordForm.current_password"
+                name="current_password"
+                type="password"
+                autocomplete="current-password"
+                :placeholder="t('请输入当前密码')"
+                required
+                class="cg-input w-full h-10 px-3.5 rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white text-sm text-slate-900"
+              />
+            </div>
+            <div>
+              <label for="cp-new" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('新密码') }}</label>
+              <input
+                id="cp-new"
+                v-model="passwordForm.new_password"
+                name="new_password"
+                type="password"
+                autocomplete="new-password"
+                :placeholder="t('请输入新密码（至少 8 位）')"
+                required
+                class="cg-input w-full h-10 px-3.5 rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white text-sm text-slate-900"
+              />
+            </div>
+            <div>
+              <label for="cp-confirm" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('确认新密码') }}</label>
+              <input
+                id="cp-confirm"
+                v-model="passwordForm.confirm_password"
+                name="confirm_password"
+                type="password"
+                autocomplete="new-password"
+                :placeholder="t('请再次输入新密码')"
+                required
+                class="cg-input w-full h-10 px-3.5 rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white text-sm text-slate-900"
+              />
+            </div>
+            <div class="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                @click="closePasswordModal"
+                class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition cursor-pointer"
+              >
+                {{ t('取消') }}
+              </button>
+              <button
+                type="submit"
+                :disabled="busyKey === '/action/change-password'"
+                class="cg-btn-primary px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-50 cursor-pointer"
+              >
+                {{ busyKey === '/action/change-password' ? t('保存中…') : t('确认修改') }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Subscription QR Code Modal (only for sub_url) -->
-    <div
-      v-if="showSubQrModal && state.sub_url && state.sub_qr_data_url"
-      id="sub-qr-modal"
-      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/30 backdrop-blur-xs"
-      @click.self="showSubQrModal = false"
-    >
+    <Transition name="cg-modal">
       <div
-        class="w-full max-w-sm bg-white rounded-2xl border border-emerald-100 p-6 shadow-xl space-y-4"
+        v-if="showSubQrModal && state.sub_url && state.sub_qr_data_url"
+        id="sub-qr-modal"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/25 backdrop-blur-[2px]"
+        @click.self="showSubQrModal = false"
       >
-        <div class="flex items-center justify-between gap-2">
-          <h3 class="text-base font-bold text-slate-900">{{ t('订阅二维码') }}</h3>
-          <button
-            type="button"
-            @click="showSubQrModal = false"
-            class="text-slate-400 hover:text-slate-600 text-sm px-2 py-0.5 rounded-lg cursor-pointer"
-          >
-            ✕
-          </button>
-        </div>
-        <div class="flex flex-col items-center gap-3 py-2">
-          <img
-            id="sub-qr"
-            :src="state.sub_qr_data_url"
-            :alt="t('订阅二维码')"
-            class="w-48 h-48 rounded-2xl bg-white p-2 border border-emerald-200/80 shadow-xs"
-          />
-          <p class="text-xs text-slate-500 text-center">{{ t('扫码导入 Clash / Mihomo 订阅') }}</p>
-        </div>
-        <div class="flex items-center justify-end gap-2 pt-1">
-          <button
-            type="button"
-            @click="copyRaw(state.sub_url, 'sub-url-modal')"
-            class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
-          >
-            {{ copiedKey === 'sub-url-modal' ? t('已复制') : t('复制订阅链接') }}
-          </button>
-          <button
-            type="button"
-            @click="showSubQrModal = false"
-            class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
-          >
-            {{ t('关闭') }}
-          </button>
+        <div
+          class="cg-modal-panel w-full max-w-sm bg-white rounded-2xl border border-emerald-100/90 p-6 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18)] space-y-4"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="text-base font-bold text-slate-900 tracking-tight">{{ t('订阅二维码') }}</h3>
+            <button
+              type="button"
+              @click="showSubQrModal = false"
+              class="text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-sm w-7 h-7 flex items-center justify-center rounded-lg transition cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+          <div class="flex flex-col items-center gap-3 py-2">
+            <img
+              id="sub-qr"
+              :src="state.sub_qr_data_url"
+              :alt="t('订阅二维码')"
+              class="w-48 h-48 rounded-2xl bg-white p-2.5 border border-emerald-200/80 shadow-xs"
+            />
+            <p class="text-xs text-slate-500 text-center">{{ t('扫码导入 Clash / Mihomo 订阅') }}</p>
+          </div>
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              @click="copyRaw(state.sub_url, 'sub-url-modal')"
+              class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
+            >
+              {{ copiedKey === 'sub-url-modal' ? t('已复制') : t('复制订阅链接') }}
+            </button>
+            <button
+              type="button"
+              @click="showSubQrModal = false"
+              class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition cursor-pointer"
+            >
+              {{ t('关闭') }}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
 
-    <!-- Bright Topbar -->
-    <header class="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-emerald-100/90 text-slate-900">
+    <!-- Frosted Topbar -->
+    <header class="sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-slate-200/80 text-slate-900">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
         <div class="flex items-center gap-3">
-          <img src="/assets/logo.png" alt="ClashGate" class="w-9 h-9 rounded-xl object-cover shadow-sm shadow-emerald-500/20 bg-white" />
+          <img
+            src="/assets/logo.png"
+            alt="ClashGate"
+            class="w-9 h-9 rounded-xl object-cover shadow-xs shadow-emerald-500/15 ring-1 ring-emerald-500/10 bg-white"
+          />
           <span class="font-bold text-base tracking-tight text-slate-900">ClashGate</span>
           <span
-            class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80"
+            class="px-2.5 py-0.5 text-[11px] font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80 tabular-nums"
           >
             {{ topbarVersionText }}
           </span>
@@ -1046,7 +1274,7 @@ onUnmounted(() => {
             type="button"
             :disabled="busyKey === '/action/update-core'"
             @click="updateCoreDirect"
-            class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white shadow-xs shadow-emerald-600/15 transition cursor-pointer"
+            class="cg-btn-primary px-3.5 py-1.5 rounded-xl text-xs font-semibold disabled:opacity-50 cursor-pointer"
           >
             {{ busyKey === '/action/update-core' ? t('更新内核中…') : t('更新内核') }}
           </button>
@@ -1054,15 +1282,26 @@ onUnmounted(() => {
             type="button"
             :disabled="busyKey === '/action/reload'"
             @click="postAction('/action/reload', {}, '/action/reload')"
-            class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200/80 disabled:opacity-50 text-emerald-800 transition cursor-pointer"
+            class="px-3.5 py-1.5 rounded-xl text-xs font-semibold border disabled:opacity-50 transition cursor-pointer inline-flex items-center gap-1.5"
+            :class="
+              state.pending_reload_count > 0
+                ? 'bg-amber-50 hover:bg-amber-100/80 border-amber-300/90 text-amber-900'
+                : 'bg-emerald-50/90 hover:bg-emerald-100/80 border-emerald-200/80 text-emerald-800'
+            "
           >
-            {{ busyKey === '/action/reload' ? t('重载中…') : t('重载配置') }}
+            <span>{{ busyKey === '/action/reload' ? t('重载中…') : t('重载配置') }}</span>
+            <span
+              v-if="state.pending_reload_count > 0"
+              class="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-amber-500 text-white tabular-nums"
+            >
+              {{ state.pending_reload_count }}
+            </span>
           </button>
           <button
             type="button"
             :disabled="busyKey === '/action/check-update' || busyKey === '/action/upgrade-self'"
             @click="checkUpdateAndPrompt"
-            class="px-3.5 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 disabled:opacity-50 text-slate-700 transition cursor-pointer"
+            class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200/90 disabled:opacity-50 text-slate-700 transition cursor-pointer"
           >
             {{
               busyKey === '/action/upgrade-self'
@@ -1073,9 +1312,17 @@ onUnmounted(() => {
             }}
           </button>
           <button
+            id="change-password-btn"
+            type="button"
+            @click="openPasswordModal"
+            class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50/70 hover:text-emerald-800 hover:border-emerald-200 border border-slate-200/90 text-slate-700 transition cursor-pointer"
+          >
+            {{ t('修改密码') }}
+          </button>
+          <button
             type="button"
             @click="setLang(lang === 'zh' ? 'en' : 'zh')"
-            class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 border border-slate-200 text-slate-600 transition cursor-pointer"
+            class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50/70 border border-slate-200/90 text-slate-600 transition cursor-pointer"
             :title="lang === 'zh' ? 'Switch to English' : '切换到中文'"
           >
             {{ lang === 'zh' ? 'English' : '中文' }}
@@ -1084,7 +1331,7 @@ onUnmounted(() => {
             <input type="hidden" name="csrf" :value="state.csrf" />
             <button
               type="submit"
-              class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 border border-slate-200 text-slate-600 transition cursor-pointer"
+              class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 border border-slate-200/90 text-slate-600 transition cursor-pointer"
             >
               {{ t('退出') }}
             </button>
@@ -1094,36 +1341,36 @@ onUnmounted(() => {
     </header>
 
     <!-- Main Container -->
-    <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6 flex-1">
-      <!-- Concise Status Strip -->
+    <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-7 space-y-6 flex-1">
+      <!-- Concise 4-Card Status Strip -->
       <div class="space-y-3">
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <!-- Card 1: 运行状态 -->
           <div
             id="stat-card-status"
-            class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)] flex items-center justify-between gap-2"
+            class="cg-surface cg-stat-card cg-stat-delay-1 rounded-2xl p-4 sm:p-5 flex items-center justify-between gap-2"
           >
             <div>
               <div class="text-xs font-medium text-slate-500">{{ t('运行状态') }}</div>
-              <div class="mt-1.5 flex items-center gap-2">
+              <div class="mt-2 flex items-center gap-2">
                 <span
                   class="w-2.5 h-2.5 rounded-full"
                   :class="{
-                    'bg-emerald-500 ring-4 ring-emerald-500/20': state.status.state_cls === 'ok',
-                    'bg-amber-500 ring-4 ring-amber-500/20': state.status.state_cls === 'warn',
-                    'bg-rose-500 ring-4 ring-rose-500/20':
+                    'bg-emerald-500 ring-4 ring-emerald-500/15': state.status.state_cls === 'ok',
+                    'bg-amber-500 ring-4 ring-amber-500/15': state.status.state_cls === 'warn',
+                    'bg-rose-500 ring-4 ring-rose-500/15':
                       state.status.state_cls !== 'ok' && state.status.state_cls !== 'warn',
                   }"
                 ></span>
-                <span class="text-lg font-bold text-slate-900">{{ t(state.status.state_txt || '未知') }}</span>
+                <span class="text-lg font-bold text-slate-900 tracking-tight">{{ t(state.status.state_txt || '未知') }}</span>
               </div>
             </div>
             <span
               class="px-2.5 py-1 text-xs font-semibold rounded-lg shrink-0"
               :class="
                 state.custom_config_mode
-                  ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
-                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+                  ? 'bg-amber-50 text-amber-700 border border-amber-200/70'
+                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
               "
             >
               {{ state.custom_config_mode ? t('自定义模式') : t('标准模板') }}
@@ -1133,10 +1380,10 @@ onUnmounted(() => {
           <!-- Card 2: 入站 · 出站（合并卡） -->
           <div
             id="stat-card-nodes"
-            class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)]"
+            class="cg-surface cg-stat-card cg-stat-delay-2 rounded-2xl p-4 sm:p-5"
           >
             <div class="text-xs font-medium text-slate-500">{{ t('入站 · 出站') }}</div>
-            <div class="mt-1.5 space-y-0.5 text-xs text-slate-600">
+            <div class="mt-2 space-y-1 text-xs text-slate-600 tabular-nums">
               <div class="flex items-baseline gap-1.5">
                 <span class="text-slate-400">{{ t('入站：') }}</span>
                 <span class="text-sm font-bold text-slate-900">{{ state.inbounds.length }}</span>
@@ -1157,21 +1404,21 @@ onUnmounted(() => {
             tabindex="0"
             @click="showPendingDiff = !showPendingDiff"
             @keydown.enter.prevent="showPendingDiff = !showPendingDiff"
-            class="rounded-2xl border p-4 sm:p-5 transition cursor-pointer select-none flex items-center justify-between gap-2"
+            class="cg-stat-card cg-stat-delay-3 rounded-2xl border p-4 sm:p-5 transition cursor-pointer select-none flex items-center justify-between gap-2"
             :class="
               state.pending_reload_count > 0
-                ? 'bg-amber-50/90 border-amber-300 shadow-[0_2px_12px_-4px_rgba(245,158,11,0.2)] hover:bg-amber-50'
-                : 'bg-white border-emerald-100/90 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)] hover:bg-emerald-50/30'
+                ? 'bg-amber-50/90 border-amber-300/90 shadow-[0_4px_16px_-6px_rgba(245,158,11,0.2)] hover:bg-amber-50'
+                : 'cg-surface hover:border-emerald-200/90'
             "
           >
             <div>
               <div class="text-xs font-medium" :class="state.pending_reload_count > 0 ? 'text-amber-800' : 'text-slate-500'">
                 {{ t('待重载配置') }}
               </div>
-              <div class="mt-1.5 flex items-baseline gap-1.5">
+              <div class="mt-2 flex items-baseline gap-1.5 tabular-nums">
                 <span
                   id="pending-reload-count"
-                  class="text-lg font-bold"
+                  class="text-lg font-bold tracking-tight"
                   :class="state.pending_reload_count > 0 ? 'text-amber-900' : 'text-slate-900'"
                 >
                   {{ state.pending_reload_count }}
@@ -1196,72 +1443,84 @@ onUnmounted(() => {
           <!-- Card 4: 已代理流量 -->
           <div
             id="stat-card-traffic"
-            class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)]"
+            class="cg-surface cg-stat-card cg-stat-delay-4 rounded-2xl p-4 sm:p-5"
           >
             <div class="text-xs font-medium text-slate-500">{{ t('已代理流量') }}</div>
-            <div class="mt-1.5 flex items-baseline gap-1.5">
-              <span class="text-lg font-bold text-slate-900">{{ trafficDisplay }}</span>
+            <div class="mt-2 flex items-baseline gap-2 tabular-nums">
+              <span class="text-lg font-bold text-slate-900 tracking-tight">{{ trafficDisplay }}</span>
               <span class="text-xs text-slate-400 truncate">{{ trafficDetail }}</span>
             </div>
           </div>
         </div>
 
         <!-- Expandable Pending Reload Diff Panel -->
-        <div
-          v-if="showPendingDiff"
-          id="pending-reload-diff-panel"
-          class="rounded-2xl border px-4 py-3.5 text-xs space-y-2.5 transition"
-          :class="
-            state.pending_reload_count > 0
-              ? 'bg-amber-50/90 border-amber-200/90 text-amber-950'
-              : 'bg-white border-emerald-100 text-slate-600'
-          "
-        >
-          <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="font-semibold flex items-center gap-2">
-              <span
-                class="w-2 h-2 rounded-full"
-                :class="state.pending_reload_count > 0 ? 'bg-amber-500' : 'bg-emerald-500'"
-              ></span>
-              <span>{{ t('待生效变更明细') }}（{{ state.pending_reload_count }}）</span>
+        <Transition name="cg-collapse">
+          <div
+            v-if="showPendingDiff"
+            id="pending-reload-diff-panel"
+            class="rounded-2xl border px-4 py-3.5 text-xs space-y-2.5"
+            :class="
+              state.pending_reload_count > 0
+                ? 'bg-amber-50/90 border-amber-200/90 text-amber-950 shadow-xs'
+                : 'bg-white border-slate-200/80 text-slate-600 shadow-xs'
+            "
+          >
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="font-semibold flex items-center gap-2">
+                <span
+                  class="w-2 h-2 rounded-full"
+                  :class="state.pending_reload_count > 0 ? 'bg-amber-500' : 'bg-emerald-500'"
+                ></span>
+                <span>{{ t('待生效变更明细') }}（{{ state.pending_reload_count }}）</span>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <button
+                  v-if="state.pending_reload_count > 0"
+                  type="button"
+                  :disabled="busyKey === '/action/reload' || busyKey === '/action/discard-pending'"
+                  @click="postAction('/action/reload', {}, '/action/reload')"
+                  class="px-3 py-1 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white transition cursor-pointer"
+                >
+                  {{ busyKey === '/action/reload' ? t('重载中…') : t('重载配置') }}
+                </button>
+                <button
+                  v-if="state.pending_reload_count > 0"
+                  id="discard-pending-btn"
+                  type="button"
+                  :disabled="busyKey === '/action/discard-pending' || busyKey === '/action/reload'"
+                  @click="confirmDiscardPending"
+                  class="px-3 py-1 rounded-lg text-xs font-semibold bg-white hover:bg-rose-50 text-rose-600 border border-rose-200/90 disabled:opacity-50 transition cursor-pointer"
+                >
+                  {{ busyKey === '/action/discard-pending' ? t('丢弃中…') : t('丢弃草稿') }}
+                </button>
+                <button
+                  type="button"
+                  @click="showPendingDiff = false"
+                  class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white/80 hover:bg-white text-slate-600 border border-slate-200/80 transition cursor-pointer"
+                >
+                  {{ t('收起') }}
+                </button>
+              </div>
             </div>
-            <div class="flex items-center gap-2">
-              <button
-                v-if="state.pending_reload_count > 0"
-                type="button"
-                :disabled="busyKey === '/action/reload'"
-                @click="postAction('/action/reload', {}, '/action/reload')"
-                class="px-3 py-1 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-white transition cursor-pointer"
+            <div v-if="state.pending_reload_items && state.pending_reload_items.length > 0" class="space-y-1 font-mono">
+              <div
+                v-for="(it, idx) in state.pending_reload_items"
+                :key="idx"
+                class="px-3 py-1.5 rounded-xl bg-white/95 border border-amber-200/60 text-slate-800 flex items-center gap-2"
               >
-                {{ busyKey === '/action/reload' ? t('重载中…') : t('重载配置') }}
-              </button>
-              <button
-                type="button"
-                @click="showPendingDiff = false"
-                class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white/80 hover:bg-white text-slate-600 border border-slate-200/80 transition cursor-pointer"
-              >
-                {{ t('收起') }}
-              </button>
+                <span>{{ formatPendingItem(it) }}</span>
+              </div>
+            </div>
+            <div v-else class="text-slate-500">
+              {{ t('无待生效') }}
             </div>
           </div>
-          <div v-if="state.pending_reload_items && state.pending_reload_items.length > 0" class="space-y-1 font-mono">
-            <div
-              v-for="(it, idx) in state.pending_reload_items"
-              :key="idx"
-              class="px-3 py-1.5 rounded-xl bg-white/90 border border-amber-200/60 text-slate-800"
-            >
-              {{ formatPendingItem(it) }}
-            </div>
-          </div>
-          <div v-else class="text-slate-500">
-            {{ t('无待生效') }}
-          </div>
-        </div>
+        </Transition>
       </div>
 
       <!-- Segmented Navigation Bar -->
       <div
-        class="flex items-center gap-1.5 bg-white p-1.5 rounded-2xl border border-emerald-100/90 shadow-xs flex-wrap w-fit"
+        class="flex items-center gap-1 bg-white/95 p-1.5 rounded-2xl border border-slate-200/85 shadow-[0_1px_2px_rgba(15,23,42,0.03)] flex-wrap w-fit"
       >
         <button
           type="button"
@@ -1269,7 +1528,7 @@ onUnmounted(() => {
           class="px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer"
           :class="
             activeTab === 'inbounds'
-              ? 'bg-emerald-600 text-white shadow-xs'
+              ? 'cg-btn-primary'
               : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
           "
         >
@@ -1281,7 +1540,7 @@ onUnmounted(() => {
           class="px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer"
           :class="
             activeTab === 'outbounds'
-              ? 'bg-emerald-600 text-white shadow-xs'
+              ? 'cg-btn-primary'
               : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
           "
         >
@@ -1293,7 +1552,7 @@ onUnmounted(() => {
           class="px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer"
           :class="
             activeTab === 'readable'
-              ? 'bg-emerald-600 text-white shadow-xs'
+              ? 'cg-btn-primary'
               : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
           "
         >
@@ -1305,7 +1564,7 @@ onUnmounted(() => {
           class="px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer"
           :class="
             activeTab === 'advanced'
-              ? 'bg-emerald-600 text-white shadow-xs'
+              ? 'cg-btn-primary'
               : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
           "
         >
@@ -1313,261 +1572,540 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- TAB 1 (HOMEPAGE): Zashboard (Fixed on Home) + 客户端订阅 + 入站节点与添加节点 -->
-      <div v-show="activeTab === 'inbounds'" class="space-y-6">
-        <!-- Top Fixed Core Cards: Zashboard 控制面板 & 客户端订阅链接 -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <!-- Zashboard 控制面板（固定首页展示：URL + 密钥卡片） -->
-          <section
-            id="zashboard-card"
-            class="bg-white rounded-2xl border border-emerald-200/80 p-5 sm:p-6 shadow-[0_2px_12px_-4px_rgba(16,185,129,0.1)] flex flex-col justify-between space-y-4"
-          >
-            <div class="flex items-center justify-between gap-3 flex-wrap">
-              <div class="flex items-center gap-2.5">
-                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                <h2 class="text-base font-bold text-slate-900">{{ t('Zashboard 控制面板') }}</h2>
-                <span
-                  class="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-semibold rounded-full"
-                  :class="
-                    state.controller_listening
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
-                      : 'bg-amber-50 text-amber-700 border border-amber-200/70'
-                  "
-                >
-                  {{ t('端口 :') }}{{ state.controller_port }} {{ state.controller_listening ? t('运行中') : t('未运行') }}
-                </span>
-              </div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <a
-                  :href="state.zb_url || '#'"
-                  target="_blank"
-                  rel="noopener"
-                  class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs shadow-emerald-600/15 transition"
-                >
-                  {{ t('打开 Zashboard') }}
-                </a>
-                <button
-                  type="button"
-                  @click="copyRaw(state.zb_url, 'zb-url')"
-                  class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
-                >
-                  {{ copiedKey === 'zb-url' ? t('已复制地址') : t('复制地址') }}
-                </button>
-                <a
-                  href="/config/server.yaml"
-                  target="_blank"
-                  rel="noopener"
-                  class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition"
-                >
-                  {{ t('查看Mihomo服务端配置') }}
-                </a>
-              </div>
-            </div>
-
-            <div class="space-y-2.5">
-              <div>
-                <div class="text-xs font-medium text-slate-500 mb-1">{{ t('免填密钥直连地址 (HTTPS)') }}</div>
-                <div
-                  id="zb-url"
-                  class="px-3.5 py-2 rounded-xl bg-[#f6faf8] border border-emerald-100 font-mono text-xs text-slate-700 break-all select-all"
-                >
-                  {{ state.zb_url || '—' }}
+      <!-- TAB 1 (HOMEPAGE): Zashboard + 客户端订阅 + 入站节点与添加节点 -->
+      <Transition name="cg-tab">
+        <div v-show="activeTab === 'inbounds'" class="space-y-6">
+          <!-- Top Fixed Core Cards: Zashboard 控制面板 & 客户端订阅链接 -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+            <!-- Zashboard 控制面板（默认隐藏敏感 URL 与 Secret，点击显示，失焦再遮罩） -->
+            <section
+              id="zashboard-card"
+              class="cg-surface-emerald rounded-2xl p-5 sm:p-6 flex flex-col justify-between space-y-4"
+            >
+              <div class="flex items-center justify-between gap-3 flex-wrap">
+                <div class="flex items-center gap-2.5">
+                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-500/15"></span>
+                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('Zashboard 控制面板') }}</h2>
+                  <span
+                    class="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-semibold rounded-full tabular-nums"
+                    :class="
+                      state.controller_listening
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
+                        : 'bg-amber-50 text-amber-700 border border-amber-200/70'
+                    "
+                  >
+                    {{ t('端口 :') }}{{ state.controller_port }} {{ state.controller_listening ? t('运行中') : t('未运行') }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <a
+                    :href="state.zb_url || '#'"
+                    target="_blank"
+                    rel="noopener"
+                    class="cg-btn-primary px-3.5 py-1.5 rounded-xl text-xs font-semibold"
+                  >
+                    {{ t('打开 Zashboard') }}
+                  </a>
+                  <button
+                    type="button"
+                    @click="copyRaw(state.zb_url, 'zb-url')"
+                    class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
+                  >
+                    {{ copiedKey === 'zb-url' ? t('已复制地址') : t('复制地址') }}
+                  </button>
+                  <a
+                    href="/config/server.yaml"
+                    target="_blank"
+                    rel="noopener"
+                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition"
+                  >
+                    {{ t('查看Mihomo服务端配置') }}
+                  </a>
                 </div>
               </div>
 
-              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
-                <div class="flex items-center gap-2 min-w-0">
-                  <span class="text-xs font-medium text-slate-500 shrink-0">{{ t('API 密钥 (Secret)：') }}</span>
-                  <code
-                    id="zb-secret"
-                    class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-800 font-mono text-xs break-all select-all"
+              <div class="space-y-3">
+                <div>
+                  <div class="flex items-center justify-between gap-2 mb-1.5">
+                    <span class="text-xs font-medium text-slate-500">{{ t('免填密钥直连地址 (HTTPS)') }}</span>
+                    <button
+                      v-if="state.zb_url && !zbUrlRevealed"
+                      type="button"
+                      @mousedown.prevent="revealZbUrl"
+                      @click.stop="revealZbUrl"
+                      class="text-[11px] font-medium text-emerald-700 hover:text-emerald-600 cursor-pointer"
+                    >
+                      {{ t('点击显示') }}
+                    </button>
+                    <span v-else-if="zbUrlRevealed" class="text-[11px] text-slate-400">
+                      {{ t('失焦自动隐藏') }}
+                    </span>
+                  </div>
+                  <div
+                    id="zb-url"
+                    ref="zbUrlEl"
+                    tabindex="0"
+                    role="button"
+                    :aria-expanded="zbUrlRevealed ? 'true' : 'false'"
+                    @click="revealZbUrl"
+                    @keydown.enter.prevent="zbUrlRevealed = !zbUrlRevealed"
+                    @keydown.space.prevent="zbUrlRevealed = !zbUrlRevealed"
+                    @blur="zbUrlRevealed = false"
+                    class="cg-input px-3.5 py-2 rounded-xl bg-[#f7fbf9] hover:bg-emerald-50/40 border border-emerald-100/90 font-mono text-xs transition cursor-pointer"
+                    :class="zbUrlRevealed ? 'text-slate-700 break-all select-all' : 'text-slate-400 tracking-widest select-none'"
                   >
-                    {{ state.mihomo_secret || '—' }}
-                  </code>
+                    {{ !state.zb_url ? '—' : zbUrlRevealed ? state.zb_url : '••••••••••••••••••••••••••••••••' }}
+                  </div>
+                </div>
+
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-0.5">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-xs font-medium text-slate-500 shrink-0">{{ t('API 密钥 (Secret)：') }}</span>
+                    <code
+                      id="zb-secret"
+                      ref="zbSecretEl"
+                      tabindex="0"
+                      role="button"
+                      :aria-expanded="zbSecretRevealed ? 'true' : 'false'"
+                      @click="revealZbSecret"
+                      @keydown.enter.prevent="zbSecretRevealed = !zbSecretRevealed"
+                      @keydown.space.prevent="zbSecretRevealed = !zbSecretRevealed"
+                      @blur="zbSecretRevealed = false"
+                      class="cg-input px-2.5 py-1 rounded-lg bg-slate-100/90 hover:bg-emerald-50/60 border border-slate-200/70 font-mono text-xs transition cursor-pointer"
+                      :class="zbSecretRevealed ? 'text-slate-800 break-all select-all' : 'text-slate-400 tracking-widest select-none'"
+                      :title="zbSecretRevealed ? '' : t('点击显示')"
+                    >
+                      {{ !state.mihomo_secret ? '—' : zbSecretRevealed ? state.mihomo_secret : '••••••••••••' }}
+                    </code>
+                    <button
+                      v-if="state.mihomo_secret && !zbSecretRevealed"
+                      type="button"
+                      @mousedown.prevent="revealZbSecret"
+                      @click.stop="revealZbSecret"
+                      class="text-[11px] font-medium text-emerald-700 hover:text-emerald-600 shrink-0 cursor-pointer"
+                    >
+                      {{ t('显示') }}
+                    </button>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <button
+                      v-if="state.mihomo_secret"
+                      type="button"
+                      @click="copyRaw(state.mihomo_secret, 'zb-secret')"
+                      class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
+                    >
+                      {{ copiedKey === 'zb-secret' ? t('已复制') : t('复制密钥') }}
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="busyKey === 'reset-secret'"
+                      @click="resetZbSecret"
+                      class="px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
+                    >
+                      {{ busyKey === 'reset-secret' ? t('重置中…') : t('重置 API 密钥') }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- 客户端订阅链接（导入连接默认收起） -->
+            <section
+              id="sub-card"
+              class="cg-surface-emerald rounded-2xl p-5 sm:p-6 flex flex-col justify-between space-y-4"
+            >
+              <div class="flex items-center justify-between gap-3 flex-wrap">
+                <div class="flex items-center gap-2.5">
+                  <span class="w-2.5 h-2.5 rounded-full bg-teal-500 ring-4 ring-teal-500/15"></span>
+                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('客户端订阅链接') }}</h2>
+                  <span
+                    class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/70"
+                  >
+                    {{ t('ACL4SSR 自动同步') }}
+                  </span>
+                </div>
+                <div v-if="state.sub_url" class="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    @click="copyRaw(state.sub_url, 'sub-url')"
+                    class="cg-btn-primary px-3.5 py-1.5 rounded-xl text-xs font-semibold cursor-pointer"
+                  >
+                    {{ copiedKey === 'sub-url' ? t('已复制') : t('复制订阅链接') }}
+                  </button>
+                  <button
+                    v-if="state.sub_url && state.sub_qr_data_url"
+                    id="sub-qr-btn"
+                    type="button"
+                    @click="showSubQrModal = true"
+                    class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
+                  >
+                    {{ t('二维码') }}
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="busyKey === 'reset-sub'"
+                    @click="resetSubUrl"
+                    class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
+                  >
+                    {{ busyKey === 'reset-sub' ? t('更换中…') : t('更换订阅链接') }}
+                  </button>
+                  <a
+                    :href="state.sub_url"
+                    target="_blank"
+                    rel="noopener"
+                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition"
+                  >
+                    {{ t('预览') }}
+                  </a>
+                </div>
+              </div>
+
+              <div class="space-y-2.5">
+                <button
+                  id="sub-import-toggle"
+                  type="button"
+                  :aria-expanded="showSubImport ? 'true' : 'false'"
+                  @click="showSubImport = !showSubImport"
+                  class="w-full px-3.5 py-2.5 rounded-xl bg-[#f7fbf9] hover:bg-emerald-50/50 border border-emerald-100/90 flex items-center justify-between gap-2 text-xs transition cursor-pointer"
+                >
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="font-semibold text-slate-700">{{ t('导入连接') }}</span>
+                    <span class="text-slate-400 truncate">
+                      {{ showSubImport ? t('收起导入地址') : t('显示导入地址') }}
+                    </span>
+                  </div>
+                  <svg
+                    class="w-4 h-4 text-slate-500 transition-transform duration-200 shrink-0"
+                    :class="showSubImport ? 'rotate-180 text-emerald-700' : ''"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </button>
+
+                <Transition name="cg-collapse">
+                  <div v-if="showSubImport" id="sub-import-panel" class="space-y-2.5 pt-1">
+                    <div>
+                      <div class="text-xs font-medium text-slate-500 mb-1">
+                        {{ t('导入 Clash / Mihomo 客户端即可使用') }}
+                      </div>
+                      <div
+                        id="sub-url"
+                        class="px-3.5 py-2.5 rounded-xl bg-[#f6faf8] border border-emerald-100 font-mono text-xs text-slate-700 break-all select-all"
+                      >
+                        {{ state.sub_url || '/etc/clashgate/client/mihomo-client.yaml' }}
+                      </div>
+                    </div>
+                    <div class="text-xs text-slate-500 flex items-center justify-between gap-2 pt-0.5 flex-wrap">
+                      <span>{{ t('本地客户端备份：') }}<code class="font-mono text-slate-700">/etc/clashgate/client/</code></span>
+                      <button
+                        type="button"
+                        @click="selectTab('readable')"
+                        class="text-emerald-700 hover:text-emerald-600 font-semibold cursor-pointer"
+                      >
+                        {{ t('前往易读配置转换 →') }}
+                      </button>
+                    </div>
+                  </div>
+                </Transition>
+              </div>
+            </section>
+          </div>
+
+          <!-- 入站节点列表 & 添加节点表单 -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <!-- Left: Inbound Nodes List -->
+            <section class="lg:col-span-7 cg-surface rounded-2xl p-5 sm:p-6">
+              <div class="flex items-center justify-between gap-2 mb-4">
+                <div class="flex items-center gap-2.5">
+                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('入站节点') }}</h2>
+                  <span
+                    class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 tabular-nums"
+                  >
+                    {{ state.inbounds.length }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    v-if="state.inbounds.length > 0"
+                    type="button"
+                    @click="copyRaw(state.all_proxies_yaml, 'all-proxies')"
+                    class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
+                  >
+                    {{ copiedKey === 'all-proxies' ? t('已复制全部') : t('复制全部配置') }}
+                  </button>
+                </div>
+              </div>
+
+              <div
+                v-if="state.inbounds.length === 0"
+                class="py-12 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-sm text-slate-400"
+              >
+                {{ t('暂无入站节点，请在右侧添加节点') }}
+              </div>
+
+              <div v-else class="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden">
+                <div
+                  v-for="item in state.inbounds"
+                  :key="item.key"
+                  class="p-4 hover:bg-emerald-50/35 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div class="space-y-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-bold text-sm text-slate-900 break-all">{{ item.name }}</span>
+                      <span
+                        class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60"
+                      >
+                        {{ item.kind_label }}
+                      </span>
+                      <span
+                        class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full"
+                        :class="
+                          item.listening
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+                            : item.pending_reload
+                              ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
+                              : 'bg-rose-50 text-rose-700 border border-rose-200/60'
+                        "
+                      >
+                        <span
+                          class="w-1.5 h-1.5 rounded-full"
+                          :class="item.listening ? 'bg-emerald-500' : item.pending_reload ? 'bg-amber-500' : 'bg-rose-500'"
+                        ></span>
+                        {{ item.listening ? t('运行中') : item.pending_reload ? t('重载配置生效') : t('未运行') }}
+                      </span>
+                    </div>
+                    <div class="text-xs text-slate-500 font-mono tabular-nums">{{ t('端口 :') }}{{ item.port }}</div>
+                  </div>
+
+                  <!-- Actions: 复制配置 + 重置密码 + 删除 -->
+                  <div class="flex items-center gap-2 shrink-0 flex-wrap">
+                    <button
+                      type="button"
+                      @click="copyRaw(item.single_config, `single-${item.key}`)"
+                      class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-200 text-slate-700 border border-slate-200/90 transition cursor-pointer"
+                    >
+                      {{ copiedKey === `single-${item.key}` ? t('已复制') : t('复制配置') }}
+                    </button>
+                    <button
+                      v-if="item.can_reset_password"
+                      type="button"
+                      :disabled="busyKey === `rst-${item.key}`"
+                      @click="resetInboundPassword(item)"
+                      class="px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-50/80 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
+                    >
+                      {{ busyKey === `rst-${item.key}` ? t('重置中…') : t('重置密码') }}
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="busyKey === `del-${item.key}`"
+                      @click="deleteInbound(item)"
+                      class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                    >
+                      {{ t('删除') }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Right: Locked-Default Add Node Form -->
+            <section class="lg:col-span-5 cg-surface rounded-2xl p-5 sm:p-6">
+              <div class="flex items-center justify-between gap-2 mb-4">
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('添加节点') }}</h2>
+                <span class="px-2.5 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                  {{ t('安全默认策略') }}
+                </span>
+              </div>
+
+              <form @submit.prevent="submitAddInbound" class="space-y-4">
+                <div>
+                  <label for="kind" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('协议类型') }}</label>
+                  <select
+                    id="kind"
+                    v-model="inboundForm.kind"
+                    name="kind"
+                    class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                  >
+                    <option v-for="p in PROTOCOLS" :key="p.value" :value="p.value">
+                      {{ p.label }}
+                    </option>
+                  </select>
+                  <p id="protocol-desc" class="mt-2 text-xs font-medium text-emerald-700 flex items-center gap-1.5">
+                    <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                    <span>{{ currentProtocol.label }}：{{ t(currentProtocol.desc) }}</span>
+                  </p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label for="nm" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('节点名称') }}</label>
+                    <input
+                      id="nm"
+                      v-model="inboundForm.name"
+                      name="name"
+                      :placeholder="t('默认 {name}', { name: currentDefaultName })"
+                      class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label for="port" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('监听端口') }}</label>
+                    <input
+                      id="port"
+                      v-model="inboundForm.port"
+                      name="port"
+                      inputmode="numeric"
+                      :placeholder="t('留空随机端口')"
+                      class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 tabular-nums"
+                    />
+                  </div>
+                </div>
+
+                <!-- Non-locked protocol options (TUIC / TrustTunnel / Mieru / HTTP / SOCKS5) -->
+                <template v-if="inboundForm.kind === 'tuic'">
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('拥塞控制') }}</label>
+                    <select
+                      v-model="inboundForm.tuic_cc"
+                      name="tuic_cc"
+                      class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                    >
+                      <option value="bbr">{{ t('bbr (默认)') }}</option>
+                      <option value="cubic">cubic</option>
+                      <option value="new_reno">new_reno</option>
+                    </select>
+                  </div>
+                </template>
+
+                <template v-else-if="inboundForm.kind === 'trusttunnel'">
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('拥塞控制') }}</label>
+                    <select
+                      v-model="inboundForm.tt_cc"
+                      name="tt_cc"
+                      class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                    >
+                      <option value="bbr">{{ t('bbr (默认)') }}</option>
+                      <option value="cubic">cubic</option>
+                    </select>
+                  </div>
+                </template>
+
+                <template v-else-if="inboundForm.kind === 'mieru'">
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('传输协议') }}</label>
+                    <select
+                      v-model="inboundForm.mieru_transport"
+                      name="mieru_transport"
+                      class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                    >
+                      <option value="TCP">{{ t('TCP (默认)') }}</option>
+                      <option value="UDP">UDP</option>
+                    </select>
+                  </div>
+                </template>
+
+                <template v-else-if="inboundForm.kind === 'http'">
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('启用 TLS') }}</label>
+                    <select
+                      v-model="inboundForm.http_tls"
+                      name="http_tls"
+                      class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                    >
+                      <option value="0">{{ t('不启用 (默认)') }}</option>
+                      <option value="1">{{ t('启用') }}</option>
+                    </select>
+                  </div>
+                </template>
+
+                <template v-else-if="inboundForm.kind === 'socks'">
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('启用 TLS') }}</label>
+                    <select
+                      v-model="inboundForm.socks_tls"
+                      name="socks_tls"
+                      class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                    >
+                      <option value="0">{{ t('不启用 (默认)') }}</option>
+                      <option value="1">{{ t('启用') }}</option>
+                    </select>
+                  </div>
+                </template>
+
+                <!-- Locked security defaults notice -->
+                <div class="rounded-xl bg-[#f4fbf7] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
+                  {{ t(currentProtocol.lockedNote) }}
+                </div>
+
+                <button
+                  type="submit"
+                  :disabled="busyKey === 'add-inbound'"
+                  class="cg-btn-primary w-full h-10 mt-1 rounded-xl disabled:opacity-50 text-sm font-semibold cursor-pointer"
+                >
+                  {{ busyKey === 'add-inbound' ? t('正在添加…') : t('添加入站节点') }}
+                </button>
+              </form>
+            </section>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- TAB 2: 服务端出站与外部订阅 -->
+      <Transition name="cg-tab">
+        <div v-show="activeTab === 'outbounds'" class="space-y-6">
+          <!-- 导入外部订阅 (proxy-providers) -->
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
+            <div class="flex items-center gap-2.5">
+              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('外部订阅源 (proxy-providers)') }}</h2>
+              <span
+                class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 tabular-nums"
+              >
+                {{ state.providers.length }}
+              </span>
+            </div>
+
+            <div
+              v-if="state.providers.length === 0"
+              class="py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-400"
+            >
+              {{ t('暂无外部订阅源，在下方粘贴 HTTP/HTTPS 订阅链接即可导入') }}
+            </div>
+
+            <div
+              v-else
+              class="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden"
+            >
+              <div
+                v-for="prov in state.providers"
+                :key="prov.name"
+                class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-emerald-50/25 transition"
+              >
+                <div class="min-w-0 space-y-1">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-sm text-slate-900">{{ prov.name }}</span>
+                    <span class="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{{ prov.path }}</span>
+                  </div>
+                  <div class="text-xs text-slate-400 font-mono truncate">{{ prov.url }}</div>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                   <button
-                    v-if="state.mihomo_secret"
                     type="button"
-                    @click="copyRaw(state.mihomo_secret, 'zb-secret')"
-                    class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition cursor-pointer"
+                    @click="copyRaw(prov.yaml, `prov-${prov.name}`)"
+                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
                   >
-                    {{ copiedKey === 'zb-secret' ? t('已复制') : t('复制密钥') }}
+                    {{ copiedKey === `prov-${prov.name}` ? t('已复制') : t('复制配置') }}
                   </button>
                   <button
                     type="button"
-                    :disabled="busyKey === 'reset-secret'"
-                    @click="resetZbSecret"
-                    class="px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
-                  >
-                    {{ busyKey === 'reset-secret' ? t('重置中…') : t('重置 API 密钥') }}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- 客户端订阅链接 -->
-          <section
-            class="bg-white rounded-2xl border border-emerald-200/80 p-5 sm:p-6 shadow-[0_2px_12px_-4px_rgba(16,185,129,0.1)] flex flex-col justify-between space-y-4"
-          >
-            <div class="flex items-center justify-between gap-3 flex-wrap">
-              <div class="flex items-center gap-2.5">
-                <span class="w-2.5 h-2.5 rounded-full bg-teal-500"></span>
-                <h2 class="text-base font-bold text-slate-900">{{ t('客户端订阅链接') }}</h2>
-                <span
-                  class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/70"
-                >
-                  {{ t('ACL4SSR 自动同步') }}
-                </span>
-              </div>
-              <div v-if="state.sub_url" class="flex items-center gap-2 flex-wrap">
-                <button
-                  type="button"
-                  @click="copyRaw(state.sub_url, 'sub-url')"
-                  class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs shadow-emerald-600/15 transition cursor-pointer"
-                >
-                  {{ copiedKey === 'sub-url' ? t('已复制') : t('复制订阅链接') }}
-                </button>
-                <button
-                  v-if="state.sub_url && state.sub_qr_data_url"
-                  id="sub-qr-btn"
-                  type="button"
-                  @click="showSubQrModal = true"
-                  class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
-                >
-                  {{ t('二维码') }}
-                </button>
-                <button
-                  type="button"
-                  :disabled="busyKey === 'reset-sub'"
-                  @click="resetSubUrl"
-                  class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
-                >
-                  {{ busyKey === 'reset-sub' ? t('更换中…') : t('更换订阅链接') }}
-                </button>
-                <a
-                  :href="state.sub_url"
-                  target="_blank"
-                  rel="noopener"
-                  class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition"
-                >
-                  {{ t('预览') }}
-                </a>
-              </div>
-            </div>
-
-            <div class="space-y-2.5">
-              <div>
-                <div class="text-xs font-medium text-slate-500 mb-1">
-                  {{ t('导入 Clash / Mihomo 客户端即可使用') }}
-                </div>
-                <div
-                  id="sub-url"
-                  class="px-3.5 py-2.5 rounded-xl bg-[#f6faf8] border border-emerald-100 font-mono text-xs text-slate-700 break-all select-all"
-                >
-                  {{ state.sub_url || '/etc/clashgate/client/mihomo-client.yaml' }}
-                </div>
-              </div>
-              <div class="text-xs text-slate-500 flex items-center justify-between gap-2 pt-1">
-                <span>{{ t('本地客户端备份：') }}<code class="font-mono text-slate-700">/etc/clashgate/client/</code></span>
-                <button
-                  type="button"
-                  @click="selectTab('readable')"
-                  class="text-emerald-700 hover:text-emerald-600 font-semibold cursor-pointer"
-                >
-                  {{ t('前往易读配置转换 →') }}
-                </button>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <!-- 入站节点列表 & 添加节点表单 -->
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          <!-- Left: Inbound Nodes List -->
-          <section class="lg:col-span-7 bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs">
-            <div class="flex items-center justify-between gap-2 mb-4">
-              <div class="flex items-center gap-2.5">
-                <h2 class="text-base font-bold text-slate-900">{{ t('入站节点') }}</h2>
-                <span
-                  class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60"
-                >
-                  {{ state.inbounds.length }}
-                </span>
-              </div>
-              <div class="flex items-center gap-2">
-                <button
-                  v-if="state.inbounds.length > 0"
-                  type="button"
-                  @click="copyRaw(state.all_proxies_yaml, 'all-proxies')"
-                  class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
-                >
-                  {{ copiedKey === 'all-proxies' ? t('已复制全部') : t('复制全部配置') }}
-                </button>
-              </div>
-            </div>
-
-            <div v-if="state.inbounds.length === 0" class="py-12 text-center text-sm text-slate-400">
-              {{ t('暂无入站节点，请在右侧添加节点') }}
-            </div>
-
-            <div v-else class="divide-y divide-slate-100 border border-slate-200/75 rounded-2xl overflow-hidden">
-              <div
-                v-for="item in state.inbounds"
-                :key="item.key"
-                class="p-4 hover:bg-emerald-50/30 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-              >
-                <div class="space-y-1 min-w-0">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="font-bold text-sm text-slate-900 break-all">{{ item.name }}</span>
-                    <span
-                      class="px-2 py-0.5 text-xs font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60"
-                    >
-                      {{ item.kind_label }}
-                    </span>
-                    <span
-                      class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full"
-                      :class="
-                        item.listening
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
-                          : item.pending_reload
-                          ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
-                          : 'bg-rose-50 text-rose-700 border border-rose-200/60'
-                      "
-                    >
-                      <span
-                        class="w-1.5 h-1.5 rounded-full"
-                        :class="item.listening ? 'bg-emerald-500' : item.pending_reload ? 'bg-amber-500' : 'bg-rose-500'"
-                      ></span>
-                      {{ item.listening ? t('运行中') : item.pending_reload ? t('重载配置生效') : t('未运行') }}
-                    </span>
-                  </div>
-                  <div class="text-xs text-slate-500 font-mono">{{ t('端口 :') }}{{ item.port }}</div>
-                </div>
-
-                <!-- Actions: 复制配置 + 重置密码 + 删除 -->
-                <div class="flex items-center gap-2 shrink-0 flex-wrap">
-                  <button
-                    type="button"
-                    @click="copyRaw(item.single_config, `single-${item.key}`)"
-                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-200 text-slate-700 border border-slate-200/90 transition cursor-pointer"
-                  >
-                    {{ copiedKey === `single-${item.key}` ? t('已复制') : t('复制配置') }}
-                  </button>
-                  <button
-                    v-if="item.can_reset_password"
-                    type="button"
-                    :disabled="busyKey === `rst-${item.key}`"
-                    @click="resetInboundPassword(item)"
-                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-50/80 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
-                  >
-                    {{ busyKey === `rst-${item.key}` ? t('重置中…') : t('重置密码') }}
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="busyKey === `del-${item.key}`"
-                    @click="deleteInbound(item)"
+                    :disabled="busyKey === `del-prov-${prov.name}`"
+                    @click="deleteProvider(prov.name)"
                     class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
                   >
                     {{ t('删除') }}
@@ -1575,508 +2113,328 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
+
+            <form @submit.prevent="submitAddProvider" class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+              <div class="sm:col-span-7">
+                <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('订阅链接 (HTTP / HTTPS)') }}</label>
+                <input
+                  v-model="providerForm.sub_url"
+                  name="sub_url"
+                  placeholder="https://example.com/sub.yaml?token=..."
+                  required
+                  class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                />
+              </div>
+              <div class="sm:col-span-3">
+                <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('名称 (选填)') }}</label>
+                <input
+                  v-model="providerForm.provider_name"
+                  name="provider_name"
+                  :placeholder="t('默认 sub')"
+                  class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                />
+              </div>
+              <div class="sm:col-span-2">
+                <button
+                  type="submit"
+                  :disabled="busyKey === 'add-provider'"
+                  class="cg-btn-primary w-full h-10 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer"
+                >
+                  {{ busyKey === 'add-provider' ? t('导入中…') : t('导入订阅') }}
+                </button>
+              </div>
+            </form>
           </section>
 
-          <!-- Right: Locked-Default Add Node Form -->
-          <section class="lg:col-span-5 bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs">
-            <div class="flex items-center justify-between gap-2 mb-4">
-              <h2 class="text-base font-bold text-slate-900">{{ t('添加节点') }}</h2>
-              <span class="px-2.5 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700">
-                {{ t('安全默认策略') }}
+          <!-- 服务端手工出站节点 (proxies) -->
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
+            <div class="flex items-center gap-2.5">
+              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('服务端出站节点 (proxies)') }}</h2>
+              <span
+                class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 tabular-nums"
+              >
+                {{ state.proxies.length }}
               </span>
             </div>
 
-            <form @submit.prevent="submitAddInbound" class="space-y-4">
-              <div>
-                <label for="kind" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('协议类型') }}</label>
-                <select
-                  id="kind"
-                  v-model="inboundForm.kind"
-                  name="kind"
-                  class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
-                >
-                  <option v-for="p in PROTOCOLS" :key="p.value" :value="p.value">
-                    {{ p.label }}
-                  </option>
-                </select>
-                <!-- One-line concise Chinese description right below protocol selector -->
-                <p id="protocol-desc" class="mt-2 text-xs font-medium text-emerald-700 flex items-center gap-1.5">
-                  <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
-                  <span>{{ currentProtocol.label }}：{{ t(currentProtocol.desc) }}</span>
-                </p>
-              </div>
+            <div
+              v-if="state.proxies.length === 0"
+              class="py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-400"
+            >
+              {{ t('暂无手工出站节点，在下方粘贴单行 JSON 或多行 YAML 即可添加') }}
+            </div>
 
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label for="nm" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('节点名称') }}</label>
-                  <input
-                    id="nm"
-                    v-model="inboundForm.name"
-                    name="name"
-                    :placeholder="t('默认 {name}', { name: currentDefaultName })"
-                    class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
-                  />
-                </div>
-                <div>
-                  <label for="port" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('监听端口') }}</label>
-                  <input
-                    id="port"
-                    v-model="inboundForm.port"
-                    name="port"
-                    inputmode="numeric"
-                    :placeholder="t('留空随机端口')"
-                    class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
-                  />
-                </div>
-              </div>
-
-              <!-- Non-locked protocol options (TUIC / TrustTunnel / Mieru / HTTP / SOCKS5) -->
-              <template v-if="inboundForm.kind === 'tuic'">
-                <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('拥塞控制') }}</label>
-                  <select
-                    v-model="inboundForm.tuic_cc"
-                    name="tuic_cc"
-                    class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
-                  >
-                    <option value="bbr">{{ t('bbr (默认)') }}</option>
-                    <option value="cubic">cubic</option>
-                    <option value="new_reno">new_reno</option>
-                  </select>
-                </div>
-              </template>
-
-              <template v-else-if="inboundForm.kind === 'trusttunnel'">
-                <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('拥塞控制') }}</label>
-                  <select
-                    v-model="inboundForm.tt_cc"
-                    name="tt_cc"
-                    class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
-                  >
-                    <option value="bbr">{{ t('bbr (默认)') }}</option>
-                    <option value="cubic">cubic</option>
-                  </select>
-                </div>
-              </template>
-
-              <template v-else-if="inboundForm.kind === 'mieru'">
-                <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('传输协议') }}</label>
-                  <select
-                    v-model="inboundForm.mieru_transport"
-                    name="mieru_transport"
-                    class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
-                  >
-                    <option value="TCP">{{ t('TCP (默认)') }}</option>
-                    <option value="UDP">UDP</option>
-                  </select>
-                </div>
-              </template>
-
-              <template v-else-if="inboundForm.kind === 'http'">
-                <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('启用 TLS') }}</label>
-                  <select
-                    v-model="inboundForm.http_tls"
-                    name="http_tls"
-                    class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
-                  >
-                    <option value="0">{{ t('不启用 (默认)') }}</option>
-                    <option value="1">{{ t('启用') }}</option>
-                  </select>
-                </div>
-              </template>
-
-              <template v-else-if="inboundForm.kind === 'socks'">
-                <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('启用 TLS') }}</label>
-                  <select
-                    v-model="inboundForm.socks_tls"
-                    name="socks_tls"
-                    class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
-                  >
-                    <option value="0">{{ t('不启用 (默认)') }}</option>
-                    <option value="1">{{ t('启用') }}</option>
-                  </select>
-                </div>
-              </template>
-
-              <!-- Locked security defaults notice -->
-              <div class="rounded-xl bg-[#f4fbf7] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900">
-                {{ t(currentProtocol.lockedNote) }}
-              </div>
-
-              <button
-                type="submit"
-                :disabled="busyKey === 'add-inbound'"
-                class="w-full h-10 mt-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold shadow-xs shadow-emerald-600/15 transition cursor-pointer"
+            <div
+              v-else
+              class="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden"
+            >
+              <div
+                v-for="p in state.proxies"
+                :key="p.name"
+                class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-emerald-50/25 transition"
               >
-                {{ busyKey === 'add-inbound' ? t('正在添加…') : t('添加入站节点') }}
-              </button>
+                <div class="space-y-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-bold text-sm text-slate-900 break-all">{{ p.name }}</span>
+                    <span
+                      class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60"
+                    >
+                      {{ p.type }}
+                    </span>
+                  </div>
+                  <div class="text-xs text-slate-500 font-mono tabular-nums">{{ p.endpoint }}</div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0 flex-wrap">
+                  <button
+                    type="button"
+                    @click="copyRaw(p.single_config, `p-single-${p.name}`)"
+                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
+                  >
+                    {{ copiedKey === `p-single-${p.name}` ? t('已复制') : t('复制配置') }}
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="busyKey === `del-proxy-${p.name}`"
+                    @click="deleteProxy(p.name)"
+                    class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                  >
+                    {{ t('删除') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <form @submit.prevent="submitAddProxies" class="space-y-3">
+              <textarea
+                v-model="proxiesRaw"
+                name="proxies_raw"
+                rows="5"
+                :placeholder="t('粘贴单行 JSON / Flow 或多行 YAML 格式的 mihomo 节点配置（含 easytier、tailscale 等）…')"
+                class="cg-input w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-900 focus:bg-white"
+              ></textarea>
+              <div class="flex items-center gap-2.5 flex-wrap">
+                <button
+                  type="submit"
+                  :disabled="busyKey === 'add-proxies'"
+                  class="cg-btn-primary px-4 py-2 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer"
+                >
+                  {{ busyKey === 'add-proxies' ? t('添加中…') : t('添加出站节点') }}
+                </button>
+                <label
+                  class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-medium transition cursor-pointer"
+                >
+                  {{ t('从文件载入') }}
+                  <input
+                    type="file"
+                    accept=".yaml,.yml,.json,.txt"
+                    class="hidden"
+                    @change="(e) => loadFileInto(e, proxiesRaw)"
+                  />
+                </label>
+              </div>
             </form>
           </section>
         </div>
-      </div>
-
-      <!-- TAB 2: 服务端出站与外部订阅 -->
-      <div v-show="activeTab === 'outbounds'" class="space-y-6">
-        <!-- 导入外部订阅 (proxy-providers) -->
-        <section class="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs space-y-4">
-          <div class="flex items-center gap-2.5">
-            <h2 class="text-base font-bold text-slate-900">{{ t('外部订阅源 (proxy-providers)') }}</h2>
-            <span
-              class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60"
-            >
-              {{ state.providers.length }}
-            </span>
-          </div>
-
-          <div
-            v-if="state.providers.length > 0"
-            class="divide-y divide-slate-100 border border-slate-200/75 rounded-2xl overflow-hidden"
-          >
-            <div
-              v-for="prov in state.providers"
-              :key="prov.name"
-              class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-emerald-50/20"
-            >
-              <div class="min-w-0 space-y-1">
-                <div class="flex items-center gap-2">
-                  <span class="font-bold text-sm text-slate-900">{{ prov.name }}</span>
-                  <span class="text-xs font-mono text-slate-500">{{ prov.path }}</span>
-                </div>
-                <div class="text-xs text-slate-400 font-mono truncate">{{ prov.url }}</div>
-              </div>
-              <div class="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  @click="copyRaw(prov.yaml, `prov-${prov.name}`)"
-                  class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
-                >
-                  {{ copiedKey === `prov-${prov.name}` ? t('已复制') : t('复制配置') }}
-                </button>
-                <button
-                  type="button"
-                  :disabled="busyKey === `del-prov-${prov.name}`"
-                  @click="deleteProvider(prov.name)"
-                  class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
-                >
-                  {{ t('删除') }}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <form @submit.prevent="submitAddProvider" class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-            <div class="sm:col-span-7">
-              <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('订阅链接 (HTTP / HTTPS)') }}</label>
-              <input
-                v-model="providerForm.sub_url"
-                name="sub_url"
-                placeholder="https://example.com/sub.yaml?token=..."
-                required
-                class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
-              />
-            </div>
-            <div class="sm:col-span-3">
-              <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('名称 (选填)') }}</label>
-              <input
-                v-model="providerForm.provider_name"
-                name="provider_name"
-                :placeholder="t('默认 sub')"
-                class="w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
-              />
-            </div>
-            <div class="sm:col-span-2">
-              <button
-                type="submit"
-                :disabled="busyKey === 'add-provider'"
-                class="w-full h-10 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold shadow-xs shadow-emerald-600/15 transition cursor-pointer"
-              >
-                {{ busyKey === 'add-provider' ? t('导入中…') : t('导入订阅') }}
-              </button>
-            </div>
-          </form>
-        </section>
-
-        <!-- 服务端手工出站节点 (proxies) -->
-        <section class="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs space-y-4">
-          <div class="flex items-center gap-2.5">
-            <h2 class="text-base font-bold text-slate-900">{{ t('服务端出站节点 (proxies)') }}</h2>
-            <span
-              class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60"
-            >
-              {{ state.proxies.length }}
-            </span>
-          </div>
-
-          <div
-            v-if="state.proxies.length > 0"
-            class="divide-y divide-slate-100 border border-slate-200/75 rounded-2xl overflow-hidden"
-          >
-            <div
-              v-for="p in state.proxies"
-              :key="p.name"
-              class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-emerald-50/20"
-            >
-              <div class="space-y-1 min-w-0">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="font-bold text-sm text-slate-900 break-all">{{ p.name }}</span>
-                  <span
-                    class="px-2 py-0.5 text-xs font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60"
-                  >
-                    {{ p.type }}
-                  </span>
-                </div>
-                <div class="text-xs text-slate-500 font-mono">{{ p.endpoint }}</div>
-              </div>
-              <div class="flex items-center gap-2 shrink-0 flex-wrap">
-                <button
-                  type="button"
-                  @click="copyRaw(p.single_config, `p-single-${p.name}`)"
-                  class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
-                >
-                  {{ copiedKey === `p-single-${p.name}` ? t('已复制') : t('复制配置') }}
-                </button>
-                <button
-                  type="button"
-                  :disabled="busyKey === `del-proxy-${p.name}`"
-                  @click="deleteProxy(p.name)"
-                  class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
-                >
-                  {{ t('删除') }}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <form @submit.prevent="submitAddProxies" class="space-y-3">
-            <textarea
-              v-model="proxiesRaw"
-              name="proxies_raw"
-              rows="5"
-              :placeholder="t('粘贴单行 JSON / Flow 或多行 YAML 格式的 mihomo 节点配置（含 easytier、tailscale 等）…')"
-              class="w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
-            ></textarea>
-            <div class="flex items-center gap-2.5 flex-wrap">
-              <button
-                type="submit"
-                :disabled="busyKey === 'add-proxies'"
-                class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold shadow-xs shadow-emerald-600/15 transition cursor-pointer"
-              >
-                {{ busyKey === 'add-proxies' ? t('添加中…') : t('添加出站节点') }}
-              </button>
-              <label
-                class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-medium transition cursor-pointer"
-              >
-                {{ t('从文件载入') }}
-                <input
-                  type="file"
-                  accept=".yaml,.yml,.json,.txt"
-                  class="hidden"
-                  @change="(e) => loadFileInto(e, proxiesRaw)"
-                />
-              </label>
-            </div>
-          </form>
-        </section>
-      </div>
+      </Transition>
 
       <!-- TAB 3: 易读配置转换 (Dedicated Converter Page) -->
-      <div v-show="activeTab === 'readable'" class="space-y-6">
-        <section class="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs space-y-5">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <div class="flex items-center gap-2.5">
-                <h2 class="text-base font-bold text-slate-900">{{ t('易读配置转换') }}</h2>
-                <span
-                  class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/70"
-                >
-                  {{ t('单行 JSON ⇄ 多行 YAML') }}
-                </span>
-              </div>
-              <p class="text-xs text-slate-500 mt-1">
-                {{ t('在此粘贴单行 JSON / Flow 节点配置或多行 YAML，一键转换为结构清晰的多行易读 YAML 格式。') }}
-              </p>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                @click="fillCurrentInboundsToConverter"
-                class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
-              >
-                {{ t('载入当前入站节点') }}
-              </button>
-              <button
-                type="button"
-                @click="
-                  converterInput = '';
-                  converterOutput = '';
-                  converterError = ''
-                "
-                class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
-              >
-                {{ t('清空') }}
-              </button>
-            </div>
-          </div>
-
-          <div
-            v-if="converterError"
-            class="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-xs text-rose-700 font-medium"
-          >
-            {{ converterError }}
-          </div>
-
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div class="space-y-2">
-              <div class="flex items-center justify-between">
-                <label class="text-xs font-semibold text-slate-700">{{ t('输入节点配置（单行 JSON / 多行 YAML）') }}</label>
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    :disabled="busyKey === 'convert-readable'"
-                    @click="convertConfigFormat('readable')"
-                    class="px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition cursor-pointer"
+      <Transition name="cg-tab">
+        <div v-show="activeTab === 'readable'" class="space-y-6">
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-5">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div class="flex items-center gap-2.5">
+                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('易读配置转换') }}</h2>
+                  <span
+                    class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/70"
                   >
-                    {{ t('转换为易读配置') }}
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="busyKey === 'convert-single'"
-                    @click="convertConfigFormat('single')"
-                    class="px-3 py-1 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
-                  >
-                    {{ t('转换为单行配置') }}
-                  </button>
+                    {{ t('单行 JSON ⇄ 多行 YAML') }}
+                  </span>
                 </div>
+                <p class="text-xs text-slate-500 mt-1">
+                  {{ t('在此粘贴单行 JSON / Flow 节点配置或多行 YAML，一键转换为结构清晰的多行易读 YAML 格式。') }}
+                </p>
               </div>
-              <textarea
-                id="converter-input"
-                v-model="converterInput"
-                rows="14"
-                :placeholder="converterPlaceholder"
-                class="w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-900 leading-relaxed focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
-              ></textarea>
-            </div>
-
-            <div class="space-y-2">
-              <div class="flex items-center justify-between">
-                <label class="text-xs font-semibold text-slate-700">{{ t('转换结果（易读 YAML）') }}</label>
+              <div class="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  :disabled="!converterOutput"
-                  @click="copyRaw(converterOutput, 'conv-out')"
-                  class="px-3.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 disabled:opacity-40 transition cursor-pointer"
+                  @click="fillCurrentInboundsToConverter"
+                  class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
                 >
-                  {{ copiedKey === 'conv-out' ? t('已复制结果') : t('复制转换结果') }}
+                  {{ t('载入当前入站节点') }}
+                </button>
+                <button
+                  type="button"
+                  @click="
+                    converterInput = '';
+                    converterOutput = '';
+                    converterError = ''
+                  "
+                  class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
+                >
+                  {{ t('清空') }}
                 </button>
               </div>
-              <textarea
-                id="converter-output"
-                v-model="converterOutput"
-                readonly
-                rows="14"
-                :placeholder="t('点击「转换为易读配置」后在此显示多行 YAML 结果…')"
-                class="w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-800 leading-relaxed focus:outline-none"
-              ></textarea>
             </div>
-          </div>
-        </section>
-      </div>
+
+            <div
+              v-if="converterError"
+              class="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 text-xs text-rose-700 font-medium"
+            >
+              {{ converterError }}
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <label class="text-xs font-semibold text-slate-700">{{ t('输入节点配置（单行 JSON / 多行 YAML）') }}</label>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      :disabled="busyKey === 'convert-readable'"
+                      @click="convertConfigFormat('readable')"
+                      class="cg-btn-primary px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer"
+                    >
+                      {{ t('转换为易读配置') }}
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="busyKey === 'convert-single'"
+                      @click="convertConfigFormat('single')"
+                      class="px-3 py-1 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
+                    >
+                      {{ t('转换为单行配置') }}
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  id="converter-input"
+                  v-model="converterInput"
+                  rows="14"
+                  :placeholder="converterPlaceholder"
+                  class="cg-input w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-900 leading-relaxed focus:bg-white"
+                ></textarea>
+              </div>
+
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <label class="text-xs font-semibold text-slate-700">{{ t('转换结果（易读 YAML）') }}</label>
+                  <button
+                    type="button"
+                    :disabled="!converterOutput"
+                    @click="copyRaw(converterOutput, 'conv-out')"
+                    class="px-3.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 disabled:opacity-40 transition cursor-pointer"
+                  >
+                    {{ copiedKey === 'conv-out' ? t('已复制结果') : t('复制转换结果') }}
+                  </button>
+                </div>
+                <textarea
+                  id="converter-output"
+                  v-model="converterOutput"
+                  readonly
+                  rows="14"
+                  :placeholder="t('点击「转换为易读配置」后在此显示多行 YAML 结果…')"
+                  class="w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-800 leading-relaxed focus:outline-none"
+                ></textarea>
+              </div>
+            </div>
+          </section>
+        </div>
+      </Transition>
 
       <!-- TAB 4: 自定义 mihomo 服务端配置 -->
-      <div v-show="activeTab === 'advanced'" class="space-y-6">
-        <section class="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs space-y-5">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div class="space-y-1">
-              <div class="flex items-center gap-2.5 flex-wrap">
-                <h2 class="text-base font-bold text-slate-900">{{ t('自定义 mihomo 服务端配置') }}</h2>
-                <span
-                  class="px-2.5 py-0.5 text-xs font-semibold rounded-full"
-                  :class="
-                    state.custom_config_mode
-                      ? 'bg-amber-50 text-amber-700 border border-amber-200/70'
-                      : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
-                  "
-                >
-                  {{ state.custom_config_mode ? t('当前：自定义配置模式') : t('当前：标准模板模式') }}
-                </span>
+      <Transition name="cg-tab">
+        <div v-show="activeTab === 'advanced'" class="space-y-6">
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-5">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div class="space-y-1">
+                <div class="flex items-center gap-2.5 flex-wrap">
+                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('自定义 mihomo 服务端配置') }}</h2>
+                  <span
+                    class="px-2.5 py-0.5 text-xs font-semibold rounded-full"
+                    :class="
+                      state.custom_config_mode
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200/70'
+                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
+                    "
+                  >
+                    {{ state.custom_config_mode ? t('当前：自定义配置模式') : t('当前：标准模板模式') }}
+                  </span>
+                </div>
+                <p class="text-xs text-slate-500">
+                  {{ t('您可以直接粘贴或编辑整份自备的 mihomo 服务端配置文件（') }}<code class="font-mono">config.yaml</code>{{ t('），校验通过后立即应用，并自动同步刷新入站 Listeners 列表与客户端订阅。普通用户无需修改此页。') }}
+                </p>
               </div>
-              <p class="text-xs text-slate-500">
-                {{ t('您可以直接粘贴或编辑整份自备的 mihomo 服务端配置文件（') }}<code class="font-mono">config.yaml</code>{{ t('），校验通过后立即应用，并自动同步刷新入站 Listeners 列表与客户端订阅。普通用户无需修改此页。') }}
-              </p>
-            </div>
 
-            <!-- 恢复标准模板（始终可见：一点即还原模板配置，并生成一个默认 VlessReality 节点） -->
-            <button
-              type="button"
-              :disabled="busyKey === 'reset-template'"
-              @click="resetTemplateConfig"
-              class="px-4 py-2 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200/90 disabled:opacity-50 transition cursor-pointer shrink-0"
-            >
-              {{ busyKey === 'reset-template' ? t('正在恢复标准模板…') : t('恢复标准模板') }}
-            </button>
-          </div>
-
-          <!-- 证书路径提示与说明 -->
-          <div class="rounded-2xl bg-amber-50/90 border border-amber-200/90 p-4 text-xs text-amber-950 leading-relaxed space-y-1.5">
-            <div class="font-bold text-amber-900">{{ t('⚠️ 醒目提醒：Mihomo 证书目录与相对路径说明') }}</div>
-            <div>
-              {{ t('1. 本系统已将 Mihomo 运行目录（') }}<code class="font-mono font-semibold">-d</code>{{ t('）、配置文件与证书统一收纳在') }}
-              <code class="font-mono font-semibold">/etc/clashgate</code>{{ t('，证书实际位于') }}
-              <code class="font-mono font-semibold">/etc/clashgate/certs/fullchain.pem</code> {{ t('与') }}
-              <code class="font-mono font-semibold">/etc/clashgate/certs/privkey.pem</code>{{ t('（相对路径即') }}
-              <code class="font-mono font-semibold">certs/fullchain.pem</code> {{ t('与') }}
-              <code class="font-mono font-semibold">certs/privkey.pem</code>）。
-            </div>
-            <div>
-              {{ t('2. 若您的自备配置中填写了其他证书路径或相对路径，请点击下方') }}
-              <b class="font-semibold">{{ t('「自动修改证书路径」') }}</b> {{ t('按钮一键修正为本机证书路径，随后点击') }}
-              <b class="font-semibold">{{ t('「更新 mihomo 服务端配置」') }}</b> {{ t('校验并生效。') }}
-            </div>
-          </div>
-
-          <form @submit.prevent="submitCustomConfig" class="space-y-3.5">
-            <textarea
-              id="custom-config-raw"
-              v-model="customConfigText"
-              name="custom_config_raw"
-              rows="16"
-              :placeholder="t('在此粘贴完整的 mihomo 服务端 YAML 配置…')"
-              class="w-full p-4 rounded-2xl border border-slate-200 bg-[#f8faf9] text-slate-800 font-mono text-xs leading-relaxed focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/15"
-            ></textarea>
-            <div class="flex items-center gap-2.5 flex-wrap">
+              <!-- 恢复标准模板 -->
               <button
                 type="button"
-                @click="autoFixCertPaths"
-                class="px-4 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-semibold transition cursor-pointer"
+                :disabled="busyKey === 'reset-template'"
+                @click="resetTemplateConfig"
+                class="px-4 py-2 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200/90 disabled:opacity-50 transition cursor-pointer shrink-0"
               >
-                {{ t('自动修改证书路径') }}
+                {{ busyKey === 'reset-template' ? t('正在恢复标准模板…') : t('恢复标准模板') }}
               </button>
-              <button
-                type="submit"
-                :disabled="busyKey === 'save-custom'"
-                class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold shadow-xs shadow-emerald-600/15 transition cursor-pointer"
-              >
-                {{ busyKey === 'save-custom' ? t('正在校验并更新…') : t('更新 mihomo 服务端配置') }}
-              </button>
-              <label
-                class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-medium transition cursor-pointer"
-              >
-                {{ t('从本地文件载入') }}
-                <input
-                  type="file"
-                  accept=".yaml,.yml,.txt"
-                  class="hidden"
-                  @change="(e) => loadFileInto(e, customConfigText)"
-                />
-              </label>
             </div>
-          </form>
-        </section>
-      </div>
+
+            <!-- 证书路径提示与说明 -->
+            <div class="rounded-2xl bg-amber-50/90 border border-amber-200/90 p-4 text-xs text-amber-950 leading-relaxed space-y-1.5">
+              <div class="font-bold text-amber-900">{{ t('⚠️ 醒目提醒：Mihomo 证书目录与相对路径说明') }}</div>
+              <div>
+                {{ t('1. 本系统已将 Mihomo 运行目录（') }}<code class="font-mono font-semibold">-d</code>{{ t('）、配置文件与证书统一收纳在') }}
+                <code class="font-mono font-semibold">/etc/clashgate</code>{{ t('，证书实际位于') }}
+                <code class="font-mono font-semibold">/etc/clashgate/certs/fullchain.pem</code> {{ t('与') }}
+                <code class="font-mono font-semibold">/etc/clashgate/certs/privkey.pem</code>{{ t('（相对路径即') }}
+                <code class="font-mono font-semibold">certs/fullchain.pem</code> {{ t('与') }}
+                <code class="font-mono font-semibold">certs/privkey.pem</code>）。
+              </div>
+              <div>
+                {{ t('2. 若您的自备配置中填写了其他证书路径或相对路径，请点击下方') }}
+                <b class="font-semibold">{{ t('「自动修改证书路径」') }}</b> {{ t('按钮一键修正为本机证书路径，随后点击') }}
+                <b class="font-semibold">{{ t('「更新 mihomo 服务端配置」') }}</b> {{ t('校验并生效。') }}
+              </div>
+            </div>
+
+            <form @submit.prevent="submitCustomConfig" class="space-y-3.5">
+              <textarea
+                id="custom-config-raw"
+                v-model="customConfigText"
+                name="custom_config_raw"
+                rows="16"
+                :placeholder="t('在此粘贴完整的 mihomo 服务端 YAML 配置…')"
+                class="cg-input w-full p-4 rounded-2xl border border-slate-200 bg-[#f8faf9] text-slate-800 font-mono text-xs leading-relaxed focus:bg-white"
+              ></textarea>
+              <div class="flex items-center gap-2.5 flex-wrap">
+                <button
+                  type="button"
+                  @click="autoFixCertPaths"
+                  class="px-4 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-semibold transition cursor-pointer"
+                >
+                  {{ t('自动修改证书路径') }}
+                </button>
+                <button
+                  type="submit"
+                  :disabled="busyKey === 'save-custom'"
+                  class="cg-btn-primary px-4 py-2 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer"
+                >
+                  {{ busyKey === 'save-custom' ? t('正在校验并更新…') : t('更新 mihomo 服务端配置') }}
+                </button>
+                <label
+                  class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-medium transition cursor-pointer"
+                >
+                  {{ t('从本地文件载入') }}
+                  <input
+                    type="file"
+                    accept=".yaml,.yml,.txt"
+                    class="hidden"
+                    @change="(e) => loadFileInto(e, customConfigText)"
+                  />
+                </label>
+              </div>
+            </form>
+          </section>
+        </div>
+      </Transition>
     </main>
   </div>
 </template>
