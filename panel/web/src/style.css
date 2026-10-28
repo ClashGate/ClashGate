@@ -110,12 +110,9 @@ textarea::-webkit-scrollbar-thumb:hover {
 }
 
 .cg-stat-card {
-  animation: cgStatFadeIn 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  border-color: rgba(209, 250, 229, 0.9);
+  box-shadow: 0 2px 10px -4px rgba(16, 185, 129, 0.08);
 }
-.cg-stat-delay-1 { animation-delay: 0ms; }
-.cg-stat-delay-2 { animation-delay: 45ms; }
-.cg-stat-delay-3 { animation-delay: 90ms; }
-.cg-stat-delay-4 { animation-delay: 135ms; }
 
 .cg-login-card {
   animation: cgStatFadeIn 240ms cubic-bezier(0.16, 1, 0.3, 1) both;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.0 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
+"""ClashGate v1.01 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -40,7 +40,7 @@ from urllib.parse import parse_qs, urlparse, quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 
-VERSION = "1.0"
+VERSION = "1.01"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -4264,10 +4264,10 @@ class Panel(BaseHTTPRequestHandler):
         )
         sub_sec = (
             f"<section id=sub-card><h2>客户端订阅链接</h2>"
+            f"<div id=sub-url>••••••••••••••••••••••••</div>"
             f"<button type=button>复制订阅链接</button>"
             f"<button type=button>二维码</button>"
-            f"<form method=post action=/action/reset-sub>{hid}<button type=submit>更换订阅链接</button></form>"
-            f"<button type=button>导入连接</button></section>"
+            f"<form method=post action=/action/reset-sub>{hid}<button type=submit>更换订阅链接</button></form></section>"
             if state["sub_url"] else ""
         )
         mver = state.get("mihomo_version", "")

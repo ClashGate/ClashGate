@@ -5,7 +5,7 @@ import { t, lang, setLang } from './i18n.js'
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '1.0',
+  version: '1.01',
   mihomo_version: '',
   csrf: '',
   login_error: '',
@@ -51,7 +51,7 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '1.0',
+  version: boot.version || '1.01',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
@@ -75,13 +75,15 @@ const state = reactive({
 
 const showPendingDiff = ref(false)
 const showSubQrModal = ref(false)
-const showSubImport = ref(false)
 
-// Zashboard sensitive fields: masked by default, click to reveal, auto-mask on blur / tab switch / outside click
+// Sensitive fields (Zashboard URL, API secret, Client subscription URL):
+// masked by default, click field to reveal, auto-mask on blur / tab switch / outside click
 const zbUrlRevealed = ref(false)
 const zbSecretRevealed = ref(false)
+const subUrlRevealed = ref(false)
 const zbUrlEl = ref(null)
 const zbSecretEl = ref(null)
+const subUrlEl = ref(null)
 
 function revealZbUrl() {
   if (!state.zb_url) return
@@ -103,9 +105,20 @@ function revealZbSecret() {
   })
 }
 
+function revealSubUrl() {
+  if (!state.sub_url) return
+  subUrlRevealed.value = true
+  nextTick(() => {
+    if (subUrlEl.value && typeof subUrlEl.value.focus === 'function') {
+      subUrlEl.value.focus()
+    }
+  })
+}
+
 function maskAllSensitive() {
   zbUrlRevealed.value = false
   zbSecretRevealed.value = false
+  subUrlRevealed.value = false
 }
 
 function handleDocumentPointerDown(ev) {
@@ -115,6 +128,9 @@ function handleDocumentPointerDown(ev) {
   }
   if (zbSecretRevealed.value && zbSecretEl.value && target && !zbSecretEl.value.contains(target)) {
     zbSecretRevealed.value = false
+  }
+  if (subUrlRevealed.value && subUrlEl.value && target && !subUrlEl.value.contains(target)) {
+    subUrlRevealed.value = false
   }
 }
 
@@ -551,7 +567,10 @@ function applyServerState(newState) {
   if (newState.version) state.version = newState.version
   if (newState.mihomo_version) state.mihomo_version = newState.mihomo_version
   if (newState.csrf) state.csrf = newState.csrf
-  if (newState.sub_url !== undefined) state.sub_url = newState.sub_url
+  if (newState.sub_url !== undefined) {
+    if (newState.sub_url !== state.sub_url) subUrlRevealed.value = false
+    state.sub_url = newState.sub_url
+  }
   if (newState.sub_qr_data_url !== undefined) state.sub_qr_data_url = newState.sub_qr_data_url
   if (!state.sub_url || !state.sub_qr_data_url) showSubQrModal.value = false
   if (newState.zb_url !== undefined) {
@@ -735,7 +754,11 @@ function resetSubUrl() {
     message: t('确定更换订阅链接？需点击顶部「重载配置」后新订阅链接才会生效（重载后旧链接失效）。'),
     confirmText: t('确认更换'),
     tone: 'amber',
-    onConfirm: () => postAction('/action/reset-sub', {}, 'reset-sub'),
+    onConfirm: async () => {
+      maskAllSensitive()
+      await postAction('/action/reset-sub', {}, 'reset-sub')
+      maskAllSensitive()
+    },
   })
 }
 
@@ -1577,15 +1600,15 @@ onUnmounted(() => {
         <div v-show="activeTab === 'inbounds'" class="space-y-6">
           <!-- Top Fixed Core Cards: Zashboard 控制面板 & 客户端订阅链接 -->
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-            <!-- Zashboard 控制面板（默认隐藏敏感 URL 与 Secret，点击显示，失焦再遮罩） -->
+            <!-- Zashboard 控制面板 -->
             <section
               id="zashboard-card"
-              class="cg-surface-emerald rounded-2xl p-5 sm:p-6 flex flex-col justify-between space-y-4"
+              class="cg-surface-emerald rounded-2xl p-5 sm:p-6 flex flex-col gap-3.5"
             >
               <div class="flex items-center justify-between gap-3 flex-wrap">
                 <div class="flex items-center gap-2.5">
-                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-500/15"></span>
-                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('Zashboard 控制面板') }}</h2>
+                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                  <h2 class="text-base font-bold text-slate-900">{{ t('Zashboard 控制面板') }}</h2>
                   <span
                     class="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-semibold rounded-full tabular-nums"
                     :class="
@@ -1624,100 +1647,74 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <div class="space-y-3">
-                <div>
-                  <div class="flex items-center justify-between gap-2 mb-1.5">
-                    <span class="text-xs font-medium text-slate-500">{{ t('免填密钥直连地址 (HTTPS)') }}</span>
-                    <button
-                      v-if="state.zb_url && !zbUrlRevealed"
-                      type="button"
-                      @mousedown.prevent="revealZbUrl"
-                      @click.stop="revealZbUrl"
-                      class="text-[11px] font-medium text-emerald-700 hover:text-emerald-600 cursor-pointer"
-                    >
-                      {{ t('点击显示') }}
-                    </button>
-                    <span v-else-if="zbUrlRevealed" class="text-[11px] text-slate-400">
-                      {{ t('失焦自动隐藏') }}
-                    </span>
-                  </div>
-                  <div
-                    id="zb-url"
-                    ref="zbUrlEl"
+              <div>
+                <div class="text-xs font-medium text-slate-500 mb-1.5">{{ t('免填密钥直连地址 (HTTPS)') }}</div>
+                <div
+                  id="zb-url"
+                  ref="zbUrlEl"
+                  tabindex="0"
+                  role="button"
+                  :aria-expanded="zbUrlRevealed ? 'true' : 'false'"
+                  @click="revealZbUrl"
+                  @keydown.enter.prevent="zbUrlRevealed = !zbUrlRevealed"
+                  @keydown.space.prevent="zbUrlRevealed = !zbUrlRevealed"
+                  @blur="zbUrlRevealed = false"
+                  class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f6faf8] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer"
+                  :class="zbUrlRevealed ? 'text-slate-700 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
+                >
+                  {{ !state.zb_url ? '—' : zbUrlRevealed ? state.zb_url : '••••••••••••••••••••••••••••••••' }}
+                </div>
+              </div>
+
+              <div class="mt-auto pt-0.5 min-h-[28px] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="text-xs font-medium text-slate-500 shrink-0">{{ t('API 密钥 (Secret)：') }}</span>
+                  <code
+                    id="zb-secret"
+                    ref="zbSecretEl"
                     tabindex="0"
                     role="button"
-                    :aria-expanded="zbUrlRevealed ? 'true' : 'false'"
-                    @click="revealZbUrl"
-                    @keydown.enter.prevent="zbUrlRevealed = !zbUrlRevealed"
-                    @keydown.space.prevent="zbUrlRevealed = !zbUrlRevealed"
-                    @blur="zbUrlRevealed = false"
-                    class="cg-input px-3.5 py-2 rounded-xl bg-[#f7fbf9] hover:bg-emerald-50/40 border border-emerald-100/90 font-mono text-xs transition cursor-pointer"
-                    :class="zbUrlRevealed ? 'text-slate-700 break-all select-all' : 'text-slate-400 tracking-widest select-none'"
+                    :aria-expanded="zbSecretRevealed ? 'true' : 'false'"
+                    @click="revealZbSecret"
+                    @keydown.enter.prevent="zbSecretRevealed = !zbSecretRevealed"
+                    @keydown.space.prevent="zbSecretRevealed = !zbSecretRevealed"
+                    @blur="zbSecretRevealed = false"
+                    class="cg-input px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-emerald-50/60 font-mono text-xs transition cursor-pointer"
+                    :class="zbSecretRevealed ? 'text-slate-800 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
                   >
-                    {{ !state.zb_url ? '—' : zbUrlRevealed ? state.zb_url : '••••••••••••••••••••••••••••••••' }}
-                  </div>
+                    {{ !state.mihomo_secret ? '—' : zbSecretRevealed ? state.mihomo_secret : '••••••••••••' }}
+                  </code>
                 </div>
-
-                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-0.5">
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="text-xs font-medium text-slate-500 shrink-0">{{ t('API 密钥 (Secret)：') }}</span>
-                    <code
-                      id="zb-secret"
-                      ref="zbSecretEl"
-                      tabindex="0"
-                      role="button"
-                      :aria-expanded="zbSecretRevealed ? 'true' : 'false'"
-                      @click="revealZbSecret"
-                      @keydown.enter.prevent="zbSecretRevealed = !zbSecretRevealed"
-                      @keydown.space.prevent="zbSecretRevealed = !zbSecretRevealed"
-                      @blur="zbSecretRevealed = false"
-                      class="cg-input px-2.5 py-1 rounded-lg bg-slate-100/90 hover:bg-emerald-50/60 border border-slate-200/70 font-mono text-xs transition cursor-pointer"
-                      :class="zbSecretRevealed ? 'text-slate-800 break-all select-all' : 'text-slate-400 tracking-widest select-none'"
-                      :title="zbSecretRevealed ? '' : t('点击显示')"
-                    >
-                      {{ !state.mihomo_secret ? '—' : zbSecretRevealed ? state.mihomo_secret : '••••••••••••' }}
-                    </code>
-                    <button
-                      v-if="state.mihomo_secret && !zbSecretRevealed"
-                      type="button"
-                      @mousedown.prevent="revealZbSecret"
-                      @click.stop="revealZbSecret"
-                      class="text-[11px] font-medium text-emerald-700 hover:text-emerald-600 shrink-0 cursor-pointer"
-                    >
-                      {{ t('显示') }}
-                    </button>
-                  </div>
-                  <div class="flex items-center gap-2 shrink-0">
-                    <button
-                      v-if="state.mihomo_secret"
-                      type="button"
-                      @click="copyRaw(state.mihomo_secret, 'zb-secret')"
-                      class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
-                    >
-                      {{ copiedKey === 'zb-secret' ? t('已复制') : t('复制密钥') }}
-                    </button>
-                    <button
-                      type="button"
-                      :disabled="busyKey === 'reset-secret'"
-                      @click="resetZbSecret"
-                      class="px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
-                    >
-                      {{ busyKey === 'reset-secret' ? t('重置中…') : t('重置 API 密钥') }}
-                    </button>
-                  </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <button
+                    v-if="state.mihomo_secret"
+                    type="button"
+                    @click="copyRaw(state.mihomo_secret, 'zb-secret')"
+                    class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition cursor-pointer"
+                  >
+                    {{ copiedKey === 'zb-secret' ? t('已复制') : t('复制密钥') }}
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="busyKey === 'reset-secret'"
+                    @click="resetZbSecret"
+                    class="px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
+                  >
+                    {{ busyKey === 'reset-secret' ? t('重置中…') : t('重置 API 密钥') }}
+                  </button>
                 </div>
               </div>
             </section>
 
-            <!-- 客户端订阅链接（导入连接默认收起） -->
+            <!-- 客户端订阅链接 -->
             <section
               id="sub-card"
-              class="cg-surface-emerald rounded-2xl p-5 sm:p-6 flex flex-col justify-between space-y-4"
+              class="cg-surface-emerald rounded-2xl p-5 sm:p-6 flex flex-col gap-3.5"
             >
               <div class="flex items-center justify-between gap-3 flex-wrap">
                 <div class="flex items-center gap-2.5">
-                  <span class="w-2.5 h-2.5 rounded-full bg-teal-500 ring-4 ring-teal-500/15"></span>
-                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('客户端订阅链接') }}</h2>
+                  <span class="w-2.5 h-2.5 rounded-full bg-teal-500"></span>
+                  <h2 class="text-base font-bold text-slate-900">{{ t('客户端订阅链接') }}</h2>
                   <span
                     class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/70"
                   >
@@ -1760,60 +1757,39 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <div class="space-y-2.5">
-                <button
-                  id="sub-import-toggle"
-                  type="button"
-                  :aria-expanded="showSubImport ? 'true' : 'false'"
-                  @click="showSubImport = !showSubImport"
-                  class="w-full px-3.5 py-2.5 rounded-xl bg-[#f7fbf9] hover:bg-emerald-50/50 border border-emerald-100/90 flex items-center justify-between gap-2 text-xs transition cursor-pointer"
+              <div>
+                <div class="text-xs font-medium text-slate-500 mb-1.5">
+                  {{ t('导入 Clash / Mihomo 客户端即可使用') }}
+                </div>
+                <div
+                  id="sub-url"
+                  ref="subUrlEl"
+                  tabindex="0"
+                  role="button"
+                  :aria-expanded="subUrlRevealed ? 'true' : 'false'"
+                  @click="revealSubUrl"
+                  @keydown.enter.prevent="subUrlRevealed = !subUrlRevealed"
+                  @keydown.space.prevent="subUrlRevealed = !subUrlRevealed"
+                  @blur="subUrlRevealed = false"
+                  class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f6faf8] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer"
+                  :class="subUrlRevealed ? 'text-slate-700 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
                 >
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="font-semibold text-slate-700">{{ t('导入连接') }}</span>
-                    <span class="text-slate-400 truncate">
-                      {{ showSubImport ? t('收起导入地址') : t('显示导入地址') }}
-                    </span>
-                  </div>
-                  <svg
-                    class="w-4 h-4 text-slate-500 transition-transform duration-200 shrink-0"
-                    :class="showSubImport ? 'rotate-180 text-emerald-700' : ''"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path
-                      fill-rule="evenodd"
-                      d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                </button>
+                  {{ !state.sub_url ? '/etc/clashgate/client/mihomo-client.yaml' : subUrlRevealed ? state.sub_url : '••••••••••••••••••••••••••••••••' }}
+                </div>
+              </div>
 
-                <Transition name="cg-collapse">
-                  <div v-if="showSubImport" id="sub-import-panel" class="space-y-2.5 pt-1">
-                    <div>
-                      <div class="text-xs font-medium text-slate-500 mb-1">
-                        {{ t('导入 Clash / Mihomo 客户端即可使用') }}
-                      </div>
-                      <div
-                        id="sub-url"
-                        class="px-3.5 py-2.5 rounded-xl bg-[#f6faf8] border border-emerald-100 font-mono text-xs text-slate-700 break-all select-all"
-                      >
-                        {{ state.sub_url || '/etc/clashgate/client/mihomo-client.yaml' }}
-                      </div>
-                    </div>
-                    <div class="text-xs text-slate-500 flex items-center justify-between gap-2 pt-0.5 flex-wrap">
-                      <span>{{ t('本地客户端备份：') }}<code class="font-mono text-slate-700">/etc/clashgate/client/</code></span>
-                      <button
-                        type="button"
-                        @click="selectTab('readable')"
-                        class="text-emerald-700 hover:text-emerald-600 font-semibold cursor-pointer"
-                      >
-                        {{ t('前往易读配置转换 →') }}
-                      </button>
-                    </div>
-                  </div>
-                </Transition>
+              <div class="mt-auto pt-0.5 min-h-[28px] text-xs text-slate-500 flex items-center justify-between gap-2 flex-wrap">
+                <div class="flex items-center gap-1.5">
+                  <span>{{ t('本地客户端备份：') }}</span>
+                  <code class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-mono text-xs">/etc/clashgate/client/</code>
+                </div>
+                <button
+                  type="button"
+                  @click="selectTab('readable')"
+                  class="text-emerald-700 hover:text-emerald-600 font-semibold cursor-pointer"
+                >
+                  {{ t('前往易读配置转换 →') }}
+                </button>
               </div>
             </section>
           </div>

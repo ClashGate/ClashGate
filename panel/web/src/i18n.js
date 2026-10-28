@@ -225,14 +225,6 @@ export const EN = {
  "确认修改": "Save password",
  "保存中…": "Saving…",
  "面板密码已修改": "Panel password updated",
- "点击显示": "Click to reveal",
- "失焦自动隐藏": "Auto-masks on blur",
- "显示": "Reveal",
- "已隐藏敏感信息 · 点击显示": "Hidden · Click to reveal",
- "导入连接": "Import connection",
- "显示导入地址": "Show import URL",
- "收起导入地址": "Hide import URL",
- "点击展开完整订阅地址与本地备份路径": "Click to show full subscription URL & local backup path",
  "暂无外部订阅源，在下方粘贴 HTTP/HTTPS 订阅链接即可导入": "No external providers yet; paste an HTTP/HTTPS subscription URL below to import",
  "暂无手工出站节点，在下方粘贴单行 JSON 或多行 YAML 即可添加": "No outbound nodes yet; paste single-line JSON or multi-line YAML below to add"
 }
