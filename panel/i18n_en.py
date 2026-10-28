@@ -130,6 +130,11 @@ TABLE = [
     ("两次输入的新密码不一致", "The two new passwords do not match"),
     ("面板密码已修改", "Panel password updated"),
     ("密码太短（至少 8 位）", "Password too short (at least 8 characters)"),
+    ("请输入 Cloudflare API Token", "Enter the Cloudflare API Token"),
+    ("API Token 不能包含空格或引号", "The API Token must not contain spaces or quotes"),
+    ("不支持的证书模式", "Unsupported certificate mode"),
+    ("已切换为 Cloudflare DNS 续证模式，证书申请 / 续期完成。", "Switched to Cloudflare DNS renewal mode; certificate request / renewal finished."),
+    ("已切换为端口续证模式，证书检查 / 续期完成。", "Switched to port renewal mode; certificate check / renewal finished."),
 ]
 
 _COMPILED = []

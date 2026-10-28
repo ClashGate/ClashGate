@@ -5,7 +5,7 @@ import { t, lang, setLang } from './i18n.js'
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '1.02',
+  version: '1.03',
   mihomo_version: '',
   csrf: '',
   login_error: '',
@@ -19,6 +19,14 @@ const boot = window.__CS_BOOT__ || {
   controller_port: 0,
   controller_listening: false,
   certs_present: true,
+  mode: 'auto-cert',
+  cert_mode: 'port',
+  domain: '',
+  cf_token: '',
+  cert_issuer: '',
+  cert_expires: '',
+  cert_days: null,
+  cert_hours: null,
   custom_config_mode: false,
   custom_config_raw: '',
   pending_reload_count: 0,
@@ -33,6 +41,10 @@ const boot = window.__CS_BOOT__ || {
     outbound_nodes_count: 0,
     outbound_providers_count: 0,
     pending_reload_count: 0,
+    mode: 'auto-cert',
+    cert_mode: 'port',
+    domain: '',
+    cert_issuer: '',
     cert_days: null,
     cert_hours: null,
     cert_expires: '',
@@ -51,7 +63,7 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '1.02',
+  version: boot.version || '1.03',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
@@ -62,6 +74,14 @@ const state = reactive({
   controller_port: boot.controller_port || 0,
   controller_listening: !!boot.controller_listening,
   certs_present: boot.certs_present !== false,
+  mode: boot.mode || (boot.status && boot.status.mode) || 'auto-cert',
+  cert_mode: boot.cert_mode || (boot.status && boot.status.cert_mode) || 'port',
+  domain: boot.domain || (boot.status && boot.status.domain) || '',
+  cf_token: boot.cf_token || '',
+  cert_issuer: boot.cert_issuer || (boot.status && boot.status.cert_issuer) || '',
+  cert_expires: boot.cert_expires || (boot.status && boot.status.cert_expires) || '',
+  cert_days: boot.cert_days !== undefined ? boot.cert_days : (boot.status ? boot.status.cert_days : null),
+  cert_hours: boot.cert_hours !== undefined ? boot.cert_hours : (boot.status ? boot.status.cert_hours : null),
   custom_config_mode: !!boot.custom_config_mode,
   custom_config_raw: boot.custom_config_raw || '',
   pending_reload_count: Number(boot.pending_reload_count || (boot.status && boot.status.pending_reload_count) || 0),
@@ -76,14 +96,16 @@ const state = reactive({
 const showPendingDiff = ref(false)
 const showSubQrModal = ref(false)
 
-// Sensitive fields (Zashboard URL, API secret, Client subscription URL):
+// Sensitive fields (Zashboard URL, API secret, Client subscription URL, Cloudflare API Token):
 // masked by default, click field to reveal, auto-mask on blur / tab switch / outside click
 const zbUrlRevealed = ref(false)
 const zbSecretRevealed = ref(false)
 const subUrlRevealed = ref(false)
+const cfTokenRevealed = ref(false)
 const zbUrlEl = ref(null)
 const zbSecretEl = ref(null)
 const subUrlEl = ref(null)
+const cfTokenEl = ref(null)
 
 function revealZbUrl() {
   if (!state.zb_url) return
@@ -115,10 +137,20 @@ function revealSubUrl() {
   })
 }
 
+function revealCfToken() {
+  cfTokenRevealed.value = true
+  nextTick(() => {
+    if (cfTokenEl.value && typeof cfTokenEl.value.focus === 'function') {
+      cfTokenEl.value.focus()
+    }
+  })
+}
+
 function maskAllSensitive() {
   zbUrlRevealed.value = false
   zbSecretRevealed.value = false
   subUrlRevealed.value = false
+  cfTokenRevealed.value = false
 }
 
 function handleDocumentPointerDown(ev) {
@@ -131,6 +163,9 @@ function handleDocumentPointerDown(ev) {
   }
   if (subUrlRevealed.value && subUrlEl.value && target && !subUrlEl.value.contains(target)) {
     subUrlRevealed.value = false
+  }
+  if (cfTokenRevealed.value && cfTokenEl.value && target && !cfTokenEl.value.contains(target)) {
+    cfTokenRevealed.value = false
   }
 }
 
@@ -278,12 +313,13 @@ const converterPlaceholder = computed(
   () => t('在此粘贴节点配置，例如：') + '\n- {"name":"VlessReality","type":"vless","server":"1.2.3.4","port":28443,...}'
 )
 
-const VALID_TABS = ['inbounds', 'outbounds', 'readable', 'advanced']
+const VALID_TABS = ['inbounds', 'outbounds', 'readable', 'advanced', 'certs']
 const TAB_PATHS = {
   inbounds: '/',
   outbounds: '/outbounds',
   readable: '/readable',
   advanced: '/advanced',
+  certs: '/certs',
 }
 
 function detectInitialTab() {
@@ -291,6 +327,7 @@ function detectInitialTab() {
     return boot.initial_tab
   }
   const p = window.location.pathname
+  if (p === '/certs' || p === '/cert') return 'certs'
   if (p === '/advanced' || p === '/custom-config') return 'advanced'
   if (p === '/readable' || p === '/convert') return 'readable'
   if (p === '/outbounds') return 'outbounds'
@@ -446,6 +483,56 @@ const converterInput = ref('')
 const converterOutput = ref('')
 const converterError = ref('')
 
+// HTTPS Certificate management state
+const certModeForm = reactive({
+  mode: 'dns',
+  cf_token: state.cf_token || '',
+})
+
+const certModeValue = computed(() => state.cert_mode || (state.status && state.status.cert_mode) || 'port')
+const certModeLabel = computed(() => {
+  if (state.mode === 'no-cert' && !state.certs_present && !state.domain) {
+    return t('无证书模式')
+  }
+  const m = certModeValue.value
+  if (m === 'dns') return t('Cloudflare DNS')
+  if (m === 'manual') return t('手动证书')
+  return t('端口模式')
+})
+const certDomainDisplay = computed(() => state.domain || (state.status && state.status.domain) || '—')
+const certIssuerDisplay = computed(() => (state.status && state.status.cert_issuer) || state.cert_issuer || '—')
+const certExpiresDisplay = computed(() => (state.status && state.status.cert_expires) || state.cert_expires || '—')
+const certDaysValue = computed(() => {
+  const d = state.status && state.status.cert_days !== undefined ? state.status.cert_days : state.cert_days
+  return d === null || d === undefined || d === '' ? null : Number(d)
+})
+const certIsTemp = computed(() => /clashgate temporary/i.test(certIssuerDisplay.value))
+
+async function submitCertMode() {
+  if (busyKey.value) return
+  if (certModeForm.mode === 'dns') {
+    const tok = certModeForm.cf_token
+    if (!tok) {
+      showToast(t('请输入 Cloudflare API Token'), false)
+      return
+    }
+    if (/[\s"']/.test(tok)) {
+      showToast(t('API Token 不能包含空格或引号'), false)
+      return
+    }
+  }
+  maskAllSensitive()
+  await postAction(
+    '/action/cert-mode',
+    {
+      cert_mode: certModeForm.mode,
+      cf_token: certModeForm.cf_token,
+    },
+    '/action/cert-mode'
+  )
+  maskAllSensitive()
+}
+
 const trafficDisplay = computed(() => {
   const s = state.status || {}
   if (s.traffic_display) return s.traffic_display
@@ -557,6 +644,14 @@ async function refreshServerStateSilent() {
           Object.assign(state.status, data.status)
           if (data.status.mihomo_version) state.mihomo_version = data.status.mihomo_version
         }
+        if (data.certs_present !== undefined) state.certs_present = data.certs_present
+        if (data.mode !== undefined) state.mode = data.mode
+        if (data.cert_mode !== undefined) state.cert_mode = data.cert_mode
+        if (data.domain !== undefined) state.domain = data.domain
+        if (data.cert_issuer !== undefined) state.cert_issuer = data.cert_issuer
+        if (data.cert_expires !== undefined) state.cert_expires = data.cert_expires
+        if (data.cert_days !== undefined) state.cert_days = data.cert_days
+        if (data.cert_hours !== undefined) state.cert_hours = data.cert_hours
       }
     }
   } catch {}
@@ -585,6 +680,18 @@ function applyServerState(newState) {
   if (newState.controller_port !== undefined) state.controller_port = newState.controller_port
   if (newState.controller_listening !== undefined) state.controller_listening = newState.controller_listening
   if (newState.certs_present !== undefined) state.certs_present = newState.certs_present
+  if (newState.mode !== undefined) state.mode = newState.mode
+  if (newState.cert_mode !== undefined) state.cert_mode = newState.cert_mode
+  if (newState.domain !== undefined) state.domain = newState.domain
+  if (newState.cf_token !== undefined) {
+    if (newState.cf_token !== state.cf_token) cfTokenRevealed.value = false
+    state.cf_token = newState.cf_token
+    if (newState.cf_token) certModeForm.cf_token = newState.cf_token
+  }
+  if (newState.cert_issuer !== undefined) state.cert_issuer = newState.cert_issuer
+  if (newState.cert_expires !== undefined) state.cert_expires = newState.cert_expires
+  if (newState.cert_days !== undefined) state.cert_days = newState.cert_days
+  if (newState.cert_hours !== undefined) state.cert_hours = newState.cert_hours
   if (newState.custom_config_mode !== undefined) state.custom_config_mode = newState.custom_config_mode
   if (newState.custom_config_raw !== undefined) {
     state.custom_config_raw = newState.custom_config_raw
@@ -1577,6 +1684,19 @@ onUnmounted(() => {
         >
           {{ t('自定义服务端配置') }}
         </button>
+        <button
+          id="tab-certs"
+          type="button"
+          @click="selectTab('certs')"
+          class="px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer"
+          :class="
+            activeTab === 'certs'
+              ? 'cg-btn-primary'
+              : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
+          "
+        >
+          {{ t('HTTPS 证书') }}
+        </button>
       </div>
 
       <!-- TAB 1 (HOMEPAGE): Zashboard + 客户端订阅 + 入站节点与添加节点 -->
@@ -2393,6 +2513,249 @@ onUnmounted(() => {
               </div>
             </form>
           </section>
+        </div>
+      </Transition>
+
+      <!-- TAB 5: HTTPS 证书管理 -->
+      <Transition name="cg-tab">
+        <div v-show="activeTab === 'certs'" id="certs-panel" class="space-y-6">
+          <!-- 证书概览与状态 -->
+          <section id="cert-status-card" class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div class="flex items-center gap-2.5 flex-wrap">
+                <span
+                  class="w-2.5 h-2.5 rounded-full"
+                  :class="
+                    !state.certs_present || !state.status.cert_expires
+                      ? 'bg-slate-400'
+                      : certIsTemp || (certDaysValue !== null && certDaysValue < 14)
+                        ? 'bg-amber-500'
+                        : 'bg-emerald-500'
+                  "
+                ></span>
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('HTTPS 证书管理') }}</h2>
+                <span
+                  class="px-2.5 py-0.5 text-xs font-semibold rounded-full border"
+                  :class="
+                    !state.certs_present || !state.status.cert_expires
+                      ? 'bg-slate-50 text-slate-600 border-slate-200/80'
+                      : certIsTemp
+                        ? 'bg-amber-50 text-amber-700 border-amber-200/80'
+                        : certDaysValue !== null && certDaysValue < 14
+                          ? 'bg-amber-50 text-amber-700 border-amber-200/80'
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-200/70'
+                  "
+                >
+                  {{
+                    !state.certs_present || !state.status.cert_expires
+                      ? t('未检测到证书')
+                      : certIsTemp
+                        ? t('临时自签证书')
+                        : certDaysValue !== null && certDaysValue < 14
+                          ? t('即将过期')
+                          : t('有效')
+                  }}
+                </span>
+              </div>
+
+              <div class="flex items-center gap-2 flex-wrap">
+                <button
+                  id="cert-renew-btn"
+                  type="button"
+                  :disabled="busyKey === '/action/cert'"
+                  @click="postAction('/action/cert', {}, '/action/cert')"
+                  class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 disabled:opacity-50 transition cursor-pointer"
+                >
+                  {{ busyKey === '/action/cert' ? t('检查续期中…') : t('立即检查 / 续期') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- 无证书空态说明 -->
+            <div
+              v-if="state.mode === 'no-cert' || !state.certs_present"
+              id="cert-empty-notice"
+              class="rounded-xl bg-amber-50/90 border border-amber-200/80 px-4 py-3 text-xs text-amber-900 leading-relaxed"
+            >
+              {{ t('当前为无证书模式或未检测到证书文件（/etc/clashgate/certs/fullchain.pem）。如需启用自动证书，可在下方配置 Cloudflare DNS 模式并申请证书。') }}
+            </div>
+
+            <!-- 手动证书提示 -->
+            <div
+              v-else-if="certModeValue === 'manual'"
+              id="cert-manual-notice"
+              class="rounded-xl bg-[#f4fbf7] border border-emerald-200/80 px-4 py-3 text-xs text-emerald-900 leading-relaxed"
+            >
+              {{ t('当前为手动证书模式。手动证书请直接替换 /etc/clashgate/certs/ 下的 fullchain.pem 与 privkey.pem 文件，然后点击右上角「立即检查 / 续期」校验证书。') }}
+            </div>
+
+            <!-- 证书信息字段网格 -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+              <div class="rounded-xl bg-[#f8fbf9] border border-slate-200/80 p-3.5">
+                <div class="text-xs font-medium text-slate-500">{{ t('域名') }}</div>
+                <div id="cert-domain" class="mt-1.5 text-sm font-bold text-slate-900 font-mono break-all">
+                  {{ certDomainDisplay }}
+                </div>
+              </div>
+
+              <div class="rounded-xl bg-[#f8fbf9] border border-slate-200/80 p-3.5">
+                <div class="text-xs font-medium text-slate-500">{{ t('当前模式') }}</div>
+                <div id="cert-current-mode" class="mt-1.5 text-sm font-bold text-slate-900">
+                  {{ certModeLabel }}
+                </div>
+              </div>
+
+              <div class="rounded-xl bg-[#f8fbf9] border border-slate-200/80 p-3.5">
+                <div class="text-xs font-medium text-slate-500">{{ t('颁发者') }}</div>
+                <div id="cert-issuer" class="mt-1.5 text-sm font-bold text-slate-900 break-all">
+                  {{ certIssuerDisplay }}
+                </div>
+              </div>
+
+              <div class="rounded-xl bg-[#f8fbf9] border border-slate-200/80 p-3.5">
+                <div class="text-xs font-medium text-slate-500">{{ t('过期时间') }}</div>
+                <div id="cert-expires" class="mt-1.5 text-sm font-bold text-slate-900 font-mono tabular-nums">
+                  {{ certExpiresDisplay }}
+                </div>
+              </div>
+
+              <div
+                class="rounded-xl border p-3.5"
+                :class="
+                  certDaysValue !== null && certDaysValue < 14
+                    ? 'bg-amber-50/80 border-amber-200/90'
+                    : 'bg-[#f8fbf9] border-slate-200/80'
+                "
+              >
+                <div
+                  class="text-xs font-medium"
+                  :class="certDaysValue !== null && certDaysValue < 14 ? 'text-amber-800' : 'text-slate-500'"
+                >
+                  {{ t('剩余天数') }}
+                </div>
+                <div
+                  id="cert-days"
+                  class="mt-1.5 text-sm font-bold tabular-nums"
+                  :class="certDaysValue !== null && certDaysValue < 14 ? 'text-amber-900' : 'text-slate-900'"
+                >
+                  {{ certDaysValue !== null ? `${certDaysValue} ${t('天')}` : '—' }}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 切换到 Cloudflare DNS 续证模式 & 如何获取 API Token -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <!-- Left: 切换 Cloudflare DNS 模式表单 -->
+            <section id="cert-dns-form-card" class="lg:col-span-6 cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
+              <div>
+                <div class="flex items-center gap-2.5">
+                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('切换到 Cloudflare DNS 续证模式') }}</h2>
+                  <span
+                    class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/70"
+                  >
+                    Cloudflare DNS
+                  </span>
+                </div>
+                <p class="text-xs text-slate-500 mt-1 leading-relaxed">
+                  {{ t('立即生效，无需点击顶栏重载配置。保存后将立即调用 acme.sh 申请或续期证书。') }}
+                </p>
+              </div>
+
+              <form @submit.prevent="submitCertMode" class="space-y-4" novalidate>
+                <div>
+                  <label for="cert-mode-select" class="block text-xs font-semibold text-slate-700 mb-1.5">
+                    {{ t('目标续证模式') }}
+                  </label>
+                  <select
+                    id="cert-mode-select"
+                    v-model="certModeForm.mode"
+                    name="cert_mode"
+                    class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                  >
+                    <option value="dns">{{ t('Cloudflare DNS（推荐，免 80 端口）') }}</option>
+                    <option value="port">{{ t('端口模式') }}</option>
+                  </select>
+                </div>
+
+                <div v-if="certModeForm.mode === 'dns'">
+                  <label for="cf-token" class="block text-xs font-semibold text-slate-700 mb-1.5">
+                    {{ t('Cloudflare API Token') }}
+                  </label>
+                  <input
+                    id="cf-token"
+                    ref="cfTokenEl"
+                    v-model="certModeForm.cf_token"
+                    name="cf_token"
+                    :type="cfTokenRevealed ? 'text' : 'password'"
+                    autocomplete="off"
+                    spellcheck="false"
+                    :placeholder="t('请输入或粘贴具备 Zone.DNS 编辑权限的 Cloudflare API Token')"
+                    @click="revealCfToken"
+                    @blur="cfTokenRevealed = false"
+                    class="cg-input w-full h-10 px-3.5 rounded-xl border border-emerald-100 bg-[#f6faf8] hover:bg-emerald-50/50 focus:bg-white font-mono text-xs transition"
+                    :class="cfTokenRevealed ? 'text-slate-800' : 'text-slate-600 tracking-widest'"
+                  />
+                </div>
+
+                <button
+                  id="cert-mode-submit"
+                  type="submit"
+                  :disabled="busyKey === '/action/cert-mode'"
+                  class="cg-btn-primary w-full h-10 rounded-xl disabled:opacity-50 text-sm font-semibold cursor-pointer"
+                >
+                  {{ busyKey === '/action/cert-mode' ? t('正在切换并续证…') : t('切换并续证') }}
+                </button>
+              </form>
+            </section>
+
+            <!-- Right: 如何获取 Cloudflare API Token 说明卡 -->
+            <section id="cf-token-guide-card" class="lg:col-span-6 cg-surface rounded-2xl p-5 sm:p-6 space-y-3.5">
+              <div class="flex items-center gap-2.5">
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('如何获取 Cloudflare API Token') }}</h2>
+              </div>
+              <p class="text-xs text-slate-500">
+                {{ t('按以下步骤在 Cloudflare 创建仅限 DNS 编辑权限的 API Token：') }}
+              </p>
+
+              <ol class="space-y-2.5 text-xs text-slate-700 leading-relaxed list-decimal list-inside">
+                <li>
+                  {{ t('打开 Cloudflare Dashboard →') }}
+                  <b class="font-semibold text-slate-900">My Profile</b> →
+                  <b class="font-semibold text-slate-900">API Tokens</b>
+                  {{ t('（直达：') }}<a
+                    href="https://dash.cloudflare.com/profile/api-tokens"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-emerald-700 hover:text-emerald-600 underline underline-offset-2 font-mono break-all"
+                  >https://dash.cloudflare.com/profile/api-tokens</a>）。
+                </li>
+                <li>
+                  {{ t('点击') }} <b class="font-semibold text-slate-900">Create Token</b>{{ t('，选择模板') }}
+                  <b class="font-semibold text-slate-900">Edit zone DNS</b>{{ t('，或自定义权限：') }}
+                  <ul class="mt-1.5 ml-4 space-y-1 list-disc text-slate-600">
+                    <li>
+                      <b class="font-semibold text-slate-800">Permissions</b>：<code class="px-1.5 py-0.5 rounded bg-slate-100 font-mono">Zone</code> →
+                      <code class="px-1.5 py-0.5 rounded bg-slate-100 font-mono">DNS</code> →
+                      <code class="px-1.5 py-0.5 rounded bg-slate-100 font-mono">Edit</code>
+                    </li>
+                    <li>
+                      <b class="font-semibold text-slate-800">Zone Resources</b>：<code class="px-1.5 py-0.5 rounded bg-slate-100 font-mono">Include</code> →
+                      {{ t('选择当前面板域名所在 Zone（或具体域名）') }}
+                    </li>
+                  </ul>
+                </li>
+                <li>
+                  {{ t('创建后复制生成的 Token，粘贴到左侧输入框并点击「切换并续证」（Token 仅显示一次，请妥善保存）。') }}
+                </li>
+              </ol>
+
+              <div class="rounded-xl bg-[#f4fbf7] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
+                {{ t('DNS 模式不需要占用 80 端口，也不要求灰云（可开启橙云代理）；Token 仅保存在本机') }}
+                <code class="font-mono font-semibold">/etc/clashgate/clashgate.env</code>。
+              </div>
+            </section>
+          </div>
         </div>
       </Transition>
     </main>

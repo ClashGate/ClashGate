@@ -3,20 +3,20 @@
 <p align="center"><a href="README.md">中文</a> · <b>English</b></p>
 
 <p align="center">
-  ClashGate · a lightweight, modern VPS proxy server and admin console (v1.02)
+  ClashGate · a lightweight, modern VPS proxy server and admin console (v1.03)
 </p>
 
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.02" src="https://img.shields.io/badge/version-v1.02-10b981" />
+  <img alt="Version: v1.03" src="https://img.shields.io/badge/version-v1.03-10b981" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
 ## ✨ Features
 
 - **Three install modes**: **no-certificate mode** (default; outputs a VLESS Reality node directly), **auto-certificate mode** (automatically obtain a Let's Encrypt certificate, with port validation or Cloudflare DNS API validation and automatic renewal), and **manual certificate mode** (bring your own certificate in `/etc/clashgate/certs/`).
-- **HTTPS admin panel (v1.02)**:
+- **HTTPS admin panel (v1.03)**:
   - **Ready to use**: 12 inbound protocols (VLESS Reality, Hysteria2, Snell V5, Shadowsocks, AnyTLS, TUIC v5, TrustTunnel, ShadowQUIC, Mieru, Sudoku, HTTP, SOCKS5). Security parameters (ciphers, obfuscation, SNI pool, fingerprints, etc.) are built in and locked, with one-click **password / key reset**.
   - **Everything on the home page**: live proxied-traffic stats (GB), the subscription link (changeable in one click), inbound nodes, and the Zashboard console (with prefilled direct URL and API secret). The top bar offers one-click core update and version check.
   - **Two-way live sync**: external subscriptions (`proxy-providers`), outbound nodes (incl. `easytier` / `tailscale`), a readable-config converter, and custom server configs (certificate paths auto-fixed, one-click restore of the default VlessReality config). Changes are validated and then synced to the server and the client subscription.

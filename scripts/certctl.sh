@@ -16,7 +16,7 @@
 # 退出码：0 = 证书已就绪，1 = 失败。
 set -Eeuo pipefail
 
-CS_ROOT=/etc/clashgate
+CS_ROOT=${CLASHGATE_ROOT:-}/etc/clashgate
 ENV_FILE=$CS_ROOT/clashgate.env
 ACME_HOME=$CS_ROOT/acme.sh             # acme.sh 程序、账户与证书（--home）
 LIVE=$ACME_HOME/live                   # acme.sh 安装证书的位置（--fullchain-file / --key-file）

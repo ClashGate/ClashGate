@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.02 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
+"""ClashGate v1.03 - rebuilt admin console for ClashGate (Vue 3 + Tailwind CSS, light green SaaS theme).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -40,7 +40,7 @@ from urllib.parse import parse_qs, urlparse, quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 
-VERSION = "1.02"
+VERSION = "1.03"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -200,6 +200,12 @@ def resolve_template_path(rel_path: str) -> str:
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     p2 = os.path.join(here, rel_path)
     return p2 if os.path.isfile(p2) else p1
+
+
+def resolve_certctl_path() -> str:
+    if os.path.isfile(CERTCTL):
+        return CERTCTL
+    return resolve_template_path("scripts/certctl.sh")
 
 
 def ensure_unified_root():
@@ -3445,6 +3451,15 @@ class Panel(BaseHTTPRequestHandler):
             if req_lang == "en" and isinstance(entry.get("detail"), str):
                 entry["detail"] = _tr_msg(entry["detail"], "en")
             localized_pending_items.append(entry)
+        has_certs = certs_present()
+        install_mode = env.get("MODE") or ("auto-cert" if (has_certs or env.get("DOMAIN") or env.get("CERT_MODE")) else "no-cert")
+        cert_mode = env.get("CERT_MODE") or "port"
+        domain = env.get("DOMAIN", "")
+        cf_token = env.get("CF_TOKEN", "")
+        cert_issuer = cert.get("issuer", "")
+        cert_expires = cert.get("expires", "")
+        cert_days = cert.get("days")
+        cert_hours = cert.get("hours")
         return {
             "version": VERSION,
             "mihomo_version": mver,
@@ -3456,7 +3471,15 @@ class Panel(BaseHTTPRequestHandler):
             "srv_cfg_url": "/config/server.yaml",
             "controller_port": cport,
             "controller_listening": cport in listening,
-            "certs_present": certs_present(),
+            "certs_present": has_certs,
+            "mode": install_mode,
+            "cert_mode": cert_mode,
+            "domain": domain,
+            "cf_token": cf_token,
+            "cert_issuer": cert_issuer,
+            "cert_expires": cert_expires,
+            "cert_days": cert_days,
+            "cert_hours": cert_hours,
             "custom_config_mode": custom_active,
             "custom_config_raw": cur_cfg,
             "pending_reload_count": len(localized_pending_items),
@@ -3471,9 +3494,13 @@ class Panel(BaseHTTPRequestHandler):
                 "outbound_nodes_count": len(srv_proxies),
                 "outbound_providers_count": len(providers),
                 "pending_reload_count": len(localized_pending_items),
-                "cert_days": cert.get("days"),
-                "cert_hours": cert.get("hours"),
-                "cert_expires": cert.get("expires", ""),
+                "mode": install_mode,
+                "cert_mode": cert_mode,
+                "domain": domain,
+                "cert_issuer": cert_issuer,
+                "cert_days": cert_days,
+                "cert_hours": cert_hours,
+                "cert_expires": cert_expires,
                 "traffic_up_bytes": traffic["up_bytes"],
                 "traffic_down_bytes": traffic["down_bytes"],
                 "traffic_total_bytes": traffic["total_bytes"],
@@ -3579,6 +3606,8 @@ class Panel(BaseHTTPRequestHandler):
             return self.send(200, self.dashboard(s, initial_tab="readable"))
         if path in ("/advanced", "/custom-config"):
             return self.send(200, self.dashboard(s, initial_tab="advanced"))
+        if path in ("/certs", "/cert"):
+            return self.send(200, self.dashboard(s, initial_tab="certs"))
         if path == "/api/state":
             return self.send(200, json.dumps(self.build_client_state(s), ensure_ascii=False), "application/json; charset=utf-8")
         if path == "/api/update-core-status":
@@ -3602,9 +3631,16 @@ class Panel(BaseHTTPRequestHandler):
             return self.do_server_config()
         if path == "/api/status":
             st = mihomo_status()
+            env_st = read_env()
+            cert_parsed = parse_cert(st["cert"].get("info", ""))
             st["version_panel"] = VERSION
             st["mihomo_version"] = get_mihomo_version_num(st)
             st["custom_config_mode"] = is_custom_config_mode()
+            st["domain"] = env_st.get("DOMAIN", "")
+            st["cert_mode"] = env_st.get("CERT_MODE") or "port"
+            st["cert_expires"] = cert_parsed.get("expires", "")
+            st["cert_days"] = cert_parsed.get("days")
+            st["cert_issuer"] = cert_parsed.get("issuer", "")
             st["traffic"] = get_traffic_stats()
             st["inbounds"] = [{k: i[k] for k in ("id", "kind", "name", "port")} for i in load_inbounds()]
             st["reality_nodes"] = [{"name": n["name"], "port": n["port"]} for n in read_nodes()]
@@ -3651,6 +3687,8 @@ class Panel(BaseHTTPRequestHandler):
             return self.do_upgrade_self(s)
         if path == "/action/cert":
             return self.do_cert_action(s)
+        if path in ("/action/cert-mode", "/action/cert-dns"):
+            return self.do_cert_mode(s, form)
         if path == "/action/reset-secret":
             return self.do_reset_secret(s)
         if path == "/action/reset-sub":
@@ -3890,9 +3928,39 @@ class Panel(BaseHTTPRequestHandler):
 
     def do_cert_action(self, s):
         with LOCK:
-            rc, out = run([CERTCTL, "renew"], timeout=180)
+            env = read_env()
+            rc, out = run([resolve_certctl_path(), "renew"], timeout=180)
+            tok = env.get("CF_TOKEN", "")
+            if tok:
+                out = out.replace(tok, "***")
         if rc == 0:
             return self.respond_mutation(s, "证书检查 / 续期完成。", True)
+        tail = " | ".join(l for l in out.splitlines() if l.strip())[-300:]
+        return self.respond_mutation(s, f"证书申请 / 续期失败：{tail}", False)
+
+    def do_cert_mode(self, s, form):
+        mode = (form.get("cert_mode") or "dns").strip()
+        if mode not in ("dns", "port"):
+            return self.respond_mutation(s, "不支持的证书模式", False)
+        raw_token = form.get("cf_token") if "cf_token" in form else form.get("token", "")
+        if mode == "dns":
+            if not raw_token:
+                return self.respond_mutation(s, "请输入 Cloudflare API Token", False)
+            if re.search(r'[\s"\'`$\\]', raw_token):
+                return self.respond_mutation(s, "API Token 不能包含空格或引号", False)
+        with LOCK:
+            if mode == "dns":
+                write_env_var("CERT_MODE", "dns")
+                write_env_var("CF_TOKEN", raw_token)
+            else:
+                write_env_var("CERT_MODE", "port")
+            rc, out = run([resolve_certctl_path(), "renew"], timeout=180)
+            if raw_token:
+                out = out.replace(raw_token, "***")
+        if rc == 0:
+            if mode == "dns":
+                return self.respond_mutation(s, "已切换为 Cloudflare DNS 续证模式，证书申请 / 续期完成。", True)
+            return self.respond_mutation(s, "已切换为端口续证模式，证书检查 / 续期完成。", True)
         tail = " | ".join(l for l in out.splitlines() if l.strip())[-300:]
         return self.respond_mutation(s, f"证书申请 / 续期失败：{tail}", False)
 
@@ -4231,7 +4299,7 @@ class Panel(BaseHTTPRequestHandler):
         q = parse_qs(urlparse(self.path).query)
         msg, ok = q.get("msg", [""])[0], q.get("ok", ["1"])[0] == "1"
         tab_q = q.get("tab", [""])[0]
-        if tab_q in ("inbounds", "outbounds", "readable", "advanced"):
+        if tab_q in ("inbounds", "outbounds", "readable", "advanced", "certs"):
             initial_tab = tab_q
         env = read_env()
         st = mihomo_status()
@@ -4270,6 +4338,20 @@ class Panel(BaseHTTPRequestHandler):
             f"<form method=post action=/action/reset-sub>{hid}<button type=submit>更换订阅链接</button></form></section>"
             if state["sub_url"] else ""
         )
+        cert_sec = (
+            f"<section id=certs-card><h2>HTTPS 证书</h2>"
+            f"<div><span>{e(state.get('domain') or '—')}</span>"
+            f"<span>{e(state.get('cert_mode') or 'port')}</span>"
+            f"<span>{e(state.get('cert_issuer') or '—')}</span>"
+            f"<span>{e(state.get('cert_expires') or '—')}</span></div>"
+            f"<form method=post action=/action/cert>{hid}<button type=submit>立即检查 / 续期</button></form>"
+            f"<form method=post action=/action/cert-mode>{hid}"
+            f"<input type=hidden name=cert_mode value=dns>"
+            f"<input id=cf-token name=cf_token type=password placeholder='Cloudflare API Token'>"
+            f"<button type=submit>切换并续证</button></form>"
+            f"<a href='https://dash.cloudflare.com/profile/api-tokens' target=_blank rel=noopener>https://dash.cloudflare.com/profile/api-tokens</a>"
+            f"</section>"
+        )
         mver = state.get("mihomo_version", "")
         ver_label = f"v{VERSION} · mihomo {mver}" if mver else f"v{VERSION}"
         fallback = (
@@ -4284,7 +4366,7 @@ class Panel(BaseHTTPRequestHandler):
             f"<button type=submit>添加入站节点</button></form></section>"
             f"<section><h2>自定义 mihomo 服务端配置</h2>"
             f"<form method=post action=/config/reset-template>{hid}<button type=submit>恢复标准模板</button></form></section>"
-            f"</main>"
+            f"{cert_sec}</main>"
         )
         return render_spa_html("ClashGate", boot, fallback)
 
