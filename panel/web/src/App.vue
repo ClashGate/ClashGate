@@ -5,7 +5,7 @@ import { t, lang, setLang } from './i18n.js'
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '0.98',
+  version: '0.99',
   mihomo_version: '',
   csrf: '',
   login_error: '',
@@ -51,7 +51,7 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '0.98',
+  version: boot.version || '0.99',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
@@ -74,6 +74,7 @@ const state = reactive({
 })
 
 const showPendingDiff = ref(false)
+const showSubQrModal = ref(false)
 const confirmDialog = reactive({
   show: false,
   title: '',
@@ -439,6 +440,7 @@ function applyServerState(newState) {
   if (newState.csrf) state.csrf = newState.csrf
   if (newState.sub_url !== undefined) state.sub_url = newState.sub_url
   if (newState.sub_qr_data_url !== undefined) state.sub_qr_data_url = newState.sub_qr_data_url
+  if (!state.sub_url || !state.sub_qr_data_url) showSubQrModal.value = false
   if (newState.zb_url !== undefined) state.zb_url = newState.zb_url
   if (newState.mihomo_secret !== undefined) state.mihomo_secret = newState.mihomo_secret
   if (newState.srv_cfg_url !== undefined) state.srv_cfg_url = newState.srv_cfg_url
@@ -978,6 +980,54 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- Subscription QR Code Modal (only for sub_url) -->
+    <div
+      v-if="showSubQrModal && state.sub_url && state.sub_qr_data_url"
+      id="sub-qr-modal"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/30 backdrop-blur-xs"
+      @click.self="showSubQrModal = false"
+    >
+      <div
+        class="w-full max-w-sm bg-white rounded-2xl border border-emerald-100 p-6 shadow-xl space-y-4"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <h3 class="text-base font-bold text-slate-900">{{ t('订阅二维码') }}</h3>
+          <button
+            type="button"
+            @click="showSubQrModal = false"
+            class="text-slate-400 hover:text-slate-600 text-sm px-2 py-0.5 rounded-lg cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+        <div class="flex flex-col items-center gap-3 py-2">
+          <img
+            id="sub-qr"
+            :src="state.sub_qr_data_url"
+            :alt="t('订阅二维码')"
+            class="w-48 h-48 rounded-2xl bg-white p-2 border border-emerald-200/80 shadow-xs"
+          />
+          <p class="text-xs text-slate-500 text-center">{{ t('扫码导入 Clash / Mihomo 订阅') }}</p>
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <button
+            type="button"
+            @click="copyRaw(state.sub_url, 'sub-url-modal')"
+            class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
+          >
+            {{ copiedKey === 'sub-url-modal' ? t('已复制') : t('复制订阅链接') }}
+          </button>
+          <button
+            type="button"
+            @click="showSubQrModal = false"
+            class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
+          >
+            {{ t('关闭') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Bright Topbar -->
     <header class="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-emerald-100/90 text-slate-900">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
@@ -1048,27 +1098,24 @@ onUnmounted(() => {
       <!-- Concise Status Strip -->
       <div class="space-y-3">
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <!-- Card 1: 入站节点 -->
+          <!-- Card 1: 运行状态 -->
           <div
-            id="stat-card-inbounds"
+            id="stat-card-status"
             class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)] flex items-center justify-between gap-2"
           >
             <div>
-              <div class="flex items-center gap-2">
+              <div class="text-xs font-medium text-slate-500">{{ t('运行状态') }}</div>
+              <div class="mt-1.5 flex items-center gap-2">
                 <span
-                  class="w-2 h-2 rounded-full"
+                  class="w-2.5 h-2.5 rounded-full"
                   :class="{
-                    'bg-emerald-500 ring-3 ring-emerald-500/20': state.status.state_cls === 'ok',
-                    'bg-amber-500 ring-3 ring-amber-500/20': state.status.state_cls === 'warn',
-                    'bg-rose-500 ring-3 ring-rose-500/20':
+                    'bg-emerald-500 ring-4 ring-emerald-500/20': state.status.state_cls === 'ok',
+                    'bg-amber-500 ring-4 ring-amber-500/20': state.status.state_cls === 'warn',
+                    'bg-rose-500 ring-4 ring-rose-500/20':
                       state.status.state_cls !== 'ok' && state.status.state_cls !== 'warn',
                   }"
                 ></span>
-                <span class="text-xs font-medium text-slate-500">{{ t('入站节点') }}</span>
-              </div>
-              <div class="mt-1.5 flex items-baseline gap-1.5">
-                <span class="text-lg font-bold text-slate-900">{{ state.inbounds.length }}</span>
-                <span class="text-xs text-slate-500">{{ state.inbounds.length }} {{ t('个节点运行中') }}</span>
+                <span class="text-lg font-bold text-slate-900">{{ t(state.status.state_txt || '未知') }}</span>
               </div>
             </div>
             <span
@@ -1083,19 +1130,23 @@ onUnmounted(() => {
             </span>
           </div>
 
-          <!-- Card 2: 出站节点 -->
+          <!-- Card 2: 入站 · 出站（合并卡） -->
           <div
-            id="stat-card-outbounds"
+            id="stat-card-nodes"
             class="bg-white rounded-2xl border border-emerald-100/90 p-4 sm:p-5 shadow-[0_2px_10px_-4px_rgba(16,185,129,0.08)]"
           >
-            <div class="text-xs font-medium text-slate-500">{{ t('出站节点') }}</div>
-            <div class="mt-1.5 flex items-baseline gap-1.5">
-              <span class="text-lg font-bold text-slate-900">
-                {{ (state.status.outbound_nodes_count ?? 0) + (state.status.outbound_providers_count ?? 0) }}
-              </span>
-              <span class="text-xs text-slate-500">
-                {{ state.status.outbound_nodes_count ?? 0 }} {{ t('节点 ·') }} {{ state.status.outbound_providers_count ?? 0 }} {{ t('订阅源') }}
-              </span>
+            <div class="text-xs font-medium text-slate-500">{{ t('入站 · 出站') }}</div>
+            <div class="mt-1.5 space-y-0.5 text-xs text-slate-600">
+              <div class="flex items-baseline gap-1.5">
+                <span class="text-slate-400">{{ t('入站：') }}</span>
+                <span class="text-sm font-bold text-slate-900">{{ state.inbounds.length }}</span>
+                <span>{{ t('个节点运行中') }}</span>
+              </div>
+              <div class="flex items-baseline gap-1.5">
+                <span class="text-slate-400">{{ t('出站：') }}</span>
+                <span class="text-sm font-bold text-slate-900">{{ state.status.outbound_nodes_count ?? 0 }}</span>
+                <span>{{ t('节点 ·') }} {{ state.status.outbound_providers_count ?? 0 }} {{ t('订阅源') }}</span>
+              </div>
             </div>
           </div>
 
@@ -1379,6 +1430,15 @@ onUnmounted(() => {
                   {{ copiedKey === 'sub-url' ? t('已复制') : t('复制订阅链接') }}
                 </button>
                 <button
+                  v-if="state.sub_url && state.sub_qr_data_url"
+                  id="sub-qr-btn"
+                  type="button"
+                  @click="showSubQrModal = true"
+                  class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
+                >
+                  {{ t('二维码') }}
+                </button>
+                <button
                   type="button"
                   :disabled="busyKey === 'reset-sub'"
                   @click="resetSubUrl"
@@ -1398,32 +1458,15 @@ onUnmounted(() => {
             </div>
 
             <div class="space-y-2.5">
-              <div class="flex flex-col sm:flex-row sm:items-center gap-3">
-                <div class="flex-1 min-w-0">
-                  <div class="text-xs font-medium text-slate-500 mb-1">
-                    {{ t('导入 Clash / Mihomo 客户端即可使用') }}
-                  </div>
-                  <div
-                    id="sub-url"
-                    class="px-3.5 py-2.5 rounded-xl bg-[#f6faf8] border border-emerald-100 font-mono text-xs text-slate-700 break-all select-all"
-                  >
-                    {{ state.sub_url || '/etc/clashgate/client/mihomo-client.yaml' }}
-                  </div>
+              <div>
+                <div class="text-xs font-medium text-slate-500 mb-1">
+                  {{ t('导入 Clash / Mihomo 客户端即可使用') }}
                 </div>
                 <div
-                  v-if="state.sub_url && state.sub_qr_data_url"
-                  class="flex items-center gap-2.5 shrink-0 bg-[#f6faf8] border border-emerald-100 rounded-xl px-2.5 py-2"
+                  id="sub-url"
+                  class="px-3.5 py-2.5 rounded-xl bg-[#f6faf8] border border-emerald-100 font-mono text-xs text-slate-700 break-all select-all"
                 >
-                  <img
-                    id="sub-qr"
-                    :src="state.sub_qr_data_url"
-                    :alt="t('订阅二维码')"
-                    class="w-16 h-16 rounded-lg bg-white p-1 border border-emerald-200/70 shrink-0"
-                  />
-                  <div class="text-xs space-y-0.5 sm:max-w-[110px]">
-                    <div class="font-semibold text-slate-800">{{ t('订阅二维码') }}</div>
-                    <div class="text-[11px] text-slate-500 leading-tight">{{ t('扫码导入 Clash / Mihomo 订阅') }}</div>
-                  </div>
+                  {{ state.sub_url || '/etc/clashgate/client/mihomo-client.yaml' }}
                 </div>
               </div>
               <div class="text-xs text-slate-500 flex items-center justify-between gap-2 pt-1">
