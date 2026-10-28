@@ -5,7 +5,7 @@ import { t, lang, setLang } from './i18n.js'
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '1.01',
+  version: '1.02',
   mihomo_version: '',
   csrf: '',
   login_error: '',
@@ -51,7 +51,7 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '1.01',
+  version: boot.version || '1.02',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
@@ -1499,15 +1499,6 @@ onUnmounted(() => {
               <div class="flex items-center gap-2 flex-wrap">
                 <button
                   v-if="state.pending_reload_count > 0"
-                  type="button"
-                  :disabled="busyKey === '/action/reload' || busyKey === '/action/discard-pending'"
-                  @click="postAction('/action/reload', {}, '/action/reload')"
-                  class="px-3 py-1 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white transition cursor-pointer"
-                >
-                  {{ busyKey === '/action/reload' ? t('重载中…') : t('重载配置') }}
-                </button>
-                <button
-                  v-if="state.pending_reload_count > 0"
                   id="discard-pending-btn"
                   type="button"
                   :disabled="busyKey === '/action/discard-pending' || busyKey === '/action/reload'"
@@ -1515,13 +1506,6 @@ onUnmounted(() => {
                   class="px-3 py-1 rounded-lg text-xs font-semibold bg-white hover:bg-rose-50 text-rose-600 border border-rose-200/90 disabled:opacity-50 transition cursor-pointer"
                 >
                   {{ busyKey === '/action/discard-pending' ? t('丢弃中…') : t('丢弃草稿') }}
-                </button>
-                <button
-                  type="button"
-                  @click="showPendingDiff = false"
-                  class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white/80 hover:bg-white text-slate-600 border border-slate-200/80 transition cursor-pointer"
-                >
-                  {{ t('收起') }}
                 </button>
               </div>
             </div>
