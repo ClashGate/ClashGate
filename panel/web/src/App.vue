@@ -873,6 +873,7 @@ function formatFetchError(err) {
 async function postAction(url, params = {}, key = url, opts = {}) {
   if (busyKey.value) return null
   busyKey.value = key
+  const versionBefore = state.version
   const body = new URLSearchParams({ csrf: state.csrf, ...params }).toString()
   const ctrl = window.AbortController ? new AbortController() : null
   const timer = ctrl ? setTimeout(() => ctrl.abort(), 120000) : null
@@ -908,6 +909,7 @@ async function postAction(url, params = {}, key = url, opts = {}) {
       if (data.sub_url) state.sub_url = data.sub_url
     }
     if (!opts.silentToast) showToast(data.msg || (data.ok ? t('操作成功') : t('操作失败')), !!data.ok)
+    if (url === '/action/upgrade-self' && data.ok) await reloadPanelAfterUpgrade(versionBefore)
     return data
   } catch (err) {
     if (timer) clearTimeout(timer)
@@ -931,14 +933,11 @@ async function postAction(url, params = {}, key = url, opts = {}) {
         }
       }
     } catch {}
-    showToast(formatFetchError(err), false)
     if (url === '/action/upgrade-self') {
-      const recovered = await waitUntilPanelBack()
-      if (recovered) {
-        showToast(t('升级完成，登录状态已保持。'), true)
-        return { ok: true, state: recovered }
-      }
+      await reloadPanelAfterUpgrade(versionBefore)
+      return null
     }
+    showToast(formatFetchError(err), false)
     return null
   } finally {
     busyKey.value = ''
@@ -1209,26 +1208,32 @@ function resetTemplateConfig() {
   })
 }
 
-async function waitUntilPanelBack() {
+async function reloadPanelAfterUpgrade(previousVersion) {
   const deadline = Date.now() + 45000
+  let sawDown = false
   while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 1200))
+    await new Promise((r) => setTimeout(r, 800))
     try {
       const stRes = await fetch('/api/state', {
         headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
         credentials: 'same-origin',
         cache: 'no-store',
       })
-      if (stRes.status === 401) return null
-      if (!stRes.ok) continue
+      if (!stRes.ok) {
+        sawDown = true
+        continue
+      }
       const stData = await stRes.json()
-      applyServerState(stData)
-      return stData
+      const ver = stData && stData.version
+      if (sawDown || (ver && previousVersion && ver !== previousVersion)) {
+        window.location.reload()
+        return
+      }
     } catch {
-      // Panel process is restarting after an update.
+      sawDown = true
     }
   }
-  return null
+  window.location.reload()
 }
 
 function selectTab(tab) {
@@ -1887,8 +1892,8 @@ onUnmounted(() => {
       </nav>
 
       <!-- TAB 1 (HOMEPAGE): Zashboard + 客户端订阅 + 入站节点与添加节点 -->
-      <Transition name="cg-tab">
-        <div v-show="activeTab === 'inbounds'" class="cg-home">
+      <Transition name="cg-tab" mode="out-in">
+        <div v-if="activeTab === 'inbounds'" key="inbounds" class="cg-home">
           <!-- 客户端订阅链接 -->
             <section
               id="sub-card"
@@ -2214,11 +2219,9 @@ onUnmounted(() => {
               </div>
             </section>
         </div>
-      </Transition>
 
       <!-- TAB 2: 服务端出站与外部订阅 -->
-      <Transition name="cg-tab">
-        <div v-show="activeTab === 'outbounds'" class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <div v-else-if="activeTab === 'outbounds'" key="outbounds" class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           <div class="space-y-4 min-w-0">
           <!-- Zashboard 控制面板 -->
           <section
@@ -2562,11 +2565,9 @@ onUnmounted(() => {
           </section>
           </div>
         </div>
-      </Transition>
 
       <!-- TAB 3: 易读配置转换 (Dedicated Converter Page) -->
-      <Transition name="cg-tab">
-        <div v-show="activeTab === 'readable'" class="space-y-6">
+        <div v-else-if="activeTab === 'readable'" key="readable" class="space-y-6">
           <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-5">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
@@ -2667,11 +2668,9 @@ onUnmounted(() => {
             </div>
           </section>
         </div>
-      </Transition>
 
       <!-- TAB 4: 自定义 mihomo 服务端配置 -->
-      <Transition name="cg-tab">
-        <div v-show="activeTab === 'advanced'" class="space-y-6">
+        <div v-else-if="activeTab === 'advanced'" key="advanced" class="space-y-6">
           <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-5">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div class="space-y-1">
@@ -2761,11 +2760,9 @@ onUnmounted(() => {
             </form>
           </section>
         </div>
-      </Transition>
 
       <!-- TAB 5: HTTPS 证书管理 -->
-      <Transition name="cg-tab">
-        <div v-show="activeTab === 'certs'" id="certs-panel" class="space-y-6">
+        <div v-else-if="activeTab === 'certs'" key="certs" id="certs-panel" class="space-y-6">
           <!-- 证书概览与状态 -->
           <section id="cert-status-card" class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -2992,11 +2989,9 @@ onUnmounted(() => {
             </section>
           </div>
         </div>
-      </Transition>
 
       <!-- Settings -->
-      <Transition name="cg-tab">
-        <div v-show="activeTab === 'settings'" class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <div v-else-if="activeTab === 'settings'" key="settings" class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
             <div class="flex items-center justify-between gap-4">
               <div>
