@@ -20,7 +20,7 @@ Simple and safe. The last mile of the Mihomo ecosystem.
 - **One-command proxy server**: deploy a Mihomo server on a common Linux VPS with a single command, ready to use.
 - **Client subscription included**: get a config you can import straight into Mihomo / Clash clients—no hand-assembled YAML.
 - **Many protocols**: add VLESS Reality, Shadowsocks, Hysteria2, Snell, AnyTLS, TUIC, TrustTunnel, ShadowQUIC, Mieru, or Sudoku in one click.
-- **Server-side routing**: when you need custom rules, replace the built-in template with your own Mihomo server config.
+- **Server-side routing**: when you need custom outbound routing, replace the built-in template with your own Mihomo server config.
 
 ## Install
 

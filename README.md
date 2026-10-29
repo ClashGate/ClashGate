@@ -20,7 +20,7 @@
 - **一键部署代理服务端**：一条命令即可在常见 Linux VPS 上完成 Mihomo 服务端部署，开箱即用。
 - **自带客户端订阅**：自动提供可直接导入 Mihomo / Clash 系客户端的配置，无需手动拼接。
 - **支持多种协议**：VLESS Reality、Shadowsocks、Hysteria2、Snell、AnyTLS、TUIC、TrustTunnel、ShadowQUIC、Mieru、Sudoku 一键添加。
-- **服务端支持分流**：需要自定义规则路由时，可替换为自己的 Mihomo 服务端配置。
+- **服务端支持分流**：需要自定义出站分流，可替换为自己的 Mihomo 服务端配置。
 
 ## 一键安装
 
