@@ -15,14 +15,12 @@
 
 Simple and safe. The last mile of the Mihomo ecosystem.
 
-ClashGate is not a kitchen-sink console. A VPS needs three answers: what listens, what it dials, and where the certificate lives. Security defaults stay locked. Changes sit as a draft until you click **Reload config**.
-
 ## What it does
 
-- **Three install modes**: no certificate (a VLESS Reality node, directly), automatic Let's Encrypt (port or Cloudflare DNS), or a certificate you bring yourself.
-- **A short panel**: Home, Outbound nodes, Node converter, HTTPS certificate. Custom server stays off until you enable it in Settings. Password changes live there too.
-- **Draft, then reload**: adding or removing nodes, rotating the subscription, and resetting keys are recorded first. **Reload config** writes the server and updates the client subscription.
-- **Your own server**: off by default. Turn it on to leave the built-in template behind and run entirely on a mihomo server config you write yourself.
+- **One-command proxy server**: deploy a Mihomo server on a common Linux VPS with a single command, ready to use.
+- **Client subscription included**: get a config you can import straight into Mihomo / Clash clients—no hand-assembled YAML.
+- **Many protocols**: add VLESS Reality, Shadowsocks, Hysteria2, Snell, AnyTLS, TUIC, TrustTunnel, ShadowQUIC, Mieru, or Sudoku in one click.
+- **Server-side routing**: when you need custom rules, replace the built-in template with your own Mihomo server config.
 
 ## Install
 
