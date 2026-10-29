@@ -95,6 +95,8 @@ TABLE = [
     ("证书申请 / 续期失败：{}", "Certificate request / renewal failed: {}"),
     ("发现新版本 v{}（当前 v{}）", "New version v{} found (current v{})"),
     ("当前已是最新版本（v{}）", "Already on the latest version (v{})"),
+    ("版本检查失败：{}", "Version check failed: {}"),
+    ("版本检查失败", "Version check failed"),
     ("检查更新失败：无法连接 GitHub 获取最新版本（{}）", "Update check failed: cannot reach GitHub for the latest version ({})"),
     ("升级失败：未找到 clashgate 管理脚本", "Upgrade failed: clashgate management script not found"),
     ("升级失败：{}", "Upgrade failed: {}"),
@@ -135,6 +137,16 @@ TABLE = [
     ("不支持的证书模式", "Unsupported certificate mode"),
     ("已切换为 Cloudflare DNS 续证模式，证书申请 / 续期完成。", "Switched to Cloudflare DNS renewal mode; certificate request / renewal finished."),
     ("已切换为端口续证模式，证书检查 / 续期完成。", "Switched to port renewal mode; certificate check / renewal finished."),
+    ("未切换证书模式，未重新生成证书。", "Certificate mode was not changed, so the certificate was not regenerated."),
+    ("已切换并重新生成证书。", "Switched mode and regenerated the certificate."),
+    ("重新生成证书失败：80 端口被占用。端口模式需要临时使用 80 端口，请释放该端口，或改用 Cloudflare DNS。", "Certificate regeneration failed: port 80 is in use. Port mode needs port 80 briefly. Free it, or use Cloudflare DNS."),
+    ("重新生成证书失败：Cloudflare API Token 无效，或没有该域名的 DNS 编辑权限。{}", "Certificate regeneration failed: the Cloudflare API Token is invalid or lacks DNS edit permission for this domain. {}"),
+    ("重新生成证书失败：{}", "Certificate regeneration failed: {}"),
+    ("设置项无效", "Invalid setting"),
+    ("已开启自定义服务端。", "Custom server enabled."),
+    ("已关闭自定义服务端。", "Custom server disabled."),
+    ("高级功能请到设置页开启", "This is an advanced feature. Enable it on the Settings page."),
+    ("正在后台重新注册 Cloudflare MASQUE，完成后点「加入出站节点」。", "Registering Cloudflare MASQUE in the background. Click “Add to outbound nodes” when it is ready."),
 ]
 
 _COMPILED = []

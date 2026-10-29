@@ -40,6 +40,11 @@ fi
 CERT_MODE=${CERT_MODE:-port}
 BASE_DOMAIN=${DOMAIN#\*.}
 ACTION=${1:-renew}
+FORCE_ISSUE=0
+if [[ $ACTION == reissue ]]; then
+  ACTION=issue
+  FORCE_ISSUE=1
+fi
 
 say() { echo "certctl: $*"; }
 err() { echo "certctl: $*" >&2; }
@@ -105,8 +110,8 @@ case $ACTION in
     exit 0 ;;
   deploy)   # 由 acme.sh 在持有锁的 issue / renew 过程中调用，这里不能再加锁
     deploy_live; exit $? ;;
-  issue|renew) ;;
-  *) err "用法：certctl.sh issue|renew|deploy|selfsign"; exit 1 ;;
+  issue|renew|reissue) ;;
+  *) err "用法：certctl.sh issue|renew|reissue|deploy|selfsign"; exit 1 ;;
 esac
 
 # 安装、定时续期和 clashgate cert 可能同时运行：串行化
@@ -195,7 +200,9 @@ $busy"
 fi
 
 force=()
-if [[ -n $saved_api && $saved_api != "$api" ]]; then
+if ((FORCE_ISSUE)); then
+  force=(--force); say "按面板请求重新签发证书"
+elif [[ -n $saved_api && $saved_api != "$api" ]]; then
   force=(--force); say "已有证书来自其他 CA（$saved_api），重新签发"
 elif [[ -n $saved_webroot && $saved_webroot != "$want_webroot" ]]; then
   force=(--force); say "证书申请方式已更改（$saved_webroot -> $want_webroot），重新签发"

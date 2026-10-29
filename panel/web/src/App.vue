@@ -1,11 +1,12 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { t, lang, setLang } from './i18n.js'
+import CgIcon from './CgIcon.vue'
 
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '1.03',
+  version: '1.04',
   mihomo_version: '',
   csrf: '',
   login_error: '',
@@ -63,7 +64,7 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '1.03',
+  version: boot.version || '1.04',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
@@ -91,9 +92,35 @@ const state = reactive({
   all_proxies_yaml: boot.all_proxies_yaml || '',
   proxies: Array.isArray(boot.proxies) ? boot.proxies : [],
   providers: Array.isArray(boot.providers) ? boot.providers : [],
+  custom_server_enabled: !!boot.custom_server_enabled,
+  masque: {
+    status: (boot.masque && boot.masque.status) || 'pending',
+    name: (boot.masque && boot.masque.name) || 'Cloudflare-MASQUE',
+    endpoint: (boot.masque && boot.masque.endpoint) || '',
+    yaml: (boot.masque && boot.masque.yaml) || '',
+    error: (boot.masque && boot.masque.error) || '',
+  },
+  update_check: {
+    core: {
+      checked_at: 0,
+      current: '',
+      latest: '',
+      has_update: false,
+      ...((boot.update_check && boot.update_check.core) || {}),
+    },
+    panel: {
+      checked_at: 0,
+      current: '',
+      latest: '',
+      has_update: false,
+      ...((boot.update_check && boot.update_check.panel) || {}),
+    },
+  },
 })
 
 const showPendingDiff = ref(false)
+const showVersionPanel = ref(false)
+const showTrafficDetail = ref(false)
 const showSubQrModal = ref(false)
 
 // Sensitive fields (Zashboard URL, API secret, Client subscription URL, Cloudflare API Token):
@@ -309,17 +336,72 @@ const topbarVersionText = computed(() => {
   return mv ? `v${state.version} · mihomo ${mv}` : `v${state.version}`
 })
 
+const pageTitle = computed(() => {
+  const titles = {
+    inbounds: t('首页'),
+    outbounds: t('出站节点'),
+    readable: t('节点转换'),
+    certs: t('HTTPS 证书'),
+    advanced: t('自定义服务端'),
+    settings: t('设置'),
+  }
+  return titles[activeTab.value] || t('首页')
+})
+
+const coreUpdate = computed(() => state.update_check.core || {})
+const panelUpdate = computed(() => state.update_check.panel || {})
+
+function versionLabel(v) {
+  const s = String(v || '').trim()
+  if (!s) return ''
+  return /^v/i.test(s) ? s : `v${s}`
+}
+
+function updateHint(v) {
+  const label = versionLabel(v)
+  return label ? t('有新版本 {v}', { v: label }) : t('有新版本')
+}
+
+function applyUpdateCheck(src) {
+  if (!src || typeof src !== 'object') return
+  state.update_check = {
+    core: mergeUpdateSlot(state.update_check.core, src.core),
+    panel: mergeUpdateSlot(state.update_check.panel, src.panel),
+  }
+}
+
+function mergeUpdateSlot(prev, next) {
+  const base = {
+    checked_at: 0,
+    current: '',
+    latest: '',
+    has_update: false,
+    ...(prev || {}),
+  }
+  if (!next || typeof next !== 'object') return base
+  const prevTs = Number(base.checked_at || 0)
+  const nextTs = Number(next.checked_at || 0)
+  if (!nextTs || nextTs < prevTs) return base
+  return {
+    ...base,
+    ...next,
+    checked_at: nextTs,
+    has_update: !!next.has_update,
+  }
+}
+
 const converterPlaceholder = computed(
   () => t('在此粘贴节点配置，例如：') + '\n- {"name":"VlessReality","type":"vless","server":"1.2.3.4","port":28443,...}'
 )
 
-const VALID_TABS = ['inbounds', 'outbounds', 'readable', 'advanced', 'certs']
+const VALID_TABS = ['inbounds', 'outbounds', 'readable', 'certs', 'advanced', 'settings']
 const TAB_PATHS = {
   inbounds: '/',
   outbounds: '/outbounds',
   readable: '/readable',
   advanced: '/advanced',
   certs: '/certs',
+  settings: '/settings',
 }
 
 function detectInitialTab() {
@@ -327,6 +409,7 @@ function detectInitialTab() {
     return boot.initial_tab
   }
   const p = window.location.pathname
+  if (p === '/settings') return 'settings'
   if (p === '/certs' || p === '/cert') return 'certs'
   if (p === '/advanced' || p === '/custom-config') return 'advanced'
   if (p === '/readable' || p === '/convert') return 'readable'
@@ -485,9 +568,10 @@ const converterError = ref('')
 
 // HTTPS Certificate management state
 const certModeForm = reactive({
-  mode: 'dns',
+  mode: state.cert_mode === 'dns' ? 'dns' : 'port',
   cf_token: state.cf_token || '',
 })
+const certRegenLock = ref(false)
 
 const certModeValue = computed(() => state.cert_mode || (state.status && state.status.cert_mode) || 'port')
 const certModeLabel = computed(() => {
@@ -507,9 +591,17 @@ const certDaysValue = computed(() => {
   return d === null || d === undefined || d === '' ? null : Number(d)
 })
 const certIsTemp = computed(() => /clashgate temporary/i.test(certIssuerDisplay.value))
+const certBaselineMode = computed(() => (certModeValue.value === 'dns' ? 'dns' : 'port'))
+const certModeDirty = computed(() => {
+  if (certModeValue.value === 'manual') return certModeForm.mode === 'dns' || certModeForm.mode === 'port'
+  if (certModeForm.mode !== certBaselineMode.value) return true
+  if (certModeForm.mode === 'dns' && (certModeForm.cf_token || '') !== (state.cf_token || '')) return true
+  return false
+})
+const certRegenDisabled = computed(() => !certModeDirty.value || certRegenLock.value || busyKey.value === '/action/cert-mode')
 
 async function submitCertMode() {
-  if (busyKey.value) return
+  if (busyKey.value || certRegenLock.value || !certModeDirty.value) return
   if (certModeForm.mode === 'dns') {
     const tok = certModeForm.cf_token
     if (!tok) {
@@ -521,16 +613,21 @@ async function submitCertMode() {
       return
     }
   }
+  certRegenLock.value = true
   maskAllSensitive()
-  await postAction(
-    '/action/cert-mode',
-    {
-      cert_mode: certModeForm.mode,
-      cf_token: certModeForm.cf_token,
-    },
-    '/action/cert-mode'
-  )
-  maskAllSensitive()
+  try {
+    await postAction(
+      '/action/cert-mode',
+      {
+        cert_mode: certModeForm.mode,
+        cf_token: certModeForm.cf_token,
+      },
+      '/action/cert-mode'
+    )
+  } finally {
+    certRegenLock.value = false
+    maskAllSensitive()
+  }
 }
 
 const trafficDisplay = computed(() => {
@@ -604,10 +701,21 @@ async function updateCoreDirect() {
   showToast(t('更新内核等待超时，请刷新页面查看内核版本状态'), false)
 }
 
+function toggleVersionPanel() {
+  showVersionPanel.value = !showVersionPanel.value
+}
+
 async function checkUpdateAndPrompt() {
-  const res = await postAction('/action/check-update', {}, '/action/check-update')
+  const res = await postAction('/action/check-update', {}, '/action/check-update', { silentToast: true })
   if (!res || !res.ok) return
-  if (res.has_update) {
+  const hasUpdate = !!res.has_update
+  state.update_check.panel = {
+    checked_at: Math.floor(Date.now() / 1000),
+    current: res.current_version || state.version,
+    latest: res.latest_version || '',
+    has_update: hasUpdate,
+  }
+  if (hasUpdate) {
     const latest = res.latest_version || t('最新版')
     const current = res.current_version || state.version
     openConfirmDialog({
@@ -617,7 +725,9 @@ async function checkUpdateAndPrompt() {
       tone: 'emerald',
       onConfirm: () => postAction('/action/upgrade-self', {}, '/action/upgrade-self'),
     })
+    return
   }
+  if (res.msg) showToast(res.msg, true)
 }
 
 let statePollTimer = null
@@ -652,6 +762,17 @@ async function refreshServerStateSilent() {
         if (data.cert_expires !== undefined) state.cert_expires = data.cert_expires
         if (data.cert_days !== undefined) state.cert_days = data.cert_days
         if (data.cert_hours !== undefined) state.cert_hours = data.cert_hours
+        if (data.custom_server_enabled !== undefined) state.custom_server_enabled = !!data.custom_server_enabled
+        if (data.masque) {
+          state.masque = {
+            status: data.masque.status || state.masque.status,
+            name: data.masque.name || state.masque.name,
+            endpoint: data.masque.endpoint || '',
+            yaml: data.masque.yaml || '',
+            error: data.masque.error || '',
+          }
+        }
+        if (data.update_check) applyUpdateCheck(data.update_check)
       }
     }
   } catch {}
@@ -693,6 +814,17 @@ function applyServerState(newState) {
   if (newState.cert_days !== undefined) state.cert_days = newState.cert_days
   if (newState.cert_hours !== undefined) state.cert_hours = newState.cert_hours
   if (newState.custom_config_mode !== undefined) state.custom_config_mode = newState.custom_config_mode
+  if (newState.custom_server_enabled !== undefined) state.custom_server_enabled = !!newState.custom_server_enabled
+  if (newState.masque && typeof newState.masque === 'object') {
+    state.masque = {
+      status: newState.masque.status || 'pending',
+      name: newState.masque.name || 'Cloudflare-MASQUE',
+      endpoint: newState.masque.endpoint || '',
+      yaml: newState.masque.yaml || '',
+      error: newState.masque.error || '',
+    }
+  }
+  if (newState.update_check) applyUpdateCheck(newState.update_check)
   if (newState.custom_config_raw !== undefined) {
     state.custom_config_raw = newState.custom_config_raw
     customConfigText.value = newState.custom_config_raw
@@ -722,7 +854,7 @@ function formatFetchError(err) {
   return t('请求异常：{raw}', { raw })
 }
 
-async function postAction(url, params = {}, key = url) {
+async function postAction(url, params = {}, key = url, opts = {}) {
   if (busyKey.value) return null
   busyKey.value = key
   const body = new URLSearchParams({ csrf: state.csrf, ...params }).toString()
@@ -759,7 +891,7 @@ async function postAction(url, params = {}, key = url) {
       if (data.zb_url) state.zb_url = data.zb_url
       if (data.sub_url) state.sub_url = data.sub_url
     }
-    showToast(data.msg || (data.ok ? t('操作成功') : t('操作失败')), !!data.ok)
+    if (!opts.silentToast) showToast(data.msg || (data.ok ? t('操作成功') : t('操作失败')), !!data.ok)
     return data
   } catch (err) {
     if (timer) clearTimeout(timer)
@@ -784,6 +916,13 @@ async function postAction(url, params = {}, key = url) {
       }
     } catch {}
     showToast(formatFetchError(err), false)
+    if (url === '/action/upgrade-self') {
+      const recovered = await waitUntilPanelBack()
+      if (recovered) {
+        showToast(t('升级完成，登录状态已保持。'), true)
+        return { ok: true, state: recovered }
+      }
+    }
     return null
   } finally {
     busyKey.value = ''
@@ -1052,8 +1191,34 @@ function resetTemplateConfig() {
   })
 }
 
+async function waitUntilPanelBack() {
+  const deadline = Date.now() + 45000
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1200))
+    try {
+      const stRes = await fetch('/api/state', {
+        headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+      })
+      if (stRes.status === 401) return null
+      if (!stRes.ok) continue
+      const stData = await stRes.json()
+      applyServerState(stData)
+      return stData
+    } catch {
+      // Panel process is restarting after an update.
+    }
+  }
+  return null
+}
+
 function selectTab(tab) {
   if (!VALID_TABS.includes(tab)) return
+  if (tab === 'advanced' && !state.custom_server_enabled) {
+    showToast(t('高级功能请到设置页开启'), false)
+    return
+  }
   activeTab.value = tab
   const targetPath = TAB_PATHS[tab] || '/'
   try {
@@ -1063,12 +1228,47 @@ function selectTab(tab) {
   } catch {}
 }
 
+async function toggleCustomServer() {
+  const next = !state.custom_server_enabled
+  const res = await postAction(
+    '/action/settings',
+    { custom_server_enabled: next ? '1' : '0' },
+    '/action/settings'
+  )
+  if (res && res.ok && !next && activeTab.value === 'advanced') selectTab('inbounds')
+}
+
+async function addMasqueOutbound() {
+  if (!state.masque.yaml) return
+  const name = (state.masque.name || 'Cloudflare-MASQUE').trim()
+  if (state.proxies.some((p) => p && p.name === name)) {
+    showToast(t('请勿重复加入'), false)
+    return
+  }
+  await postAction('/proxies/add', { proxies_raw: state.masque.yaml }, 'add-masque')
+}
+
+async function retryMasque() {
+  await postAction('/action/masque-register', {}, '/action/masque-register')
+  state.masque = { ...state.masque, status: 'pending', error: '' }
+}
+
 onMounted(() => {
   if (boot.flash_msg) {
     showToast(boot.flash_msg, boot.flash_ok !== false)
   }
+  if (activeTab.value === 'advanced' && !state.custom_server_enabled) {
+    activeTab.value = 'inbounds'
+    showToast(t('高级功能请到设置页开启'), false)
+  }
   window.addEventListener('popstate', () => {
-    activeTab.value = detectInitialTab()
+    const next = detectInitialTab()
+    if (next === 'advanced' && !state.custom_server_enabled) {
+      activeTab.value = 'inbounds'
+      showToast(t('高级功能请到设置页开启'), false)
+      return
+    }
+    activeTab.value = next
   })
   window.addEventListener('blur', maskAllSensitive)
   document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -1087,40 +1287,28 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- Login View: Bright, refined Linear/Stripe-inspired light-green SaaS sign-in -->
-  <div
-    v-if="pageMode === 'login'"
-    class="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#f1fbf6] via-[#f7fbf9] to-[#edf8f2]"
-  >
-    <div
-      class="cg-login-card relative overflow-hidden w-full max-w-[420px] bg-white rounded-3xl shadow-[0_2px_6px_rgba(15,23,42,0.03),0_20px_48px_-12px_rgba(16,185,129,0.14)] border border-emerald-100/90 p-8 sm:p-9"
-    >
-      <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 via-emerald-500 to-teal-500"></div>
-      <div class="flex justify-end -mt-1 mb-3">
+  <!-- Login -->
+  <div v-if="pageMode === 'login'" class="cg-login">
+    <div class="cg-login-card">
+      <div class="flex justify-end mb-4">
         <button
           type="button"
           @click="setLang(lang === 'zh' ? 'en' : 'zh')"
-          class="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-50 hover:bg-emerald-50 hover:text-emerald-800 border border-slate-200/80 text-slate-600 transition cursor-pointer"
+          class="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 transition cursor-pointer"
         >
           {{ lang === 'zh' ? 'English' : '中文' }}
         </button>
       </div>
       <div class="flex items-center gap-3.5 mb-7">
-        <img
-          src="/assets/logo.png"
-          alt="ClashGate"
-          class="w-12 h-12 rounded-2xl object-cover shadow-md shadow-emerald-500/15 ring-1 ring-emerald-500/10 bg-white"
-        />
+        <img src="/assets/logo.png" alt="" class="cg-logo" />
         <div>
           <div class="flex items-center gap-2">
-            <h1 class="text-xl font-bold text-slate-900 tracking-tight">ClashGate</h1>
-            <span
-              class="px-2.5 py-0.5 text-[11px] font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80 tabular-nums"
-            >
+            <h1 class="cg-wordmark text-[22px] leading-none text-slate-900">ClashGate</h1>
+            <span class="px-2 py-0.5 text-[11px] font-medium rounded-full bg-slate-100 text-slate-600 border border-slate-200 tabular-nums">
               {{ topbarVersionText }}
             </span>
           </div>
-          <p class="text-xs text-slate-500 mt-1">{{ t('服务端管理控制台 · 请登录') }}</p>
+          <p class="text-xs text-slate-500 mt-1.5">{{ t('采用 Mihomo 核心，简单安全。') }}</p>
         </div>
       </div>
 
@@ -1167,8 +1355,8 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <!-- Dashboard View: Bright, airy, high-craft light-green SaaS console -->
-  <div v-else class="min-h-screen text-slate-900 flex flex-col">
+  <!-- Dashboard -->
+  <div v-else class="cg-app min-h-screen text-slate-900">
     <!-- Toast Notification -->
     <transition
       enter-active-class="transition duration-200 ease-out"
@@ -1382,41 +1570,78 @@ onUnmounted(() => {
       </div>
     </Transition>
 
-    <!-- Frosted Topbar -->
-    <header class="sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-slate-200/80 text-slate-900">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-        <div class="flex items-center gap-3">
-          <img
-            src="/assets/logo.png"
-            alt="ClashGate"
-            class="w-9 h-9 rounded-xl object-cover shadow-xs shadow-emerald-500/15 ring-1 ring-emerald-500/10 bg-white"
-          />
-          <span class="font-bold text-base tracking-tight text-slate-900">ClashGate</span>
-          <span
-            class="px-2.5 py-0.5 text-[11px] font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80 tabular-nums"
+    <div class="cg-shell">
+      <aside class="cg-side">
+        <div class="cg-brand">
+          <img src="/assets/logo.png" alt="" class="cg-logo" />
+          <div class="min-w-0">
+            <div class="cg-wordmark text-[18px] leading-none text-[#3d2b22]">ClashGate</div>
+            <div class="cg-brand-sub">{{ t('简单安全的代理服务端') }}</div>
+          </div>
+        </div>
+        <div class="cg-nav-label">{{ t('导航') }}</div>
+        <nav class="flex flex-col gap-1" aria-label="pages">
+          <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'inbounds' }" @click="selectTab('inbounds')">
+            <CgIcon name="house" />{{ t('首页') }}
+          </button>
+          <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'outbounds' }" @click="selectTab('outbounds')">
+            <CgIcon name="outbound" />{{ t('出站节点') }}
+          </button>
+          <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
+            <CgIcon name="convert" />{{ t('节点转换') }}
+          </button>
+          <button id="tab-certs" type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'certs' }" @click="selectTab('certs')">
+            <CgIcon name="shield" />{{ t('HTTPS 证书') }}
+          </button>
+          <button
+            type="button"
+            class="cg-nav"
+            :class="state.custom_server_enabled ? { 'is-active': activeTab === 'advanced' } : 'is-locked'"
+            @click="selectTab('advanced')"
           >
-            {{ topbarVersionText }}
-          </span>
+            <CgIcon :name="state.custom_server_enabled ? 'server' : 'lock'" />{{ t('自定义服务端') }}
+          </button>
+          <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'settings' }" @click="selectTab('settings')">
+            <CgIcon name="settings" />{{ t('设置') }}
+          </button>
+        </nav>
+      </aside>
+
+      <div class="cg-column">
+    <!-- Topbar -->
+    <header class="sticky top-0 z-30 cg-top">
+      <div class="cg-topbar px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5 min-w-0 lg:hidden">
+          <img src="/assets/logo.png" alt="" class="cg-logo" />
+          <span class="cg-wordmark text-[18px] text-slate-900">ClashGate</span>
+        </div>
+        <div class="hidden lg:block min-w-0">
+          <div class="cg-kicker">ClashGate</div>
+          <div class="cg-page-title">{{ pageTitle }}</div>
         </div>
 
-        <div class="flex items-center gap-2 flex-wrap">
+        <div class="cg-actions justify-end">
           <button
             type="button"
             :disabled="busyKey === '/action/update-core'"
             @click="updateCoreDirect"
-            class="cg-btn-primary px-3.5 py-1.5 rounded-xl text-xs font-semibold disabled:opacity-50 cursor-pointer"
+            class="cg-tool px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border-slate-200 text-slate-800"
+            :class="{ 'is-update': coreUpdate.has_update }"
+            :title="coreUpdate.has_update ? updateHint(coreUpdate.latest) : undefined"
           >
-            {{ busyKey === '/action/update-core' ? t('更新内核中…') : t('更新内核') }}
+            <CgIcon name="refresh" :size="14" />
+            <span>{{ busyKey === '/action/update-core' ? t('更新内核中…') : t('更新内核') }}</span>
+            <CgIcon v-if="coreUpdate.has_update && busyKey !== '/action/update-core'" name="up" :size="13" />
           </button>
           <button
             type="button"
             :disabled="busyKey === '/action/reload'"
             @click="postAction('/action/reload', {}, '/action/reload')"
-            class="px-3.5 py-1.5 rounded-xl text-xs font-semibold border disabled:opacity-50 transition cursor-pointer inline-flex items-center gap-1.5"
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50 transition cursor-pointer inline-flex items-center gap-1.5"
             :class="
               state.pending_reload_count > 0
                 ? 'bg-amber-50 hover:bg-amber-100/80 border-amber-300/90 text-amber-900'
-                : 'bg-emerald-50/90 hover:bg-emerald-100/80 border-emerald-200/80 text-emerald-800'
+                : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
             "
           >
             <span>{{ busyKey === '/action/reload' ? t('重载中…') : t('重载配置') }}</span>
@@ -1431,38 +1656,35 @@ onUnmounted(() => {
             type="button"
             :disabled="busyKey === '/action/check-update' || busyKey === '/action/upgrade-self'"
             @click="checkUpdateAndPrompt"
-            class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200/90 disabled:opacity-50 text-slate-700 transition cursor-pointer"
+            class="cg-tool px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 disabled:opacity-50 text-slate-700 transition cursor-pointer inline-flex items-center gap-1.5"
+            :class="{ 'is-update': panelUpdate.has_update }"
+            :title="panelUpdate.has_update ? updateHint(panelUpdate.latest) : undefined"
           >
-            {{
+            <span>{{
               busyKey === '/action/upgrade-self'
                 ? t('升级中…')
                 : busyKey === '/action/check-update'
                   ? t('检查中…')
                   : t('检查更新')
-            }}
-          </button>
-          <button
-            id="change-password-btn"
-            type="button"
-            @click="openPasswordModal"
-            class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50/70 hover:text-emerald-800 hover:border-emerald-200 border border-slate-200/90 text-slate-700 transition cursor-pointer"
-          >
-            {{ t('修改密码') }}
+            }}</span>
+            <CgIcon v-if="panelUpdate.has_update && busyKey !== '/action/check-update' && busyKey !== '/action/upgrade-self'" name="up" :size="13" />
           </button>
           <button
             type="button"
             @click="setLang(lang === 'zh' ? 'en' : 'zh')"
-            class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50/70 border border-slate-200/90 text-slate-600 transition cursor-pointer"
+            class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 transition cursor-pointer inline-flex items-center gap-1"
             :title="lang === 'zh' ? 'Switch to English' : '切换到中文'"
           >
-            {{ lang === 'zh' ? 'English' : '中文' }}
+            <CgIcon name="lang" :size="14" />
+            {{ lang === 'zh' ? 'EN' : '中文' }}
           </button>
           <form method="post" action="/logout" class="inline">
             <input type="hidden" name="csrf" :value="state.csrf" />
             <button
               type="submit"
-              class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 border border-slate-200/90 text-slate-600 transition cursor-pointer"
+              class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 border border-slate-200 text-slate-600 transition cursor-pointer inline-flex items-center gap-1"
             >
+              <CgIcon name="logout" :size="14" />
               {{ t('退出') }}
             </button>
           </form>
@@ -1472,118 +1694,66 @@ onUnmounted(() => {
 
     <!-- Main Container -->
     <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-7 space-y-6 flex-1">
-      <!-- Concise 4-Card Status Strip -->
-      <div class="space-y-3">
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <!-- Card 1: 运行状态 -->
-          <div
+      <!-- Status strip: homepage only -->
+      <div v-show="activeTab === 'inbounds'" class="space-y-3">
+        <div class="cg-rail">
+          <article
             id="stat-card-status"
-            class="cg-surface cg-stat-card cg-stat-delay-1 rounded-2xl p-4 sm:p-5 flex items-center justify-between gap-2"
+            role="button"
+            tabindex="0"
+            @click="toggleVersionPanel"
+            @keydown.enter.prevent="toggleVersionPanel"
+            class="cg-rail-cell"
           >
-            <div>
-              <div class="text-xs font-medium text-slate-500">{{ t('运行状态') }}</div>
-              <div class="mt-2 flex items-center gap-2">
-                <span
-                  class="w-2.5 h-2.5 rounded-full"
-                  :class="{
-                    'bg-emerald-500 ring-4 ring-emerald-500/15': state.status.state_cls === 'ok',
-                    'bg-amber-500 ring-4 ring-amber-500/15': state.status.state_cls === 'warn',
-                    'bg-rose-500 ring-4 ring-rose-500/15':
-                      state.status.state_cls !== 'ok' && state.status.state_cls !== 'warn',
-                  }"
-                ></span>
-                <span class="text-lg font-bold text-slate-900 tracking-tight">{{ t(state.status.state_txt || '未知') }}</span>
-              </div>
-            </div>
             <span
-              class="px-2.5 py-1 text-xs font-semibold rounded-lg shrink-0"
-              :class="
-                state.custom_config_mode
-                  ? 'bg-amber-50 text-amber-700 border border-amber-200/70'
-                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
-              "
-            >
-              {{ state.custom_config_mode ? t('自定义模式') : t('标准模板') }}
-            </span>
-          </div>
+              class="cg-live"
+              :class="state.status.state_cls === 'ok' ? 'is-ok' : state.status.state_cls === 'warn' ? 'is-warn' : 'is-bad'"
+            ></span>
+            <span class="cg-rail-label">{{ t('运行状态') }}</span>
+            <span class="cg-rail-strong">{{ t(state.status.state_txt || '未知') }}</span>
+            <span class="cg-stat-mode">{{ state.custom_config_mode ? t('自定义服务端') : t('标准模板') }}</span>
+          </article>
 
-          <!-- Card 2: 入站 · 出站（合并卡） -->
-          <div
-            id="stat-card-nodes"
-            class="cg-surface cg-stat-card cg-stat-delay-2 rounded-2xl p-4 sm:p-5"
-          >
-            <div class="text-xs font-medium text-slate-500">{{ t('入站 · 出站') }}</div>
-            <div class="mt-2 space-y-1 text-xs text-slate-600 tabular-nums">
-              <div class="flex items-baseline gap-1.5">
-                <span class="text-slate-400">{{ t('入站：') }}</span>
-                <span class="text-sm font-bold text-slate-900">{{ state.inbounds.length }}</span>
-                <span>{{ t('个节点运行中') }}</span>
-              </div>
-              <div class="flex items-baseline gap-1.5">
-                <span class="text-slate-400">{{ t('出站：') }}</span>
-                <span class="text-sm font-bold text-slate-900">{{ state.status.outbound_nodes_count ?? 0 }}</span>
-                <span>{{ t('节点 ·') }} {{ state.status.outbound_providers_count ?? 0 }} {{ t('订阅源') }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Card 3: 待重载配置 -->
-          <div
+          <article
             id="stat-card-pending-reload"
             role="button"
             tabindex="0"
             @click="showPendingDiff = !showPendingDiff"
             @keydown.enter.prevent="showPendingDiff = !showPendingDiff"
-            class="cg-stat-card cg-stat-delay-3 rounded-2xl border p-4 sm:p-5 transition cursor-pointer select-none flex items-center justify-between gap-2"
-            :class="
-              state.pending_reload_count > 0
-                ? 'bg-amber-50/90 border-amber-300/90 shadow-[0_4px_16px_-6px_rgba(245,158,11,0.2)] hover:bg-amber-50'
-                : 'cg-surface hover:border-emerald-200/90'
-            "
+            class="cg-rail-cell"
+            :class="{ 'is-pending': state.pending_reload_count > 0 }"
           >
-            <div>
-              <div class="text-xs font-medium" :class="state.pending_reload_count > 0 ? 'text-amber-800' : 'text-slate-500'">
-                {{ t('待重载配置') }}
-              </div>
-              <div class="mt-2 flex items-baseline gap-1.5 tabular-nums">
-                <span
-                  id="pending-reload-count"
-                  class="text-lg font-bold tracking-tight"
-                  :class="state.pending_reload_count > 0 ? 'text-amber-900' : 'text-slate-900'"
-                >
-                  {{ state.pending_reload_count }}
-                </span>
-                <span
-                  class="text-xs"
-                  :class="state.pending_reload_count > 0 ? 'text-amber-700 font-medium' : 'text-slate-500'"
-                >
-                  {{ state.pending_reload_count > 0 ? t('项待重载生效') : t('无待生效') }}
-                </span>
-              </div>
-            </div>
-            <span
-              v-if="state.pending_reload_count > 0"
-              class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-full bg-amber-100/90 text-amber-800 border border-amber-300/80 shrink-0"
-            >
-              <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-              {{ showPendingDiff ? t('收起') : t('点击展开变更') }}
+            <span class="cg-rail-label">{{ t('待重载') }}</span>
+            <span v-if="state.pending_reload_count > 0" class="cg-rail-hint is-inline">
+              {{ showPendingDiff ? t('收起') : t('有修改，点开查看') }}
             </span>
-          </div>
+            <span id="pending-reload-count" class="cg-rail-num">{{ state.pending_reload_count }}</span>
+          </article>
 
-          <!-- Card 4: 已代理流量 -->
-          <div
+          <article
             id="stat-card-traffic"
-            class="cg-surface cg-stat-card cg-stat-delay-4 rounded-2xl p-4 sm:p-5"
+            role="button"
+            tabindex="0"
+            @click="showTrafficDetail = !showTrafficDetail"
+            @keydown.enter.prevent="showTrafficDetail = !showTrafficDetail"
+            class="cg-rail-cell"
           >
-            <div class="text-xs font-medium text-slate-500">{{ t('已代理流量') }}</div>
-            <div class="mt-2 flex items-baseline gap-2 tabular-nums">
-              <span class="text-lg font-bold text-slate-900 tracking-tight">{{ trafficDisplay }}</span>
-              <span class="text-xs text-slate-400 truncate">{{ trafficDetail }}</span>
-            </div>
-          </div>
+            <span class="cg-rail-label">{{ t('流量') }}</span>
+            <span class="cg-rail-num">{{ trafficDisplay }}</span>
+          </article>
         </div>
 
-        <!-- Expandable Pending Reload Diff Panel -->
+        <Transition name="cg-collapse">
+          <div
+            v-if="showVersionPanel"
+            id="version-panel"
+            class="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-sm text-slate-800 flex flex-wrap items-center gap-x-6 gap-y-1"
+          >
+            <span class="font-semibold">{{ t('Mihomo 内核') }} {{ versionLabel(state.mihomo_version) || '—' }}</span>
+            <span class="font-semibold">{{ t('面板') }} {{ versionLabel(state.version) || '—' }}</span>
+          </div>
+        </Transition>
+
         <Transition name="cg-collapse">
           <div
             v-if="showPendingDiff"
@@ -1591,8 +1761,8 @@ onUnmounted(() => {
             class="rounded-2xl border px-4 py-3.5 text-xs space-y-2.5"
             :class="
               state.pending_reload_count > 0
-                ? 'bg-amber-50/90 border-amber-200/90 text-amber-950 shadow-xs'
-                : 'bg-white border-slate-200/80 text-slate-600 shadow-xs'
+                ? 'bg-amber-50/90 border-amber-200/90 text-amber-950'
+                : 'bg-white border-slate-200/80 text-slate-600'
             "
           >
             <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -1603,217 +1773,74 @@ onUnmounted(() => {
                 ></span>
                 <span>{{ t('待生效变更明细') }}（{{ state.pending_reload_count }}）</span>
               </div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <button
-                  v-if="state.pending_reload_count > 0"
-                  id="discard-pending-btn"
-                  type="button"
-                  :disabled="busyKey === '/action/discard-pending' || busyKey === '/action/reload'"
-                  @click="confirmDiscardPending"
-                  class="px-3 py-1 rounded-lg text-xs font-semibold bg-white hover:bg-rose-50 text-rose-600 border border-rose-200/90 disabled:opacity-50 transition cursor-pointer"
-                >
-                  {{ busyKey === '/action/discard-pending' ? t('丢弃中…') : t('丢弃草稿') }}
-                </button>
-              </div>
+              <button
+                v-if="state.pending_reload_count > 0"
+                id="discard-pending-btn"
+                type="button"
+                :disabled="busyKey === '/action/discard-pending' || busyKey === '/action/reload'"
+                @click="confirmDiscardPending"
+                class="px-3 py-1 rounded-lg text-xs font-semibold bg-white hover:bg-rose-50 text-rose-600 border border-rose-200/90 disabled:opacity-50 transition cursor-pointer"
+              >
+                {{ busyKey === '/action/discard-pending' ? t('丢弃中…') : t('丢弃草稿') }}
+              </button>
             </div>
             <div v-if="state.pending_reload_items && state.pending_reload_items.length > 0" class="space-y-1 font-mono">
               <div
                 v-for="(it, idx) in state.pending_reload_items"
                 :key="idx"
-                class="px-3 py-1.5 rounded-xl bg-white/95 border border-amber-200/60 text-slate-800 flex items-center gap-2"
+                class="px-3 py-1.5 rounded-xl bg-white/95 border border-amber-200/60 text-slate-800"
               >
-                <span>{{ formatPendingItem(it) }}</span>
+                {{ formatPendingItem(it) }}
               </div>
             </div>
-            <div v-else class="text-slate-500">
-              {{ t('无待生效') }}
-            </div>
+            <div v-else class="text-slate-500">{{ t('无待生效') }}</div>
+          </div>
+        </Transition>
+
+        <Transition name="cg-collapse">
+          <div
+            v-if="showTrafficDetail"
+            id="traffic-detail-panel"
+            class="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-sm text-slate-700 tabular-nums"
+          >
+            {{ trafficDetail }}
           </div>
         </Transition>
       </div>
 
-      <!-- Segmented Navigation Bar -->
-      <div
-        class="flex items-center gap-1 bg-white/95 p-1.5 rounded-2xl border border-slate-200/85 shadow-[0_1px_2px_rgba(15,23,42,0.03)] flex-wrap w-fit"
-      >
-        <button
-          type="button"
-          @click="selectTab('inbounds')"
-          class="px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer"
-          :class="
-            activeTab === 'inbounds'
-              ? 'cg-btn-primary'
-              : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
-          "
-        >
-          {{ t('首页 · 入站与面板') }}
+      <nav class="cg-mobile-nav lg:hidden" aria-label="pages">
+        <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'inbounds' }" @click="selectTab('inbounds')">
+          <CgIcon name="house" :size="15" />{{ t('首页') }}
+        </button>
+        <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'outbounds' }" @click="selectTab('outbounds')">
+          <CgIcon name="outbound" :size="15" />{{ t('出站节点') }}
+        </button>
+        <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
+          <CgIcon name="convert" :size="15" />{{ t('节点转换') }}
+        </button>
+        <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'certs' }" @click="selectTab('certs')">
+          <CgIcon name="shield" :size="15" />{{ t('HTTPS 证书') }}
         </button>
         <button
           type="button"
-          @click="selectTab('outbounds')"
-          class="px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer"
-          :class="
-            activeTab === 'outbounds'
-              ? 'cg-btn-primary'
-              : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
-          "
-        >
-          {{ t('服务端出站') }}
-        </button>
-        <button
-          type="button"
-          @click="selectTab('readable')"
-          class="px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer"
-          :class="
-            activeTab === 'readable'
-              ? 'cg-btn-primary'
-              : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
-          "
-        >
-          {{ t('易读配置转换') }}
-        </button>
-        <button
-          type="button"
+          class="cg-nav"
+          :class="state.custom_server_enabled ? { 'is-active': activeTab === 'advanced' } : 'is-locked'"
           @click="selectTab('advanced')"
-          class="px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer"
-          :class="
-            activeTab === 'advanced'
-              ? 'cg-btn-primary'
-              : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
-          "
         >
-          {{ t('自定义服务端配置') }}
+          <CgIcon :name="state.custom_server_enabled ? 'server' : 'lock'" :size="15" />{{ t('自定义服务端') }}
         </button>
-        <button
-          id="tab-certs"
-          type="button"
-          @click="selectTab('certs')"
-          class="px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer"
-          :class="
-            activeTab === 'certs'
-              ? 'cg-btn-primary'
-              : 'text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60'
-          "
-        >
-          {{ t('HTTPS 证书') }}
+        <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'settings' }" @click="selectTab('settings')">
+          <CgIcon name="settings" :size="15" />{{ t('设置') }}
         </button>
-      </div>
+      </nav>
 
       <!-- TAB 1 (HOMEPAGE): Zashboard + 客户端订阅 + 入站节点与添加节点 -->
       <Transition name="cg-tab">
-        <div v-show="activeTab === 'inbounds'" class="space-y-6">
-          <!-- Top Fixed Core Cards: Zashboard 控制面板 & 客户端订阅链接 -->
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-            <!-- Zashboard 控制面板 -->
-            <section
-              id="zashboard-card"
-              class="cg-surface-emerald rounded-2xl p-5 sm:p-6 flex flex-col gap-3.5"
-            >
-              <div class="flex items-center justify-between gap-3 flex-wrap">
-                <div class="flex items-center gap-2.5">
-                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                  <h2 class="text-base font-bold text-slate-900">{{ t('Zashboard 控制面板') }}</h2>
-                  <span
-                    class="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-semibold rounded-full tabular-nums"
-                    :class="
-                      state.controller_listening
-                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
-                        : 'bg-amber-50 text-amber-700 border border-amber-200/70'
-                    "
-                  >
-                    {{ t('端口 :') }}{{ state.controller_port }} {{ state.controller_listening ? t('运行中') : t('未运行') }}
-                  </span>
-                </div>
-                <div class="flex items-center gap-2 flex-wrap">
-                  <a
-                    :href="state.zb_url || '#'"
-                    target="_blank"
-                    rel="noopener"
-                    class="cg-btn-primary px-3.5 py-1.5 rounded-xl text-xs font-semibold"
-                  >
-                    {{ t('打开 Zashboard') }}
-                  </a>
-                  <button
-                    type="button"
-                    @click="copyRaw(state.zb_url, 'zb-url')"
-                    class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
-                  >
-                    {{ copiedKey === 'zb-url' ? t('已复制地址') : t('复制地址') }}
-                  </button>
-                  <a
-                    href="/config/server.yaml"
-                    target="_blank"
-                    rel="noopener"
-                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition"
-                  >
-                    {{ t('查看Mihomo服务端配置') }}
-                  </a>
-                </div>
-              </div>
-
-              <div>
-                <div class="text-xs font-medium text-slate-500 mb-1.5">{{ t('免填密钥直连地址 (HTTPS)') }}</div>
-                <div
-                  id="zb-url"
-                  ref="zbUrlEl"
-                  tabindex="0"
-                  role="button"
-                  :aria-expanded="zbUrlRevealed ? 'true' : 'false'"
-                  @click="revealZbUrl"
-                  @keydown.enter.prevent="zbUrlRevealed = !zbUrlRevealed"
-                  @keydown.space.prevent="zbUrlRevealed = !zbUrlRevealed"
-                  @blur="zbUrlRevealed = false"
-                  class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f6faf8] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer"
-                  :class="zbUrlRevealed ? 'text-slate-700 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
-                >
-                  {{ !state.zb_url ? '—' : zbUrlRevealed ? state.zb_url : '••••••••••••••••••••••••••••••••' }}
-                </div>
-              </div>
-
-              <div class="mt-auto pt-0.5 min-h-[28px] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div class="flex items-center gap-2 min-w-0">
-                  <span class="text-xs font-medium text-slate-500 shrink-0">{{ t('API 密钥 (Secret)：') }}</span>
-                  <code
-                    id="zb-secret"
-                    ref="zbSecretEl"
-                    tabindex="0"
-                    role="button"
-                    :aria-expanded="zbSecretRevealed ? 'true' : 'false'"
-                    @click="revealZbSecret"
-                    @keydown.enter.prevent="zbSecretRevealed = !zbSecretRevealed"
-                    @keydown.space.prevent="zbSecretRevealed = !zbSecretRevealed"
-                    @blur="zbSecretRevealed = false"
-                    class="cg-input px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-emerald-50/60 font-mono text-xs transition cursor-pointer"
-                    :class="zbSecretRevealed ? 'text-slate-800 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
-                  >
-                    {{ !state.mihomo_secret ? '—' : zbSecretRevealed ? state.mihomo_secret : '••••••••••••' }}
-                  </code>
-                </div>
-                <div class="flex items-center gap-2 shrink-0">
-                  <button
-                    v-if="state.mihomo_secret"
-                    type="button"
-                    @click="copyRaw(state.mihomo_secret, 'zb-secret')"
-                    class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition cursor-pointer"
-                  >
-                    {{ copiedKey === 'zb-secret' ? t('已复制') : t('复制密钥') }}
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="busyKey === 'reset-secret'"
-                    @click="resetZbSecret"
-                    class="px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
-                  >
-                    {{ busyKey === 'reset-secret' ? t('重置中…') : t('重置 API 密钥') }}
-                  </button>
-                </div>
-              </div>
-            </section>
-
-            <!-- 客户端订阅链接 -->
+        <div v-show="activeTab === 'inbounds'" class="cg-home">
+          <!-- 客户端订阅链接 -->
             <section
               id="sub-card"
-              class="cg-surface-emerald rounded-2xl p-5 sm:p-6 flex flex-col gap-3.5"
+              class="cg-home-sub cg-surface-emerald rounded-2xl p-5 sm:p-6 flex flex-col gap-3.5"
             >
               <div class="flex items-center justify-between gap-3 flex-wrap">
                 <div class="flex items-center gap-2.5">
@@ -1856,7 +1883,7 @@ onUnmounted(() => {
                     rel="noopener"
                     class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition"
                   >
-                    {{ t('预览') }}
+                    {{ t('查看配置') }}
                   </a>
                 </div>
               </div>
@@ -1882,121 +1909,14 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <div class="mt-auto pt-0.5 min-h-[28px] text-xs text-slate-500 flex items-center justify-between gap-2 flex-wrap">
-                <div class="flex items-center gap-1.5">
-                  <span>{{ t('本地客户端备份：') }}</span>
-                  <code class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-mono text-xs">/etc/clashgate/client/</code>
-                </div>
-                <button
-                  type="button"
-                  @click="selectTab('readable')"
-                  class="text-emerald-700 hover:text-emerald-600 font-semibold cursor-pointer"
-                >
-                  {{ t('前往易读配置转换 →') }}
-                </button>
-              </div>
-            </section>
-          </div>
-
-          <!-- 入站节点列表 & 添加节点表单 -->
-          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            <!-- Left: Inbound Nodes List -->
-            <section class="lg:col-span-7 cg-surface rounded-2xl p-5 sm:p-6">
-              <div class="flex items-center justify-between gap-2 mb-4">
-                <div class="flex items-center gap-2.5">
-                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('入站节点') }}</h2>
-                  <span
-                    class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 tabular-nums"
-                  >
-                    {{ state.inbounds.length }}
-                  </span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button
-                    v-if="state.inbounds.length > 0"
-                    type="button"
-                    @click="copyRaw(state.all_proxies_yaml, 'all-proxies')"
-                    class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
-                  >
-                    {{ copiedKey === 'all-proxies' ? t('已复制全部') : t('复制全部配置') }}
-                  </button>
-                </div>
-              </div>
-
-              <div
-                v-if="state.inbounds.length === 0"
-                class="py-12 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-sm text-slate-400"
-              >
-                {{ t('暂无入站节点，请在右侧添加节点') }}
-              </div>
-
-              <div v-else class="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden">
-                <div
-                  v-for="item in state.inbounds"
-                  :key="item.key"
-                  class="p-4 hover:bg-emerald-50/35 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                >
-                  <div class="space-y-1 min-w-0">
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <span class="font-bold text-sm text-slate-900 break-all">{{ item.name }}</span>
-                      <span
-                        class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60"
-                      >
-                        {{ item.kind_label }}
-                      </span>
-                      <span
-                        class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full"
-                        :class="
-                          item.listening
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
-                            : item.pending_reload
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
-                              : 'bg-rose-50 text-rose-700 border border-rose-200/60'
-                        "
-                      >
-                        <span
-                          class="w-1.5 h-1.5 rounded-full"
-                          :class="item.listening ? 'bg-emerald-500' : item.pending_reload ? 'bg-amber-500' : 'bg-rose-500'"
-                        ></span>
-                        {{ item.listening ? t('运行中') : item.pending_reload ? t('重载配置生效') : t('未运行') }}
-                      </span>
-                    </div>
-                    <div class="text-xs text-slate-500 font-mono tabular-nums">{{ t('端口 :') }}{{ item.port }}</div>
-                  </div>
-
-                  <!-- Actions: 复制配置 + 重置密码 + 删除 -->
-                  <div class="flex items-center gap-2 shrink-0 flex-wrap">
-                    <button
-                      type="button"
-                      @click="copyRaw(item.single_config, `single-${item.key}`)"
-                      class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-200 text-slate-700 border border-slate-200/90 transition cursor-pointer"
-                    >
-                      {{ copiedKey === `single-${item.key}` ? t('已复制') : t('复制配置') }}
-                    </button>
-                    <button
-                      v-if="item.can_reset_password"
-                      type="button"
-                      :disabled="busyKey === `rst-${item.key}`"
-                      @click="resetInboundPassword(item)"
-                      class="px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-50/80 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
-                    >
-                      {{ busyKey === `rst-${item.key}` ? t('重置中…') : t('重置密码') }}
-                    </button>
-                    <button
-                      type="button"
-                      :disabled="busyKey === `del-${item.key}`"
-                      @click="deleteInbound(item)"
-                      class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
-                    >
-                      {{ t('删除') }}
-                    </button>
-                  </div>
-                </div>
+              <div class="mt-auto pt-0.5 min-h-[28px] text-xs text-slate-500 flex items-center gap-1.5">
+                <span>{{ t('本地客户端备份：') }}</span>
+                <code class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-mono text-xs">/etc/clashgate/client/</code>
               </div>
             </section>
 
             <!-- Right: Locked-Default Add Node Form -->
-            <section class="lg:col-span-5 cg-surface rounded-2xl p-5 sm:p-6">
+            <section class="cg-home-add cg-surface rounded-2xl p-5 sm:p-6">
               <div class="flex items-center justify-between gap-2 mb-4">
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('添加节点') }}</h2>
                 <span class="px-2.5 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
@@ -2133,99 +2053,107 @@ onUnmounted(() => {
                 </button>
               </form>
             </section>
-          </div>
+
+          <!-- 入站节点 -->
+            <section class="cg-home-in cg-surface rounded-2xl p-5 sm:p-6">
+              <div class="flex items-center justify-between gap-2 mb-4">
+                <div class="flex items-center gap-2.5">
+                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('入站节点') }}</h2>
+                  <span
+                    class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 tabular-nums"
+                  >
+                    {{ state.inbounds.length }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    v-if="state.inbounds.length > 0"
+                    type="button"
+                    @click="copyRaw(state.all_proxies_yaml, 'all-proxies')"
+                    class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
+                  >
+                    {{ copiedKey === 'all-proxies' ? t('已复制全部') : t('复制全部配置') }}
+                  </button>
+                </div>
+              </div>
+
+              <div
+                v-if="state.inbounds.length === 0"
+                class="py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-sm text-slate-400"
+              >
+                {{ t('暂无入站节点，请在上方添加节点') }}
+              </div>
+
+              <div v-else class="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden">
+                <div
+                  v-for="item in state.inbounds"
+                  :key="item.key"
+                  class="p-4 hover:bg-emerald-50/35 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div class="space-y-1 min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="font-bold text-sm text-slate-900 break-all">{{ item.name }}</span>
+                      <span
+                        class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60"
+                      >
+                        {{ item.kind_label }}
+                      </span>
+                      <span
+                        class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full"
+                        :class="
+                          item.listening
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+                            : item.pending_reload
+                              ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
+                              : 'bg-rose-50 text-rose-700 border border-rose-200/60'
+                        "
+                      >
+                        <span
+                          class="w-1.5 h-1.5 rounded-full"
+                          :class="item.listening ? 'bg-emerald-500' : item.pending_reload ? 'bg-amber-500' : 'bg-rose-500'"
+                        ></span>
+                        {{ item.listening ? t('运行中') : item.pending_reload ? t('重载配置生效') : t('未运行') }}
+                      </span>
+                    </div>
+                    <div class="text-xs text-slate-500 font-mono tabular-nums">{{ t('端口') }} {{ item.port }}</div>
+                  </div>
+
+                  <!-- Actions: 复制配置 + 重置密码 + 删除 -->
+                  <div class="flex items-center gap-2 shrink-0 flex-wrap">
+                    <button
+                      type="button"
+                      @click="copyRaw(item.single_config, `single-${item.key}`)"
+                      class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-200 text-slate-700 border border-slate-200/90 transition cursor-pointer"
+                    >
+                      {{ copiedKey === `single-${item.key}` ? t('已复制') : t('复制配置') }}
+                    </button>
+                    <button
+                      v-if="item.can_reset_password"
+                      type="button"
+                      :disabled="busyKey === `rst-${item.key}`"
+                      @click="resetInboundPassword(item)"
+                      class="px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-50/80 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
+                    >
+                      {{ busyKey === `rst-${item.key}` ? t('重置中…') : t('重置密码') }}
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="busyKey === `del-${item.key}`"
+                      @click="deleteInbound(item)"
+                      class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                    >
+                      {{ t('删除') }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
         </div>
       </Transition>
 
       <!-- TAB 2: 服务端出站与外部订阅 -->
       <Transition name="cg-tab">
         <div v-show="activeTab === 'outbounds'" class="space-y-6">
-          <!-- 导入外部订阅 (proxy-providers) -->
-          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
-            <div class="flex items-center gap-2.5">
-              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('外部订阅源 (proxy-providers)') }}</h2>
-              <span
-                class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 tabular-nums"
-              >
-                {{ state.providers.length }}
-              </span>
-            </div>
-
-            <div
-              v-if="state.providers.length === 0"
-              class="py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-400"
-            >
-              {{ t('暂无外部订阅源，在下方粘贴 HTTP/HTTPS 订阅链接即可导入') }}
-            </div>
-
-            <div
-              v-else
-              class="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden"
-            >
-              <div
-                v-for="prov in state.providers"
-                :key="prov.name"
-                class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-emerald-50/25 transition"
-              >
-                <div class="min-w-0 space-y-1">
-                  <div class="flex items-center gap-2">
-                    <span class="font-bold text-sm text-slate-900">{{ prov.name }}</span>
-                    <span class="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{{ prov.path }}</span>
-                  </div>
-                  <div class="text-xs text-slate-400 font-mono truncate">{{ prov.url }}</div>
-                </div>
-                <div class="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    @click="copyRaw(prov.yaml, `prov-${prov.name}`)"
-                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
-                  >
-                    {{ copiedKey === `prov-${prov.name}` ? t('已复制') : t('复制配置') }}
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="busyKey === `del-prov-${prov.name}`"
-                    @click="deleteProvider(prov.name)"
-                    class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
-                  >
-                    {{ t('删除') }}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <form @submit.prevent="submitAddProvider" class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-              <div class="sm:col-span-7">
-                <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('订阅链接 (HTTP / HTTPS)') }}</label>
-                <input
-                  v-model="providerForm.sub_url"
-                  name="sub_url"
-                  placeholder="https://example.com/sub.yaml?token=..."
-                  required
-                  class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
-                />
-              </div>
-              <div class="sm:col-span-3">
-                <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('名称 (选填)') }}</label>
-                <input
-                  v-model="providerForm.provider_name"
-                  name="provider_name"
-                  :placeholder="t('默认 sub')"
-                  class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
-                />
-              </div>
-              <div class="sm:col-span-2">
-                <button
-                  type="submit"
-                  :disabled="busyKey === 'add-provider'"
-                  class="cg-btn-primary w-full h-10 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer"
-                >
-                  {{ busyKey === 'add-provider' ? t('导入中…') : t('导入订阅') }}
-                </button>
-              </div>
-            </form>
-          </section>
-
           <!-- 服务端手工出站节点 (proxies) -->
           <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
             <div class="flex items-center gap-2.5">
@@ -2314,6 +2242,254 @@ onUnmounted(() => {
               </div>
             </form>
           </section>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+          <!-- Zashboard 控制面板 -->
+          <section
+            id="zashboard-card"
+            class="cg-surface-emerald rounded-2xl p-5 sm:p-6 flex flex-col gap-3.5"
+          >
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+              <div class="flex items-center gap-2.5">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                <h2 class="text-base font-bold text-slate-900">{{ t('Zashboard 控制面板') }}</h2>
+                <span
+                  class="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-semibold rounded-full tabular-nums"
+                  :class="
+                    state.controller_listening
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
+                      : 'bg-amber-50 text-amber-700 border border-amber-200/70'
+                  "
+                >
+                  {{ t('端口') }} {{ state.controller_port }} {{ state.controller_listening ? t('运行中') : t('未运行') }}
+                </span>
+              </div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <a
+                  :href="state.zb_url || '#'"
+                  target="_blank"
+                  rel="noopener"
+                  class="cg-btn-primary px-3.5 py-1.5 rounded-xl text-xs font-semibold"
+                >
+                  {{ t('打开 Zashboard') }}
+                </a>
+                <button
+                  type="button"
+                  @click="copyRaw(state.zb_url, 'zb-url')"
+                  class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
+                >
+                  {{ copiedKey === 'zb-url' ? t('已复制地址') : t('复制地址') }}
+                </button>
+                <a
+                  href="/config/server.yaml"
+                  target="_blank"
+                  rel="noopener"
+                  class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition"
+                >
+                  {{ t('查看 Mihomo 服务端配置') }}
+                </a>
+              </div>
+            </div>
+
+            <div>
+              <div class="text-xs font-medium text-slate-500 mb-1.5">{{ t('免填密钥直连地址 (HTTPS)') }}</div>
+              <div
+                id="zb-url"
+                ref="zbUrlEl"
+                tabindex="0"
+                role="button"
+                :aria-expanded="zbUrlRevealed ? 'true' : 'false'"
+                @click="revealZbUrl"
+                @keydown.enter.prevent="zbUrlRevealed = !zbUrlRevealed"
+                @keydown.space.prevent="zbUrlRevealed = !zbUrlRevealed"
+                @blur="zbUrlRevealed = false"
+                class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f6faf8] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer"
+                :class="zbUrlRevealed ? 'text-slate-700 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
+              >
+                {{ !state.zb_url ? '—' : zbUrlRevealed ? state.zb_url : '••••••••••••••••••••••••••••••••' }}
+              </div>
+            </div>
+
+            <div class="mt-auto pt-0.5 min-h-[28px] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-xs font-medium text-slate-500 shrink-0">{{ t('API 密钥 (Secret)：') }}</span>
+                <code
+                  id="zb-secret"
+                  ref="zbSecretEl"
+                  tabindex="0"
+                  role="button"
+                  :aria-expanded="zbSecretRevealed ? 'true' : 'false'"
+                  @click="revealZbSecret"
+                  @keydown.enter.prevent="zbSecretRevealed = !zbSecretRevealed"
+                  @keydown.space.prevent="zbSecretRevealed = !zbSecretRevealed"
+                  @blur="zbSecretRevealed = false"
+                  class="cg-input px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-emerald-50/60 font-mono text-xs transition cursor-pointer"
+                  :class="zbSecretRevealed ? 'text-slate-800 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
+                >
+                  {{ !state.mihomo_secret ? '—' : zbSecretRevealed ? state.mihomo_secret : '••••••••••••' }}
+                </code>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <button
+                  v-if="state.mihomo_secret"
+                  type="button"
+                  @click="copyRaw(state.mihomo_secret, 'zb-secret')"
+                  class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition cursor-pointer"
+                >
+                  {{ copiedKey === 'zb-secret' ? t('已复制') : t('复制密钥') }}
+                </button>
+                <button
+                  type="button"
+                  :disabled="busyKey === 'reset-secret'"
+                  @click="resetZbSecret"
+                  class="px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
+                >
+                  {{ busyKey === 'reset-secret' ? t('重置中…') : t('重置 API 密钥') }}
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Cloudflare MASQUE preset -->
+          <section class="cg-surface cg-feature rounded-2xl p-5 sm:p-6">
+            <div class="flex items-center justify-between gap-4">
+              <div class="flex items-start gap-2.5 min-w-0">
+                <span class="mt-0.5 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-700 shrink-0">
+                  <CgIcon name="cloud" :size="16" />
+                </span>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('Cloudflare MASQUE') }}</h2>
+                    <span
+                      v-if="state.masque.status !== 'ok'"
+                      class="px-2.5 py-0.5 text-xs font-semibold rounded-full border"
+                      :class="
+                        state.masque.status === 'error'
+                          ? 'bg-rose-50 text-rose-700 border-rose-200/80'
+                          : 'bg-slate-50 text-slate-600 border-slate-200'
+                      "
+                    >
+                      {{ state.masque.status === 'error' ? t('注册失败') : t('后台注册中') }}
+                    </span>
+                  </div>
+                  <p class="text-xs text-slate-500 mt-1 leading-relaxed">
+                    {{ t('通过Cloudflare注册MASQUE节点。') }}
+                  </p>
+                  <div v-if="state.masque.status === 'ok'" class="mt-2.5 font-mono text-xs text-slate-600 break-all">
+                    {{ state.masque.name }} · {{ state.masque.endpoint }}
+                  </div>
+                </div>
+              </div>
+              <button
+                v-if="state.masque.status === 'ok'"
+                type="button"
+                :disabled="busyKey === 'add-masque'"
+                @click="addMasqueOutbound"
+                class="cg-btn-primary px-3.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 cursor-pointer shrink-0"
+              >
+                {{ busyKey === 'add-masque' ? t('添加中…') : t('加入出站节点') }}
+              </button>
+            </div>
+            <div v-if="state.masque.status === 'error'" class="space-y-2 mt-3">
+              <p class="text-xs text-rose-700 leading-relaxed break-all">{{ state.masque.error || t('注册失败') }}</p>
+              <button
+                type="button"
+                :disabled="busyKey === '/action/masque-register'"
+                @click="retryMasque"
+                class="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+              >
+                {{ busyKey === '/action/masque-register' ? t('注册中…') : t('重新注册') }}
+              </button>
+            </div>
+            <p v-else-if="state.masque.status !== 'ok'" class="text-xs text-slate-500 mt-3">{{ t('正在向 Cloudflare 注册，完成后这里会出现「加入出站节点」。') }}</p>
+          </section>
+          </div>
+
+          <!-- 导入外部订阅 (proxy-providers) -->
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
+            <div class="flex items-center gap-2.5">
+              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('外部订阅源 (proxy-providers)') }}</h2>
+              <span
+                class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 tabular-nums"
+              >
+                {{ state.providers.length }}
+              </span>
+            </div>
+
+            <div
+              v-if="state.providers.length === 0"
+              class="py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-400"
+            >
+              {{ t('暂无外部订阅源，在下方粘贴 HTTP/HTTPS 订阅链接即可导入') }}
+            </div>
+
+            <div
+              v-else
+              class="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden"
+            >
+              <div
+                v-for="prov in state.providers"
+                :key="prov.name"
+                class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-emerald-50/25 transition"
+              >
+                <div class="min-w-0 space-y-1">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-sm text-slate-900">{{ prov.name }}</span>
+                    <span class="text-xs font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{{ prov.path }}</span>
+                  </div>
+                  <div class="text-xs text-slate-400 font-mono truncate">{{ prov.url }}</div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    @click="copyRaw(prov.yaml, `prov-${prov.name}`)"
+                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
+                  >
+                    {{ copiedKey === `prov-${prov.name}` ? t('已复制') : t('复制配置') }}
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="busyKey === `del-prov-${prov.name}`"
+                    @click="deleteProvider(prov.name)"
+                    class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                  >
+                    {{ t('删除') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <form @submit.prevent="submitAddProvider" class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+              <div class="sm:col-span-7">
+                <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('订阅链接 (HTTP / HTTPS)') }}</label>
+                <input
+                  v-model="providerForm.sub_url"
+                  name="sub_url"
+                  placeholder="https://example.com/sub.yaml?token=..."
+                  required
+                  class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                />
+              </div>
+              <div class="sm:col-span-3">
+                <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('名称 (选填)') }}</label>
+                <input
+                  v-model="providerForm.provider_name"
+                  name="provider_name"
+                  :placeholder="t('默认 sub')"
+                  class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                />
+              </div>
+              <div class="sm:col-span-2">
+                <button
+                  type="submit"
+                  :disabled="busyKey === 'add-provider'"
+                  class="cg-btn-primary w-full h-10 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer"
+                >
+                  {{ busyKey === 'add-provider' ? t('导入中…') : t('导入订阅') }}
+                </button>
+              </div>
+            </form>
+          </section>
         </div>
       </Transition>
 
@@ -2324,7 +2500,7 @@ onUnmounted(() => {
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <div class="flex items-center gap-2.5">
-                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('易读配置转换') }}</h2>
+                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('节点转换') }}</h2>
                   <span
                     class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/70"
                   >
@@ -2429,7 +2605,7 @@ onUnmounted(() => {
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div class="space-y-1">
                 <div class="flex items-center gap-2.5 flex-wrap">
-                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('自定义 mihomo 服务端配置') }}</h2>
+                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('自定义服务端') }}</h2>
                   <span
                     class="px-2.5 py-0.5 text-xs font-semibold rounded-full"
                     :class="
@@ -2438,11 +2614,11 @@ onUnmounted(() => {
                         : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
                     "
                   >
-                    {{ state.custom_config_mode ? t('当前：自定义配置模式') : t('当前：标准模板模式') }}
+                    {{ state.custom_config_mode ? t('当前：自定义配置') : t('当前：标准模板') }}
                   </span>
                 </div>
                 <p class="text-xs text-slate-500">
-                  {{ t('您可以直接粘贴或编辑整份自备的 mihomo 服务端配置文件（') }}<code class="font-mono">config.yaml</code>{{ t('），校验通过后立即应用，并自动同步刷新入站 Listeners 列表与客户端订阅。普通用户无需修改此页。') }}
+                  {{ t('您可以直接粘贴或编辑整份自备的 mihomo 服务端配置文件（') }}<code class="font-mono">config.yaml</code>{{ t('），校验通过后立即生效。普通用户无需修改此页。') }}
                 </p>
               </div>
 
@@ -2557,18 +2733,6 @@ onUnmounted(() => {
                   }}
                 </span>
               </div>
-
-              <div class="flex items-center gap-2 flex-wrap">
-                <button
-                  id="cert-renew-btn"
-                  type="button"
-                  :disabled="busyKey === '/action/cert'"
-                  @click="postAction('/action/cert', {}, '/action/cert')"
-                  class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 disabled:opacity-50 transition cursor-pointer"
-                >
-                  {{ busyKey === '/action/cert' ? t('检查续期中…') : t('立即检查 / 续期') }}
-                </button>
-              </div>
             </div>
 
             <!-- 无证书空态说明 -->
@@ -2586,7 +2750,7 @@ onUnmounted(() => {
               id="cert-manual-notice"
               class="rounded-xl bg-[#f4fbf7] border border-emerald-200/80 px-4 py-3 text-xs text-emerald-900 leading-relaxed"
             >
-              {{ t('当前为手动证书模式。手动证书请直接替换 /etc/clashgate/certs/ 下的 fullchain.pem 与 privkey.pem 文件，然后点击右上角「立即检查 / 续期」校验证书。') }}
+              {{ t('当前为手动证书模式。手动证书请直接替换 /etc/clashgate/certs/ 下的 fullchain.pem 与 privkey.pem 文件。') }}
             </div>
 
             <!-- 证书信息字段网格 -->
@@ -2650,7 +2814,7 @@ onUnmounted(() => {
             <section id="cert-dns-form-card" class="lg:col-span-6 cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
               <div>
                 <div class="flex items-center gap-2.5">
-                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('切换到 Cloudflare DNS 续证模式') }}</h2>
+                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('切换并重新生成证书') }}</h2>
                   <span
                     class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/70"
                   >
@@ -2658,7 +2822,7 @@ onUnmounted(() => {
                   </span>
                 </div>
                 <p class="text-xs text-slate-500 mt-1 leading-relaxed">
-                  {{ t('立即生效，无需点击顶栏重载配置。保存后将立即调用 acme.sh 申请或续期证书。') }}
+                  {{ t('只有和当前模式不同时才能点击。切换后会立刻重新生成证书，Token 错误或 80 端口被占用会返回具体原因。') }}
                 </p>
               </div>
 
@@ -2701,10 +2865,10 @@ onUnmounted(() => {
                 <button
                   id="cert-mode-submit"
                   type="submit"
-                  :disabled="busyKey === '/action/cert-mode'"
-                  class="cg-btn-primary w-full h-10 rounded-xl disabled:opacity-50 text-sm font-semibold cursor-pointer"
+                  :disabled="certRegenDisabled"
+                  class="cg-btn-primary w-full h-10 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed text-sm font-semibold cursor-pointer"
                 >
-                  {{ busyKey === '/action/cert-mode' ? t('正在切换并续证…') : t('切换并续证') }}
+                  {{ certRegenLock || busyKey === '/action/cert-mode' ? t('正在重新生成证书…') : t('切换并重新生成证书') }}
                 </button>
               </form>
             </section>
@@ -2746,7 +2910,7 @@ onUnmounted(() => {
                   </ul>
                 </li>
                 <li>
-                  {{ t('创建后复制生成的 Token，粘贴到左侧输入框并点击「切换并续证」（Token 仅显示一次，请妥善保存）。') }}
+                  {{ t('创建后复制生成的 Token，粘贴到左侧输入框。模式与当前不同时，按钮才会亮起，点击后切换并重新生成证书（Token 只显示一次）。') }}
                 </li>
               </ol>
 
@@ -2758,6 +2922,46 @@ onUnmounted(() => {
           </div>
         </div>
       </Transition>
+
+      <!-- Settings -->
+      <Transition name="cg-tab">
+        <div v-show="activeTab === 'settings'" class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('自定义服务端') }}</h2>
+                <p class="text-xs text-slate-500 mt-1 leading-relaxed max-w-xl">
+                  {{ t('高级功能，打开后可自由编辑 mihomo 服务端配置。') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="state.custom_server_enabled ? 'true' : 'false'"
+                :disabled="busyKey === '/action/settings'"
+                @click="toggleCustomServer"
+                class="cg-switch"
+                :class="{ 'is-on': state.custom_server_enabled }"
+              >
+                <span></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="cg-surface rounded-2xl">
+            <button
+              type="button"
+              class="w-full p-5 sm:p-6 text-left rounded-2xl hover:bg-[#f7f9fc] transition cursor-pointer"
+              @click="openPasswordModal"
+            >
+              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('修改面板密码') }}</h2>
+              <p class="text-xs text-slate-500 mt-1 leading-relaxed">{{ t('更新当前登录密码。') }}</p>
+            </button>
+          </section>
+        </div>
+      </Transition>
     </main>
+      </div>
+    </div>
   </div>
 </template>
