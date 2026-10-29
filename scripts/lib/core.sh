@@ -208,7 +208,14 @@ assemble_config() {
       if (!has) print "proxies: []"
       next
     }
-    /^@@LISTENERS@@$/  { while ((getline l < r) > 0) print l; while ((getline l < e) > 0) print l; next }
+    /^@@LISTENERS@@$/  {
+      buf = ""
+      while ((getline l < r) > 0) buf = buf l "\n"
+      while ((getline l < e) > 0) buf = buf l "\n"
+      if (buf ~ /[^[:space:]]/) { print "listeners:"; printf "%s", buf }
+      else print "listeners: []"
+      next
+    }
     { print }' "$LIB_DIR/resources/server.yaml.tpl" > "$CONF.new"
   chmod 640 "$CONF.new"; chown root:mihomo "$CONF.new"
   mv -f "$CONF.new" "$CONF"

@@ -62,6 +62,73 @@ html:not(.cg-ready) #app {
   }
 }
 
+.cg-lang-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 32px;
+  padding: 0 0.55rem 0 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid #e2e7ef;
+  background: #fff;
+  color: #3a4654;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+.cg-lang-btn:hover {
+  background: #f8fafc;
+}
+.cg-lang-btn[aria-expanded="true"] {
+  border-color: #bfdbfe;
+  background: #eef5ff;
+  color: #1558b8;
+}
+.cg-lang-caret {
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
+}
+.cg-lang-menu {
+  position: fixed;
+  z-index: 80;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #e2e7ef;
+  border-radius: 12px;
+  box-shadow: 0 18px 40px -24px rgba(22, 48, 86, 0.55);
+}
+.cg-lang-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #1a2330;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  text-align: start;
+}
+.cg-lang-item:hover {
+  background: #f5f7fb;
+}
+.cg-lang-item.is-active {
+  background: #eef5ff;
+  color: #1558b8;
+}
+html[lang="fa"] body,
+html[lang="fa"] .cg-app h2 {
+  font-family: Tahoma, "Noto Naskh Arabic", "Noto Sans Arabic", "Segoe UI", sans-serif;
+}
+
 .cg-app h2 {
   font-family: "Newsreader", "Iowan Old Style", Palatino, "Songti SC", "Noto Serif CJK SC", serif;
   font-weight: 600;

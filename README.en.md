@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.05" src="https://img.shields.io/badge/version-v1.05-14614d" />
+  <img alt="Version: v1.06" src="https://img.shields.io/badge/version-v1.06-14614d" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -22,7 +22,7 @@ ClashGate is not a kitchen-sink console. A VPS needs three answers: what listens
 - **Three install modes**: no certificate (a VLESS Reality node, directly), automatic Let's Encrypt (port or Cloudflare DNS), or a certificate you bring yourself.
 - **A short panel**: Home, Outbound nodes, Node converter, HTTPS certificate. Custom server stays off until you enable it in Settings. Password changes live there too.
 - **Draft, then reload**: adding or removing nodes, rotating the subscription, and resetting keys are recorded first. **Reload config** writes the server and updates the client subscription.
-- **Certificates regenerate on a real switch**: the button stays gray until the mode changes. A bad API token or an occupied port 80 is returned as an error, not a silent failure.
+- **Your own server**: off by default. Turn it on to leave the built-in template behind and run entirely on a mihomo server config you write yourself.
 
 ## Install
 

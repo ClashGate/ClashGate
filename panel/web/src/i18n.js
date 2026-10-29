@@ -1,5 +1,7 @@
 // ClashGate panel i18n: default zh; choice kept in localStorage + cookie (cookie lets the server localize API messages).
 import { ref } from 'vue'
+import localesRu from './locales/ru.json'
+import localesFa from './locales/fa.json'
 
 const KEY = 'clashgate_lang'
 export const EN = {
@@ -193,7 +195,10 @@ export const EN = {
  "复制配置": "Copy config",
  "重置密码": "Reset password",
  "免证书的新一代协议": "Next-generation certificate-free protocol",
- "已锁定安全默认：默认启用 VLESS Encryption (vless-x25519)，SNI 从内置域名池随机抽取": "Secure defaults locked: VLESS Encryption (vless-x25519) enabled by default; SNI randomly picked from the built-in domain pool",
+ "已锁定安全默认：默认启用 VLESS Encryption (vless-x25519)。SNI 可自填，留空从内置域名池随机抽取": "Secure defaults locked: VLESS Encryption (vless-x25519) is on. SNI is optional; leave it blank to pick a random domain from the built-in pool",
+ "已锁定安全默认：混淆模式固定为 tls。伪装 Host 可自填，留空从内置域名池随机抽取": "Secure defaults locked: obfuscation mode is fixed to tls. Camouflage host is optional; leave it blank to pick a random domain from the built-in pool",
+ "已锁定安全默认：伪装地址 (JLS) 可自填，留空从内置域名池随机抽取，拥塞控制默认 bbr": "Secure defaults locked: camouflage address (JLS) is optional; leave it blank to pick a random domain from the built-in pool. Congestion control defaults to bbr",
+ "留空从内置域名池随机抽取": "Leave blank to pick a random domain from the built-in pool",
  "新一代 UDP 协议": "Next-generation UDP protocol",
  "已锁定安全默认：混淆密码 (Salamander) 默认随机生成，不可手动关闭": "Secure defaults locked: obfuscation password (Salamander) generated randomly and cannot be disabled",
  "经典轻量级加密协议，默认锁定 aes-256-gcm": "Classic lightweight encrypted protocol, locked to aes-256-gcm by default",
@@ -280,7 +285,7 @@ export const EN = {
  "节点转换": "Node converter",
  "自定义服务端": "Custom server",
  "设置": "Settings",
- "简单安全的代理服务端": "A simple, safe proxy server",
+ "简单安全的mihomo服务端": "A simple, safe Mihomo server",
  "导航": "Navigate",
  "采用 Mihomo 核心，简单安全。": "Mihomo core. Simple and safe.",
  "高级功能请到设置页开启": "This is an advanced feature. Enable it on the Settings page.",
@@ -306,28 +311,51 @@ export const EN = {
  "升级完成，登录状态已保持。": "Upgrade finished. You are still signed in.",
  "导航": "Menu",
  "高级功能，打开后可自由编辑 mihomo 服务端配置。": "Advanced. Turn it on to edit the mihomo server config freely.",
+ "自动更新": "Automatic updates",
+ "打开后每周自动更新面板。更新面板时会同时更新 Mihomo 内核。": "When on, the panel updates once a week. Updating the panel also updates the Mihomo core.",
  "请勿重复加入": "Already added. Don't add it again.",
  "内核": "Core",
  "节点": "Nodes",
  "入站": "Inbound",
  "出站": "Outbound",
  "订阅": "subs",
+ "语言": "Language",
  "草稿": "Drafts",
  "流量": "Traffic",
  "没有待重载的修改": "Nothing waiting to reload",
  "有修改，点开查看": "Changes waiting — open to review",
  "自定义配置": "Custom config",
- "展开": "Open"
+ "展开": "Open",
+ "+ 添加节点「{name}」（端口 {port}）": "+ Add node “{name}” (port {port})",
+ "- 删除节点「{name}」": "- Delete node “{name}”",
+ "~ 重置密码「{name}」": "~ Reset password “{name}”",
+ "~ 重置 API 密钥": "~ Reset API secret",
+ "~ 更换订阅链接": "~ Change subscription link",
+ "+ 添加出站节点「{name}」": "+ Add outbound node “{name}”",
+ "- 删除出站节点「{name}」": "- Delete outbound node “{name}”",
+ "+ 导入订阅源「{name}」": "+ Import provider “{name}”",
+ "- 删除订阅源「{name}」": "- Delete provider “{name}”"
 }
+
+export const LANGS = ['zh', 'en', 'ru', 'fa']
+const DICTS = { en: EN, ru: localesRu.ui || {}, fa: localesFa.ui || {} }
+const HTML_LANG = { zh: 'zh-CN', en: 'en', ru: 'ru', fa: 'fa' }
 
 function detect() {
   let v = ''
   try {
     v = window.localStorage.getItem(KEY) || ''
   } catch {}
-  if (v !== 'en' && v !== 'zh') {
-    const m = document.cookie.match(/(?:^|;\s*)clashgate_lang=(en|zh)/)
-    v = m ? m[1] : 'zh'
+  if (!LANGS.includes(v)) {
+    const m = document.cookie.match(/(?:^|;\s*)clashgate_lang=(zh|en|ru|fa)/)
+    v = m ? m[1] : ''
+  }
+  if (!LANGS.includes(v)) {
+    const nav = (navigator.language || '').toLowerCase()
+    if (nav.startsWith('ru')) v = 'ru'
+    else if (nav.startsWith('fa')) v = 'fa'
+    else if (nav.startsWith('en')) v = 'en'
+    else v = 'zh'
   }
   return v
 }
@@ -339,19 +367,25 @@ function persist(v) {
     window.localStorage.setItem(KEY, v)
   } catch {}
   document.cookie = `${KEY}=${v}; path=/; max-age=31536000; SameSite=Lax`
-  document.documentElement.lang = v === 'en' ? 'en' : 'zh-CN'
+  document.documentElement.lang = HTML_LANG[v] || 'zh-CN'
+  document.documentElement.dir = v === 'fa' ? 'rtl' : 'ltr'
 }
 persist(lang.value)
 
 export function setLang(v) {
-  lang.value = v === 'en' ? 'en' : 'zh'
+  lang.value = LANGS.includes(v) ? v : 'zh'
   persist(lang.value)
+}
+
+export function langLabel(v) {
+  return { zh: '中文', en: 'English', ru: 'Русский', fa: 'فارسی' }[v] || v
 }
 
 // t('中文源文案', { name }) -> current language. Placeholders use {name}. Unknown keys fall back to the source text.
 export function t(key, params) {
   let s = key
-  if (lang.value === 'en' && Object.prototype.hasOwnProperty.call(EN, key)) s = EN[key]
+  const dict = DICTS[lang.value]
+  if (dict && Object.prototype.hasOwnProperty.call(dict, key)) s = dict[key]
   if (params) s = s.replace(/\{(\w+)\}/g, (m, k) => (params[k] === undefined ? m : params[k]))
   return s
 }

@@ -1,12 +1,12 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { t, lang, setLang } from './i18n.js'
+import { t, lang, setLang, LANGS, langLabel } from './i18n.js'
 import CgIcon from './CgIcon.vue'
 
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '1.05',
+  version: '1.06',
   mihomo_version: '',
   csrf: '',
   login_error: '',
@@ -64,7 +64,7 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '1.05',
+  version: boot.version || '1.06',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
@@ -93,9 +93,10 @@ const state = reactive({
   proxies: Array.isArray(boot.proxies) ? boot.proxies : [],
   providers: Array.isArray(boot.providers) ? boot.providers : [],
   custom_server_enabled: !!boot.custom_server_enabled,
+  auto_update: !!boot.auto_update,
   masque: {
     status: (boot.masque && boot.masque.status) || 'idle',
-    name: (boot.masque && boot.masque.name) || 'Cloudflare-MASQUE',
+    name: (boot.masque && boot.masque.name) || '⛅️ Cloudflare-MASQUE',
     endpoint: (boot.masque && boot.masque.endpoint) || '',
     yaml: (boot.masque && boot.masque.yaml) || '',
     error: (boot.masque && boot.masque.error) || '',
@@ -193,6 +194,9 @@ function handleDocumentPointerDown(ev) {
   }
   if (cfTokenRevealed.value && cfTokenEl.value && target && !cfTokenEl.value.contains(target)) {
     cfTokenRevealed.value = false
+  }
+  if (langOpen.value && target && target.closest && !target.closest('.cg-lang, .cg-lang-menu')) {
+    langOpen.value = false
   }
 }
 
@@ -299,35 +303,15 @@ function formatPendingItem(item) {
   const op = item.op || ''
   const name = item.name || ''
   const port = item.port
-  if (op === 'add') {
-    return lang.value === 'en'
-      ? `+ Add node “${name}” (port ${port})`
-      : `+ 添加节点「${name}」（端口 ${port}）`
-  }
-  if (op === 'delete') {
-    return lang.value === 'en' ? `- Delete node “${name}”` : `- 删除节点「${name}」`
-  }
-  if (op === 'reset-password') {
-    return lang.value === 'en' ? `~ Reset password “${name}”` : `~ 重置密码「${name}」`
-  }
-  if (op === 'reset-secret') {
-    return lang.value === 'en' ? '~ Reset API secret' : '~ 重置 API 密钥'
-  }
-  if (op === 'reset-sub') {
-    return lang.value === 'en' ? '~ Change subscription link' : '~ 更换订阅链接'
-  }
-  if (op === 'add-proxy') {
-    return lang.value === 'en' ? `+ Add outbound node “${name}”` : `+ 添加出站节点「${name}」`
-  }
-  if (op === 'delete-proxy') {
-    return lang.value === 'en' ? `- Delete outbound node “${name}”` : `- 删除出站节点「${name}」`
-  }
-  if (op === 'add-provider') {
-    return lang.value === 'en' ? `+ Import provider “${name}”` : `+ 导入订阅源「${name}」`
-  }
-  if (op === 'delete-provider') {
-    return lang.value === 'en' ? `- Delete provider “${name}”` : `- 删除订阅源「${name}」`
-  }
+  if (op === 'add') return t('+ 添加节点「{name}」（端口 {port}）', { name, port })
+  if (op === 'delete') return t('- 删除节点「{name}」', { name })
+  if (op === 'reset-password') return t('~ 重置密码「{name}」', { name })
+  if (op === 'reset-secret') return t('~ 重置 API 密钥')
+  if (op === 'reset-sub') return t('~ 更换订阅链接')
+  if (op === 'add-proxy') return t('+ 添加出站节点「{name}」', { name })
+  if (op === 'delete-proxy') return t('- 删除出站节点「{name}」', { name })
+  if (op === 'add-provider') return t('+ 导入订阅源「{name}」', { name })
+  if (op === 'delete-provider') return t('- 删除订阅源「{name}」', { name })
   return item.detail || ''
 }
 
@@ -424,8 +408,34 @@ watch(activeTab, () => {
 
 const busyKey = ref('')
 const copiedKey = ref('')
+const langOpen = ref(false)
+const langMenuStyle = ref({})
 const toast = reactive({ show: false, msg: '', ok: true })
 let toastTimer = null
+
+function toggleLangMenu(ev) {
+  if (langOpen.value) {
+    langOpen.value = false
+    return
+  }
+  const btn = ev.currentTarget
+  const rect = btn.getBoundingClientRect()
+  const width = 168
+  const rtl = document.documentElement.dir === 'rtl'
+  let left = rtl ? rect.left : rect.right - width
+  left = Math.max(8, Math.min(left, window.innerWidth - width - 8))
+  langMenuStyle.value = {
+    top: `${Math.round(rect.bottom + 6)}px`,
+    left: `${Math.round(left)}px`,
+    width: `${width}px`,
+  }
+  langOpen.value = true
+}
+
+function pickLang(code) {
+  setLang(code)
+  langOpen.value = false
+}
 
 function showToast(msg, ok = true) {
   if (!msg) return
@@ -444,7 +454,7 @@ const PROTOCOLS = [
     label: 'VLESS Reality',
     defaultName: 'VlessReality',
     desc: '免证书的新一代协议',
-    lockedNote: '已锁定安全默认：默认启用 VLESS Encryption (vless-x25519)，SNI 从内置域名池随机抽取',
+    lockedNote: '已锁定安全默认：默认启用 VLESS Encryption (vless-x25519)。SNI 可自填，留空从内置域名池随机抽取',
   },
   {
     value: 'hysteria2',
@@ -465,7 +475,7 @@ const PROTOCOLS = [
     label: 'Snell V5',
     defaultName: 'SnellV5',
     desc: '轻量高效的私有协议，内置随机 TLS 伪装',
-    lockedNote: '已锁定安全默认：混淆模式固定为 tls，伪装 Host 从内置池随机抽取',
+    lockedNote: '已锁定安全默认：混淆模式固定为 tls。伪装 Host 可自填，留空从内置域名池随机抽取',
   },
   {
     value: 'anytls',
@@ -479,7 +489,7 @@ const PROTOCOLS = [
     label: 'ShadowQUIC',
     defaultName: 'ShadowQUIC',
     desc: '免证书的新一代 QUIC 协议，内置随机 JLS 伪装',
-    lockedNote: '已锁定安全默认：伪装地址 (JLS) 从内置域名池随机抽取，拥塞控制默认 bbr',
+    lockedNote: '已锁定安全默认：伪装地址 (JLS) 可自填，留空从内置域名池随机抽取，拥塞控制默认 bbr',
   },
   {
     value: 'sudoku',
@@ -537,10 +547,14 @@ const inboundForm = reactive({
   mieru_transport: 'TCP',
   http_tls: '0',
   socks_tls: '0',
+  sni: '',
 })
 
 const currentProtocol = computed(() => PROTOCOL_MAP[inboundForm.kind] || PROTOCOLS[0])
 const currentDefaultName = computed(() => DEFAULT_NAMES[inboundForm.kind] || 'VlessReality')
+const sniEditable = computed(() =>
+  inboundForm.kind === 'vless-reality' || inboundForm.kind === 'snell' || inboundForm.kind === 'shadowquic'
+)
 
 watch(
   () => inboundForm.kind,
@@ -763,6 +777,7 @@ async function refreshServerStateSilent() {
         if (data.cert_days !== undefined) state.cert_days = data.cert_days
         if (data.cert_hours !== undefined) state.cert_hours = data.cert_hours
         if (data.custom_server_enabled !== undefined) state.custom_server_enabled = !!data.custom_server_enabled
+        if (data.auto_update !== undefined) state.auto_update = !!data.auto_update
         if (data.masque) {
           state.masque = {
             status: data.masque.status || state.masque.status,
@@ -815,10 +830,11 @@ function applyServerState(newState) {
   if (newState.cert_hours !== undefined) state.cert_hours = newState.cert_hours
   if (newState.custom_config_mode !== undefined) state.custom_config_mode = newState.custom_config_mode
   if (newState.custom_server_enabled !== undefined) state.custom_server_enabled = !!newState.custom_server_enabled
+  if (newState.auto_update !== undefined) state.auto_update = !!newState.auto_update
   if (newState.masque && typeof newState.masque === 'object') {
     state.masque = {
       status: newState.masque.status || 'idle',
-      name: newState.masque.name || 'Cloudflare-MASQUE',
+      name: newState.masque.name || '⛅️ Cloudflare-MASQUE',
       endpoint: newState.masque.endpoint || '',
       yaml: newState.masque.yaml || '',
       error: newState.masque.error || '',
@@ -975,12 +991,14 @@ async function submitAddInbound() {
     mieru_transport: inboundForm.mieru_transport,
     http_tls: inboundForm.http_tls,
     socks_tls: inboundForm.socks_tls,
+    sni: sniEditable.value ? inboundForm.sni.trim() : '',
     req_id: pendingAddReqId,
   }
   const res = await postAction('/inbounds/add', payload, 'add-inbound')
   pendingAddReqId = ''
   if (res && res.ok) {
     inboundForm.port = ''
+    inboundForm.sni = ''
     inboundForm.name = currentDefaultName.value
   }
 }
@@ -1238,14 +1256,39 @@ async function toggleCustomServer() {
   if (res && res.ok && !next && activeTab.value === 'advanced') selectTab('inbounds')
 }
 
+async function toggleAutoUpdate() {
+  const next = !state.auto_update
+  await postAction(
+    '/action/settings',
+    { auto_update: next ? '1' : '0' },
+    '/action/settings'
+  )
+}
+
+function masqueNodeName(name) {
+  const n = String(name || 'Cloudflare-MASQUE').trim()
+  return n.startsWith('⛅️') ? n : `⛅️ ${n}`
+}
+
+function masqueYamlNamed(yaml, name) {
+  const raw = String(yaml || '').trim().replace(/^-+\s*/, '')
+  try {
+    const obj = JSON.parse(raw)
+    obj.name = name
+    return '- ' + JSON.stringify(obj)
+  } catch {
+    return yaml
+  }
+}
+
 async function addMasqueOutbound() {
   if (!state.masque.yaml) return
-  const name = (state.masque.name || 'Cloudflare-MASQUE').trim()
-  if (state.proxies.some((p) => p && p.name === name)) {
+  const name = masqueNodeName(state.masque.name)
+  if (state.proxies.some((p) => p && (p.name === name || p.name === String(state.masque.name || '').trim()))) {
     showToast(t('请勿重复加入'), false)
     return
   }
-  await postAction('/proxies/add', { proxies_raw: state.masque.yaml }, 'add-masque')
+  await postAction('/proxies/add', { proxies_raw: masqueYamlNamed(state.masque.yaml, name) }, 'add-masque')
 }
 
 async function retryMasque() {
@@ -1291,13 +1334,19 @@ onUnmounted(() => {
   <div v-if="pageMode === 'login'" class="cg-login">
     <div class="cg-login-card">
       <div class="flex justify-end mb-4">
-        <button
-          type="button"
-          @click="setLang(lang === 'zh' ? 'en' : 'zh')"
-          class="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 transition cursor-pointer"
-        >
-          {{ lang === 'zh' ? 'English' : '中文' }}
-        </button>
+        <div class="cg-lang">
+          <button
+            type="button"
+            class="cg-lang-btn"
+            :aria-expanded="langOpen ? 'true' : 'false'"
+            :aria-label="t('语言')"
+            @click="toggleLangMenu"
+          >
+            <CgIcon name="lang" :size="14" />
+            <span>{{ langLabel(lang) }}</span>
+            <svg class="cg-lang-caret" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
       </div>
       <div class="flex items-center gap-3.5 mb-7">
         <img src="/assets/logo.png" alt="" class="cg-logo" />
@@ -1576,7 +1625,7 @@ onUnmounted(() => {
           <img src="/assets/logo.png" alt="" class="cg-logo" />
           <div class="min-w-0">
             <div class="cg-wordmark text-[18px] leading-none text-[#3d2b22]">ClashGate</div>
-            <div class="cg-brand-sub">{{ t('简单安全的代理服务端') }}</div>
+            <div class="cg-brand-sub">{{ t('简单安全的mihomo服务端') }}</div>
           </div>
         </div>
         <div class="cg-nav-label">{{ t('导航') }}</div>
@@ -1616,7 +1665,6 @@ onUnmounted(() => {
           <span class="cg-wordmark text-[18px] text-slate-900">ClashGate</span>
         </div>
         <div class="hidden lg:block min-w-0">
-          <div class="cg-kicker">ClashGate</div>
           <div class="cg-page-title">{{ pageTitle }}</div>
         </div>
 
@@ -1669,15 +1717,19 @@ onUnmounted(() => {
             }}</span>
             <CgIcon v-if="panelUpdate.has_update && busyKey !== '/action/check-update' && busyKey !== '/action/upgrade-self'" name="up" :size="13" />
           </button>
-          <button
-            type="button"
-            @click="setLang(lang === 'zh' ? 'en' : 'zh')"
-            class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 transition cursor-pointer inline-flex items-center gap-1"
-            :title="lang === 'zh' ? 'Switch to English' : '切换到中文'"
-          >
-            <CgIcon name="lang" :size="14" />
-            {{ lang === 'zh' ? 'EN' : '中文' }}
-          </button>
+          <div class="cg-lang">
+            <button
+              type="button"
+              class="cg-lang-btn"
+              :aria-expanded="langOpen ? 'true' : 'false'"
+              :aria-label="t('语言')"
+              @click="toggleLangMenu"
+            >
+              <CgIcon name="lang" :size="14" />
+              <span>{{ langLabel(lang) }}</span>
+              <svg class="cg-lang-caret" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
           <form method="post" action="/logout" class="inline">
             <input type="hidden" name="csrf" :value="state.csrf" />
             <button
@@ -1967,6 +2019,19 @@ onUnmounted(() => {
                   </div>
                 </div>
 
+                <div v-if="sniEditable">
+                  <label for="sni" class="block text-xs font-semibold text-slate-700 mb-1.5">SNI</label>
+                  <input
+                    id="sni"
+                    v-model="inboundForm.sni"
+                    name="sni"
+                    autocomplete="off"
+                    spellcheck="false"
+                    :placeholder="t('留空从内置域名池随机抽取')"
+                    class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                  />
+                </div>
+
                 <!-- Non-locked protocol options (TUIC / TrustTunnel / Mieru / HTTP / SOCKS5) -->
                 <template v-if="inboundForm.kind === 'tuic'">
                   <div>
@@ -2153,97 +2218,8 @@ onUnmounted(() => {
 
       <!-- TAB 2: 服务端出站与外部订阅 -->
       <Transition name="cg-tab">
-        <div v-show="activeTab === 'outbounds'" class="space-y-6">
-          <!-- 服务端手工出站节点 (proxies) -->
-          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
-            <div class="flex items-center gap-2.5">
-              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('服务端出站节点 (proxies)') }}</h2>
-              <span
-                class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 tabular-nums"
-              >
-                {{ state.proxies.length }}
-              </span>
-            </div>
-
-            <div
-              v-if="state.proxies.length === 0"
-              class="py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-400"
-            >
-              {{ t('暂无手工出站节点，在下方粘贴单行 JSON 或多行 YAML 即可添加') }}
-            </div>
-
-            <div
-              v-else
-              class="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden"
-            >
-              <div
-                v-for="p in state.proxies"
-                :key="p.name"
-                class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-emerald-50/25 transition"
-              >
-                <div class="space-y-1 min-w-0">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="font-bold text-sm text-slate-900 break-all">{{ p.name }}</span>
-                    <span
-                      class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60"
-                    >
-                      {{ p.type }}
-                    </span>
-                  </div>
-                  <div class="text-xs text-slate-500 font-mono tabular-nums">{{ p.endpoint }}</div>
-                </div>
-                <div class="flex items-center gap-2 shrink-0 flex-wrap">
-                  <button
-                    type="button"
-                    @click="copyRaw(p.single_config, `p-single-${p.name}`)"
-                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
-                  >
-                    {{ copiedKey === `p-single-${p.name}` ? t('已复制') : t('复制配置') }}
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="busyKey === `del-proxy-${p.name}`"
-                    @click="deleteProxy(p.name)"
-                    class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
-                  >
-                    {{ t('删除') }}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <form @submit.prevent="submitAddProxies" class="space-y-3">
-              <textarea
-                v-model="proxiesRaw"
-                name="proxies_raw"
-                rows="5"
-                :placeholder="t('粘贴单行 JSON / Flow 或多行 YAML 格式的 mihomo 节点配置（含 easytier、tailscale 等）…')"
-                class="cg-input w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-900 focus:bg-white"
-              ></textarea>
-              <div class="flex items-center gap-2.5 flex-wrap">
-                <button
-                  type="submit"
-                  :disabled="busyKey === 'add-proxies'"
-                  class="cg-btn-primary px-4 py-2 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer"
-                >
-                  {{ busyKey === 'add-proxies' ? t('添加中…') : t('添加出站节点') }}
-                </button>
-                <label
-                  class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-medium transition cursor-pointer"
-                >
-                  {{ t('从文件载入') }}
-                  <input
-                    type="file"
-                    accept=".yaml,.yml,.json,.txt"
-                    class="hidden"
-                    @change="(e) => loadFileInto(e, proxiesRaw)"
-                  />
-                </label>
-              </div>
-            </form>
-          </section>
-
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <div v-show="activeTab === 'outbounds'" class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+          <div class="space-y-4 min-w-0">
           <!-- Zashboard 控制面板 -->
           <section
             id="zashboard-card"
@@ -2349,7 +2325,96 @@ onUnmounted(() => {
               </div>
             </div>
           </section>
+          <!-- 服务端手工出站节点 (proxies) -->
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
+            <div class="flex items-center gap-2.5">
+              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('服务端出站节点 (proxies)') }}</h2>
+              <span
+                class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 tabular-nums"
+              >
+                {{ state.proxies.length }}
+              </span>
+            </div>
 
+            <div
+              v-if="state.proxies.length === 0"
+              class="py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-400"
+            >
+              {{ t('暂无手工出站节点，在下方粘贴单行 JSON 或多行 YAML 即可添加') }}
+            </div>
+
+            <div
+              v-else
+              class="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden"
+            >
+              <div
+                v-for="p in state.proxies"
+                :key="p.name"
+                class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-emerald-50/25 transition"
+              >
+                <div class="space-y-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-bold text-sm text-slate-900 break-all">{{ p.name }}</span>
+                    <span
+                      class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60"
+                    >
+                      {{ p.type }}
+                    </span>
+                  </div>
+                  <div class="text-xs text-slate-500 font-mono tabular-nums">{{ p.endpoint }}</div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0 flex-wrap">
+                  <button
+                    type="button"
+                    @click="copyRaw(p.single_config, `p-single-${p.name}`)"
+                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
+                  >
+                    {{ copiedKey === `p-single-${p.name}` ? t('已复制') : t('复制配置') }}
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="busyKey === `del-proxy-${p.name}`"
+                    @click="deleteProxy(p.name)"
+                    class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                  >
+                    {{ t('删除') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <form @submit.prevent="submitAddProxies" class="space-y-3">
+              <textarea
+                v-model="proxiesRaw"
+                name="proxies_raw"
+                rows="5"
+                :placeholder="t('粘贴单行 JSON / Flow 或多行 YAML 格式的 mihomo 节点配置（含 easytier、tailscale 等）…')"
+                class="cg-input w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-900 focus:bg-white"
+              ></textarea>
+              <div class="flex items-center gap-2.5 flex-wrap">
+                <button
+                  type="submit"
+                  :disabled="busyKey === 'add-proxies'"
+                  class="cg-btn-primary px-4 py-2 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer"
+                >
+                  {{ busyKey === 'add-proxies' ? t('添加中…') : t('添加出站节点') }}
+                </button>
+                <label
+                  class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-medium transition cursor-pointer"
+                >
+                  {{ t('从文件载入') }}
+                  <input
+                    type="file"
+                    accept=".yaml,.yml,.json,.txt"
+                    class="hidden"
+                    @change="(e) => loadFileInto(e, proxiesRaw)"
+                  />
+                </label>
+              </div>
+            </form>
+          </section>
+          </div>
+          <div class="space-y-4 min-w-0">
           <!-- Cloudflare MASQUE preset -->
           <section class="cg-surface cg-feature rounded-2xl p-5 sm:p-6">
             <div class="flex items-center justify-between gap-4">
@@ -2376,7 +2441,7 @@ onUnmounted(() => {
                     {{ t('通过Cloudflare注册MASQUE节点。') }}
                   </p>
                   <div v-if="state.masque.status === 'ok'" class="mt-2.5 font-mono text-xs text-slate-600 break-all">
-                    {{ state.masque.name }} · {{ state.masque.endpoint }}
+                    {{ masqueNodeName(state.masque.name) }} · {{ state.masque.endpoint }}
                   </div>
                 </div>
               </div>
@@ -2410,8 +2475,6 @@ onUnmounted(() => {
             </div>
             <p v-else-if="state.masque.status === 'pending'" class="text-xs text-slate-500 mt-3">{{ t('正在向 Cloudflare 注册，完成后这里会出现「加入出站节点」。') }}</p>
           </section>
-          </div>
-
           <!-- 导入外部订阅 (proxy-providers) -->
           <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
             <div class="flex items-center gap-2.5">
@@ -2497,6 +2560,7 @@ onUnmounted(() => {
               </div>
             </form>
           </section>
+          </div>
         </div>
       </Transition>
 
@@ -2955,6 +3019,28 @@ onUnmounted(() => {
             </div>
           </section>
 
+          <section class="cg-surface rounded-2xl p-5 sm:p-6">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('自动更新') }}</h2>
+                <p class="text-xs text-slate-500 mt-1 leading-relaxed max-w-xl">
+                  {{ t('打开后每周自动更新面板。更新面板时会同时更新 Mihomo 内核。') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="state.auto_update ? 'true' : 'false'"
+                :disabled="busyKey === '/action/settings'"
+                @click="toggleAutoUpdate"
+                class="cg-switch"
+                :class="{ 'is-on': state.auto_update }"
+              >
+                <span></span>
+              </button>
+            </div>
+          </section>
+
           <section class="cg-surface rounded-2xl">
             <button
               type="button"
@@ -2971,4 +3057,21 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
+  <Teleport to="body">
+    <div v-if="langOpen" class="cg-lang-menu" :style="langMenuStyle" role="listbox" :aria-label="t('语言')">
+      <button
+        v-for="code in LANGS"
+        :key="code"
+        type="button"
+        role="option"
+        class="cg-lang-item"
+        :class="{ 'is-active': lang === code }"
+        :aria-selected="lang === code ? 'true' : 'false'"
+        @click="pickLang(code)"
+      >
+        <span dir="auto">{{ langLabel(code) }}</span>
+        <CgIcon v-if="lang === code" name="check" :size="14" />
+      </button>
+    </div>
+  </Teleport>
 </template>

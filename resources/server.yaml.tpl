@@ -32,17 +32,30 @@ sniffer:
       ports: [443, 8443]
     QUIC:
       ports: [443, 8443]
+      # QUIC 载荷嗅探不可靠，改写目标容易把 UDP/443 送到错误地址
+      override-destination: false
 
 dns:
   enable: true
-  ipv6: true
+  # 域名只解析 IPv4。很多 VPS 没有可用的 IPv6 出口，返回 AAAA 会让连接先去撞不通的地址。
+  # 全局 ipv6 仍打开：客户端直接访问 IPv6 地址时，机器有 IPv6 就能出去；GEOIP 也继续匹配 IPv6。
+  ipv6: false
+  # 服务端用 redir-host。fake-ip 是客户端 / TUN 的做法，这里会把真实目标换成假 IP。
+  enhanced-mode: redir-host
+  # DNS 直连。respect-rules 会让解析跟着策略组走，中国组默认 REJECT 时解析会被丢掉。
+  respect-rules: false
+  cache-algorithm: arc
+  # 不写 listen：内核不对外开 DNS 端口，只给自己解析。
   default-nameserver:
-    - 8.8.8.8
     - 1.1.1.1
+    - 8.8.8.8
   nameserver:
-    - https://doh.sb/dns-query
+    - https://1.1.1.1/dns-query
+    - https://dns.google/dns-query
+  # 节点域名用 IP DNS，不依赖 DoH，避免解析节点时还要先解析 DoH 域名。
   proxy-server-nameserver:
-    - https://doh.sb/dns-query
+    - 1.1.1.1
+    - 8.8.8.8
 
 @@PROXY_PROVIDERS@@
 
@@ -81,7 +94,7 @@ rule-providers:
     interval: 86400
 
 # 节点与订阅源通过 include-all 自动引入（含面板添加到 proxies: 与 proxy-providers: 的出站节点）
-# 顺序：🚀 节点选择 → 🤖 AI → 📱 社交媒体 → 🇨🇳 中国 → 🐟 漏网之鱼（漏网之鱼最后）
+# 顺序：🚀 节点选择 → 🤖 AI → 📱 社交媒体 → 🇨🇳 中国（默认 REJECT） → 🐟 漏网之鱼（漏网之鱼最后）
 proxy-groups:
   - name: "🚀 节点选择"
     type: select
@@ -104,6 +117,7 @@ proxy-groups:
     type: select
     include-all: true
     proxies:
+      - REJECT
       - DIRECT
   - name: "🐟 漏网之鱼"
     type: select
@@ -125,5 +139,4 @@ rules:
   - GEOIP,cn,🇨🇳 中国,no-resolve
   - MATCH,🐟 漏网之鱼
 
-listeners:
 @@LISTENERS@@

@@ -5,10 +5,12 @@ Source strings in panel.py stay Chinese (default). When the request language is 
 mapped through TABLE. "{}" is a placeholder; captured parts are translated recursively.
 Unmapped text falls back to the original Chinese.
 """
+import json
+import os
 import re
 
 TABLE = [
-    ("没有可用的随机端口", "No random port available"),
+    ("SNI 无效，请填写域名，或留空从内置域名池随机抽取", "Invalid SNI. Enter a domain, or leave it blank to pick a random domain from the built-in pool"),
     ("Reality 密钥对生成失败：{}", "Failed to generate the Reality key pair: {}"),
     ("VLESS 加密密钥生成失败：{}", "Failed to generate the VLESS encryption keys: {}"),
     ("无法解析字段：{}", "Cannot parse field: {}"),
@@ -145,6 +147,9 @@ TABLE = [
     ("设置项无效", "Invalid setting"),
     ("已开启自定义服务端。", "Custom server enabled."),
     ("已关闭自定义服务端。", "Custom server disabled."),
+    ("已开启每周自动更新。更新面板时会同时更新 Mihomo 内核。", "Weekly automatic updates are on. Updating the panel also updates the Mihomo core."),
+    ("已关闭每周自动更新。", "Weekly automatic updates are off."),
+    ("设置已保存。", "Settings saved."),
     ("高级功能请到设置页开启", "This is an advanced feature. Enable it on the Settings page."),
     ("正在向 Cloudflare 注册 MASQUE，完成后点「加入出站节点」。", "Registering a Cloudflare MASQUE node. Click “Add to outbound nodes” when it is ready."),
 ]
@@ -156,6 +161,21 @@ for _zh, _en in TABLE:
     _COMPILED.append((len("".join(_parts)), _rx, _zh, _en, len(_parts) - 1))
 _COMPILED.sort(key=lambda x: -x[0])
 _CJK = re.compile(r"[\u4e00-\u9fff]")
+_LANGS = ("zh", "en", "ru", "fa")
+
+
+def _load_server(code: str) -> dict:
+    path = os.path.join(os.path.dirname(__file__), "web", "src", "locales", f"{code}.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    server = data.get("server") if isinstance(data, dict) else {}
+    return server if isinstance(server, dict) else {}
+
+
+_EXTRA = {"ru": _load_server("ru"), "fa": _load_server("fa")}
 
 
 def _fill(en: str, caps):
@@ -169,13 +189,14 @@ def _fill(en: str, caps):
 
 
 def tr(msg, lang="zh"):
-    """Translate msg to English when lang == 'en'; otherwise return unchanged."""
-    if lang != "en" or not isinstance(msg, str) or not _CJK.search(msg):
+    """Translate a Chinese API message when lang is en, ru, or fa."""
+    if lang not in ("en", "ru", "fa") or not isinstance(msg, str) or not _CJK.search(msg):
         return msg
-    for _n, rx, _zh, en, ncap in _COMPILED:
+    for _n, rx, zh, en, ncap in _COMPILED:
         m = rx.fullmatch(msg)
         if m:
-            return _fill(en, [tr(c, lang) for c in m.groups()])
+            text = en if lang == "en" else (_EXTRA.get(lang, {}).get(zh) or en)
+            return _fill(text, [tr(c, lang) for c in m.groups()])
     return msg
 
 
@@ -183,5 +204,10 @@ def detect_lang(cookie_header: str = "", accept_language: str = "") -> str:
     for part in (cookie_header or "").split(";"):
         k, _, v = part.strip().partition("=")
         if k == "clashgate_lang":
-            return "en" if v.strip().lower().startswith("en") else "zh"
+            code = v.strip().lower().split("-")[0]
+            return code if code in _LANGS else "zh"
+    first = (accept_language or "").split(",")[0].strip().lower().split(";")[0]
+    code = first.split("-")[0]
+    if code in ("en", "ru", "fa"):
+        return code
     return "zh"

@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.05" src="https://img.shields.io/badge/version-v1.05-14614d" />
+  <img alt="Version: v1.06" src="https://img.shields.io/badge/version-v1.06-14614d" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -22,7 +22,7 @@ ClashGate 不做大而全的控制台。一台 VPS 只需要知道三件事：�
 - **安装三选一**：无证书（直接给出 VLESS Reality）、自动证书（Let's Encrypt，端口验证或 Cloudflare DNS）、手动证书。
 - **面板很短**：首页、出站节点、节点转换、HTTPS 证书。自定义服务端默认关闭，到设置里打开。修改密码也在设置里。
 - **先草稿，后重载**：增删节点、换订阅、重置密钥都先记下来。点顶部「重载配置」后写入服务端，并更新客户端订阅。
-- **证书按切换生成**：没改模式时按钮是灰的。切换后重新生成证书；Token 无效或 80 端口被占用，会把原因返回到面板。
+- **自定义服务端**：默认关闭。打开后不再使用内置模板，可以完全采用自己的 mihomo 服务端配置。
 
 ## 一键安装
 

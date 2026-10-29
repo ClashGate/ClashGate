@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.05 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.06 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -41,7 +41,7 @@ from urllib.parse import parse_qs, urlparse, quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 
-VERSION = "1.05"
+VERSION = "1.06"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -56,6 +56,7 @@ TRAFFIC_JSON = CS_ROOT + "/traffic.json"
 SESSIONS_JSON = CS_ROOT + "/sessions.json"
 PANEL_SETTINGS = CS_ROOT + "/panel_settings.json"
 MASQUE_JSON = CS_ROOT + "/masque.json"
+MASQUE_NAME = "⛅️ Cloudflare-MASQUE"
 UPDATE_CHECK_JSON = CS_ROOT + "/update_check.json"
 UPDATE_CHECK_INTERVAL = 7 * 24 * 3600
 MIHOMO_DIR = CS_ROOT
@@ -113,6 +114,27 @@ _MASQUE_LOCK = threading.Lock()
 
 def pick_reality_sni() -> str:
     return random.choice(REALITY_SNI_POOL)
+
+
+_SNI_HOST = re.compile(
+    r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$"
+)
+
+
+def resolve_sni(form: dict) -> str:
+    """Use the SNI typed on the add-node form, or a random built-in domain if blank."""
+    raw = (form.get("sni") or "").strip().lower().rstrip(".")
+    if not raw:
+        return pick_reality_sni()
+    if "://" in raw or "/" in raw:
+        raise ValueError("SNI 无效，请填写域名，或留空从内置域名池随机抽取")
+    if ":" in raw:
+        host, _, port = raw.rpartition(":")
+        if port.isdigit():
+            raw = host
+    if not _SNI_HOST.fullmatch(raw):
+        raise ValueError("SNI 无效，请填写域名，或留空从内置域名池随机抽取")
+    return raw
 
 TYPES = (
     "vless-reality", "shadowsocks", "hysteria2", "snell",
@@ -1383,7 +1405,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
     label = name
 
     if kind == "vless-reality":
-        sni = pick_reality_sni()
+        sni = resolve_sni(form)
         priv, pub = reality_keypair()
         uid, sid = str(uuidlib.uuid4()), secrets.token_hex(4)
         dec, enc = vless_x25519_keypair()
@@ -1420,7 +1442,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
     elif kind == "snell":
         version = 5
         obfs_mode = "tls"
-        obfs_host = pick_reality_sni()
+        obfs_host = resolve_sni(form)
         psk = base64.b64encode(secrets.token_bytes(16)).decode()
         listener = {**base, "type": "snell", "psk": psk, "version": version, "udp": True,
                     "obfs-opts": {"mode": obfs_mode, "host": obfs_host}}
@@ -1519,7 +1541,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
 
     else:  # shadowquic
         user = (form.get("sq_user") or "user").strip() or "user"
-        jls_host = pick_reality_sni()
+        jls_host = resolve_sni(form)
         jls_addr = f"{jls_host}:443"
         cc = "bbr"
         zero_rtt = True
@@ -1756,7 +1778,7 @@ def assemble_config() -> str:
             elif s == "@@PROXIES@@":
                 out.append(proxies_block)
             elif s == "@@LISTENERS@@":
-                out.append(block)
+                out.append("listeners:\n" + block if block.strip() else "listeners: []\n")
             else:
                 out.append(line)
     return "".join(out)
@@ -1834,21 +1856,26 @@ def forget_session(tok: str):
 
 
 def load_panel_settings() -> dict:
-    enabled = False
+    out = {"custom_server_enabled": False, "auto_update": False}
     try:
         with open(PANEL_SETTINGS) as f:
             raw = json.load(f)
         if isinstance(raw, dict):
-            enabled = bool(raw.get("custom_server_enabled"))
+            out["custom_server_enabled"] = bool(raw.get("custom_server_enabled"))
+            out["auto_update"] = bool(raw.get("auto_update"))
     except Exception:
         pass
-    return {"custom_server_enabled": enabled}
+    return out
 
 
-def save_panel_settings(enabled: bool):
+def save_panel_settings(updates: dict):
+    cur = load_panel_settings()
+    for key in ("custom_server_enabled", "auto_update"):
+        if key in updates:
+            cur[key] = bool(updates[key])
     atomic_write(
         PANEL_SETTINGS,
-        json.dumps({"custom_server_enabled": bool(enabled)}, indent=2) + "\n",
+        json.dumps(cur, indent=2) + "\n",
         0o600,
     )
 
@@ -1991,7 +2018,7 @@ def register_cloudflare_masque() -> dict:
         raise RuntimeError("注册成功但没有返回隧道 IPv4")
     edge_pub = _edge_public_b64(str(peer.get("public_key") or ""))
     proxy = {
-        "name": "Cloudflare-MASQUE",
+        "name": MASQUE_NAME,
         "type": "masque",
         "server": server,
         "port": port,
@@ -2025,7 +2052,7 @@ def load_masque_state() -> dict:
             proxy = raw["proxy"]
             return {
                 "status": "ok",
-                "name": str(raw.get("name") or proxy.get("name") or "Cloudflare-MASQUE"),
+                "name": str(raw.get("name") or proxy.get("name") or MASQUE_NAME),
                 "endpoint": str(raw.get("endpoint") or ""),
                 "yaml": str(raw.get("yaml") or ""),
                 "error": "",
@@ -2033,14 +2060,14 @@ def load_masque_state() -> dict:
         if isinstance(raw, dict):
             return {
                 "status": str(raw.get("status") or "error"),
-                "name": "Cloudflare-MASQUE",
+                "name": MASQUE_NAME,
                 "endpoint": "",
                 "yaml": "",
                 "error": str(raw.get("error") or ""),
             }
     except Exception:
         pass
-    return {"status": "idle", "name": "Cloudflare-MASQUE", "endpoint": "", "yaml": "", "error": ""}
+    return {"status": "idle", "name": MASQUE_NAME, "endpoint": "", "yaml": "", "error": ""}
 
 
 def save_masque_state(state: dict):
@@ -2054,14 +2081,14 @@ def _masque_worker():
         if current.get("status") == "ok" and current.get("yaml"):
             return
         try:
-            save_masque_state({"status": "pending", "name": "Cloudflare-MASQUE", "error": "", "updated": int(time.time())})
+            save_masque_state({"status": "pending", "name": MASQUE_NAME, "error": "", "updated": int(time.time())})
             ready = register_cloudflare_masque()
             save_masque_state(ready)
             sys.stderr.write(f"cloudflare masque registered: {ready.get('endpoint')}\n")
         except Exception as e:
             save_masque_state({
                 "status": "error",
-                "name": "Cloudflare-MASQUE",
+                "name": MASQUE_NAME,
                 "error": str(e)[:500],
                 "updated": int(time.time()),
             })
@@ -3408,6 +3435,7 @@ def load_update_check() -> dict:
     data = {
         "core": _blank_update_slot(),
         "panel": _blank_update_slot(VERSION),
+        "auto_applied_at": 0,
     }
     try:
         with open(UPDATE_CHECK_JSON) as f:
@@ -3422,6 +3450,10 @@ def load_update_check() -> dict:
                         "latest": str(slot.get("latest") or ""),
                         "has_update": bool(slot.get("has_update")),
                     })
+            try:
+                data["auto_applied_at"] = int(raw.get("auto_applied_at") or 0)
+            except (TypeError, ValueError):
+                data["auto_applied_at"] = 0
     except Exception:
         pass
     return data
@@ -3495,25 +3527,68 @@ def _check_due_updates():
             sys.stderr.write(f"clashgate version check failed: {e}\n")
 
 
+def _apply_auto_update():
+    """When enabled, upgrade the panel once a week. `clashgate update` also upgrades Mihomo."""
+    if not load_panel_settings().get("auto_update"):
+        return
+    data = load_update_check()
+    try:
+        last = float(data.get("auto_applied_at") or 0)
+    except (TypeError, ValueError):
+        last = 0
+    if time.time() - last < UPDATE_CHECK_INTERVAL:
+        return
+    core_has = False
+    panel_has = False
+    try:
+        current = get_local_mihomo_version().lstrip("vV")
+        rel = fetch_latest_mihomo_release()
+        latest = str(rel.get("tag_name") or "").lstrip("vV")
+        core_has = bool(current and latest and parse_version_tuple(latest) > parse_version_tuple(current))
+        record_core_check(current, latest, core_has)
+    except Exception as e:
+        sys.stderr.write(f"auto update core check failed: {e}\n")
+        core_has = bool(load_update_check()["core"].get("has_update"))
+    try:
+        latest_cs = fetch_latest_clashgate_version().lstrip("vV")
+        panel_has = parse_version_tuple(latest_cs) > parse_version_tuple(VERSION)
+        record_panel_check(latest_cs, panel_has)
+    except Exception as e:
+        sys.stderr.write(f"auto update panel check failed: {e}\n")
+        panel_has = bool(load_update_check()["panel"].get("has_update"))
+    data = load_update_check()
+    if not core_has and not panel_has:
+        data["auto_applied_at"] = int(time.time())
+        save_update_check(data)
+        return
+    cmd_bin = CLASHGATE_BIN if os.path.isfile(CLASHGATE_BIN) else "/usr/local/bin/clashgate"
+    if not os.path.isfile(cmd_bin):
+        sys.stderr.write("auto update skipped: clashgate command not installed\n")
+        data["auto_applied_at"] = int(time.time())
+        save_update_check(data)
+        return
+    rc, out = run(["bash", cmd_bin, "update"], timeout=180)
+    data = load_update_check()
+    data["auto_applied_at"] = int(time.time())
+    save_update_check(data)
+    if rc != 0:
+        tail = " | ".join(l for l in (out or "").splitlines() if l.strip())[-300:]
+        sys.stderr.write(f"auto update failed: {tail}\n")
+        return
+    record_panel_check(VERSION, False)
+    sys.stderr.write("auto update applied: panel and mihomo core\n")
+
+
 def start_weekly_update_check():
-    """Check Mihomo and ClashGate versions at startup if due, then once a week."""
+    """Check versions weekly. If auto-update is on, apply a panel+core upgrade once a week."""
     def _loop():
         while True:
-            wait = 3600
             try:
-                data = load_update_check()
-                due = []
-                for key in ("core", "panel"):
-                    ts = float(data[key].get("checked_at") or 0)
-                    due.append(max(0, UPDATE_CHECK_INTERVAL - (time.time() - ts)))
-                wait = min(due) if due else UPDATE_CHECK_INTERVAL
-                if wait <= 0:
-                    _check_due_updates()
-                    wait = 3600
+                _check_due_updates()
+                _apply_auto_update()
             except Exception as e:
                 sys.stderr.write(f"weekly update check failed: {e}\n")
-                wait = 3600
-            time.sleep(max(30, wait))
+            time.sleep(3600)
     threading.Thread(target=_loop, name="update-check", daemon=True).start()
 
 
@@ -3757,11 +3832,11 @@ class Panel(BaseHTTPRequestHandler):
         return _tr_msg(msg, self.lang())
 
     def send(self, code, body, ctype="text/html; charset=utf-8", headers=None):
-        if ctype.startswith("application/json") and isinstance(body, str) and self.lang() == "en":
+        if ctype.startswith("application/json") and isinstance(body, str) and self.lang() in ("en", "ru", "fa"):
             try:
                 obj = json.loads(body)
                 if isinstance(obj, dict) and isinstance(obj.get("msg"), str):
-                    obj["msg"] = _tr_msg(obj["msg"], "en")
+                    obj["msg"] = _tr_msg(obj["msg"], self.lang())
                     body = json.dumps(obj, ensure_ascii=False)
             except ValueError:
                 pass
@@ -3902,8 +3977,8 @@ class Panel(BaseHTTPRequestHandler):
         localized_pending_items = []
         for it in pending_items:
             entry = dict(it)
-            if req_lang == "en" and isinstance(entry.get("detail"), str):
-                entry["detail"] = _tr_msg(entry["detail"], "en")
+            if req_lang in ("en", "ru", "fa") and isinstance(entry.get("detail"), str):
+                entry["detail"] = _tr_msg(entry["detail"], req_lang)
             localized_pending_items.append(entry)
         has_certs = certs_present()
         install_mode = env.get("MODE") or ("auto-cert" if (has_certs or env.get("DOMAIN") or env.get("CERT_MODE")) else "no-cert")
@@ -3936,6 +4011,7 @@ class Panel(BaseHTTPRequestHandler):
             "cert_hours": cert_hours,
             "custom_config_mode": custom_active,
             "custom_server_enabled": bool(load_panel_settings().get("custom_server_enabled")),
+            "auto_update": bool(load_panel_settings().get("auto_update")),
             "custom_config_raw": cur_cfg,
             "masque": load_masque_state(),
             "update_check": public_update_check(),
@@ -4268,15 +4344,27 @@ class Panel(BaseHTTPRequestHandler):
         return self.respond_mutation(s, "已丢弃待重载草稿", True)
 
     def do_settings(self, s, form):
-        raw = (form.get("custom_server_enabled") or "").strip().lower()
-        if raw not in ("0", "1", "false", "true", "on", "off"):
+        updates = {}
+        for key in ("custom_server_enabled", "auto_update"):
+            if key not in form:
+                continue
+            raw = (form.get(key) or "").strip().lower()
+            if raw not in ("0", "1", "false", "true", "on", "off"):
+                return self.respond_mutation(s, "设置项无效", False)
+            updates[key] = raw in ("1", "true", "on")
+        if not updates:
             return self.respond_mutation(s, "设置项无效", False)
-        enabled = raw in ("1", "true", "on")
         with LOCK:
-            save_panel_settings(enabled)
-        if enabled:
+            save_panel_settings(updates)
+        if "auto_update" in updates and len(updates) == 1:
+            if updates["auto_update"]:
+                return self.respond_mutation(s, "已开启每周自动更新。更新面板时会同时更新 Mihomo 内核。", True)
+            return self.respond_mutation(s, "已关闭每周自动更新。", True)
+        if updates.get("custom_server_enabled"):
             return self.respond_mutation(s, "已开启自定义服务端。", True)
-        return self.respond_mutation(s, "已关闭自定义服务端。", True)
+        if "custom_server_enabled" in updates:
+            return self.respond_mutation(s, "已关闭自定义服务端。", True)
+        return self.respond_mutation(s, "设置已保存。", True)
 
     def do_masque_register(self, s):
         start_masque_registrar(force=True)
