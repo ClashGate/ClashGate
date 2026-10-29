@@ -1,6 +1,6 @@
 {
   "name": "clashgate-panel-web",
-  "version": "1.0.4",
+  "version": "1.05",
   "private": true,
   "type": "module",
   "scripts": {

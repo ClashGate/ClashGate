@@ -298,6 +298,7 @@ export const EN = {
  "），校验通过后立即生效。普通用户无需修改此页。": "). It takes effect right after validation. Most users do not need this page.",
  "Cloudflare MASQUE": "Cloudflare MASQUE",
  "通过Cloudflare注册MASQUE节点。": "Register a MASQUE node through Cloudflare.",
+ "注册 MASQUE": "Register MASQUE",
  "已就绪": "Ready",
  "注册失败": "Registration failed",
  "后台注册中": "Registering",

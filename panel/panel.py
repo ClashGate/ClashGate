@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.04 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.05 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -41,7 +41,7 @@ from urllib.parse import parse_qs, urlparse, quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 
-VERSION = "1.04"
+VERSION = "1.05"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -2040,7 +2040,7 @@ def load_masque_state() -> dict:
             }
     except Exception:
         pass
-    return {"status": "pending", "name": "Cloudflare-MASQUE", "endpoint": "", "yaml": "", "error": ""}
+    return {"status": "idle", "name": "Cloudflare-MASQUE", "endpoint": "", "yaml": "", "error": ""}
 
 
 def save_masque_state(state: dict):
@@ -4280,7 +4280,7 @@ class Panel(BaseHTTPRequestHandler):
 
     def do_masque_register(self, s):
         start_masque_registrar(force=True)
-        return self.respond_mutation(s, "正在后台重新注册 Cloudflare MASQUE，完成后点「加入出站节点」。", True)
+        return self.respond_mutation(s, "正在向 Cloudflare 注册 MASQUE，完成后点「加入出站节点」。", True)
 
     def do_change_password(self, s, form):
         cur_pw = form.get("current_password", "")
@@ -4925,7 +4925,6 @@ def serve(cfg_path):
     Panel.cfg_path = cfg_path
     Panel.sessions = _load_sessions_file()
     start_traffic_poller(30)
-    start_masque_registrar(False)
     start_weekly_update_check()
     addr = (cfg.get("listen", "0.0.0.0"), int(cfg.get("port", 8443)))
     if cfg.get("tls_cert"):

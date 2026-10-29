@@ -6,7 +6,7 @@ import CgIcon from './CgIcon.vue'
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
   initial_tab: 'inbounds',
-  version: '1.04',
+  version: '1.05',
   mihomo_version: '',
   csrf: '',
   login_error: '',
@@ -64,7 +64,7 @@ const boot = window.__CS_BOOT__ || {
 
 const pageMode = ref(boot.page || 'dashboard')
 const state = reactive({
-  version: boot.version || '1.04',
+  version: boot.version || '1.05',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
   csrf: boot.csrf || '',
   sub_url: boot.sub_url || '',
@@ -94,7 +94,7 @@ const state = reactive({
   providers: Array.isArray(boot.providers) ? boot.providers : [],
   custom_server_enabled: !!boot.custom_server_enabled,
   masque: {
-    status: (boot.masque && boot.masque.status) || 'pending',
+    status: (boot.masque && boot.masque.status) || 'idle',
     name: (boot.masque && boot.masque.name) || 'Cloudflare-MASQUE',
     endpoint: (boot.masque && boot.masque.endpoint) || '',
     yaml: (boot.masque && boot.masque.yaml) || '',
@@ -817,7 +817,7 @@ function applyServerState(newState) {
   if (newState.custom_server_enabled !== undefined) state.custom_server_enabled = !!newState.custom_server_enabled
   if (newState.masque && typeof newState.masque === 'object') {
     state.masque = {
-      status: newState.masque.status || 'pending',
+      status: newState.masque.status || 'idle',
       name: newState.masque.name || 'Cloudflare-MASQUE',
       endpoint: newState.masque.endpoint || '',
       yaml: newState.masque.yaml || '',
@@ -2361,7 +2361,7 @@ onUnmounted(() => {
                   <div class="flex items-center gap-2 flex-wrap">
                     <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('Cloudflare MASQUE') }}</h2>
                     <span
-                      v-if="state.masque.status !== 'ok'"
+                      v-if="state.masque.status === 'pending' || state.masque.status === 'error'"
                       class="px-2.5 py-0.5 text-xs font-semibold rounded-full border"
                       :class="
                         state.masque.status === 'error'
@@ -2389,19 +2389,26 @@ onUnmounted(() => {
               >
                 {{ busyKey === 'add-masque' ? t('添加中…') : t('加入出站节点') }}
               </button>
-            </div>
-            <div v-if="state.masque.status === 'error'" class="space-y-2 mt-3">
-              <p class="text-xs text-rose-700 leading-relaxed break-all">{{ state.masque.error || t('注册失败') }}</p>
               <button
+                v-else
                 type="button"
-                :disabled="busyKey === '/action/masque-register'"
+                :disabled="state.masque.status === 'pending' || busyKey === '/action/masque-register'"
                 @click="retryMasque"
-                class="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+                class="cg-btn-primary px-3.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 cursor-pointer shrink-0"
               >
-                {{ busyKey === '/action/masque-register' ? t('注册中…') : t('重新注册') }}
+                {{
+                  state.masque.status === 'pending' || busyKey === '/action/masque-register'
+                    ? t('注册中…')
+                    : state.masque.status === 'error'
+                      ? t('重新注册')
+                      : t('注册 MASQUE')
+                }}
               </button>
             </div>
-            <p v-else-if="state.masque.status !== 'ok'" class="text-xs text-slate-500 mt-3">{{ t('正在向 Cloudflare 注册，完成后这里会出现「加入出站节点」。') }}</p>
+            <div v-if="state.masque.status === 'error'" class="mt-3">
+              <p class="text-xs text-rose-700 leading-relaxed break-all">{{ state.masque.error || t('注册失败') }}</p>
+            </div>
+            <p v-else-if="state.masque.status === 'pending'" class="text-xs text-slate-500 mt-3">{{ t('正在向 Cloudflare 注册，完成后这里会出现「加入出站节点」。') }}</p>
           </section>
           </div>
 

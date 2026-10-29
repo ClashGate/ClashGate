@@ -146,7 +146,7 @@ TABLE = [
     ("已开启自定义服务端。", "Custom server enabled."),
     ("已关闭自定义服务端。", "Custom server disabled."),
     ("高级功能请到设置页开启", "This is an advanced feature. Enable it on the Settings page."),
-    ("正在后台重新注册 Cloudflare MASQUE，完成后点「加入出站节点」。", "Registering Cloudflare MASQUE in the background. Click “Add to outbound nodes” when it is ready."),
+    ("正在向 Cloudflare 注册 MASQUE，完成后点「加入出站节点」。", "Registering a Cloudflare MASQUE node. Click “Add to outbound nodes” when it is ready."),
 ]
 
 _COMPILED = []

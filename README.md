@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.04" src="https://img.shields.io/badge/version-v1.04-14614d" />
+  <img alt="Version: v1.05" src="https://img.shields.io/badge/version-v1.05-14614d" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
