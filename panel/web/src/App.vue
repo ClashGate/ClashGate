@@ -1554,7 +1554,17 @@ function setUpdateChannel(channel) {
   if (next === 'test' && state.update_channel !== 'test') {
     openConfirmDialog({
       title: t('切换到测试通道'),
-      message: t('测试版可能不稳定，可能出现功能异常或兼容性问题。确定切换到测试通道？'),
+      message: t('测试版可能不稳定，可能出现功能异常或兼容性问题。切换后将立即更新到测试通道最新版本。确定切换？'),
+      confirmText: t('确认切换'),
+      tone: 'amber',
+      onConfirm: () => applyUpdateChannel(next),
+    })
+    return
+  }
+  if (next === 'stable' && state.update_channel !== 'stable') {
+    openConfirmDialog({
+      title: t('切换到正式通道'),
+      message: t('将切换到正式通道并立即更新到正式版最新版本。确定切换？'),
       confirmText: t('确认切换'),
       tone: 'amber',
       onConfirm: () => applyUpdateChannel(next),
@@ -1565,6 +1575,7 @@ function setUpdateChannel(channel) {
 }
 
 async function applyUpdateChannel(next) {
+  const prev = state.update_channel
   // Always POST so legacy Beat installs migrate env to ClashGate/ClashGate@branch even if UI already shows 测试.
   const res = await postAction(
     '/action/settings',
@@ -1574,6 +1585,11 @@ async function applyUpdateChannel(next) {
   if (res && res.ok) {
     state.update_channel = next
     state.update_channel_label = next === 'test' ? t('测试') : t('正式')
+    // Every real channel switch pulls that channel's latest build right away.
+    if (prev !== next) {
+      showToast(t('已切换通道，正在更新到该通道最新版本……'), true)
+      await postAction('/action/upgrade-self', {}, '/action/upgrade-self')
+    }
   }
 }
 
@@ -2141,7 +2157,7 @@ onUnmounted(() => {
             class="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-sm text-slate-800 flex flex-wrap items-center gap-x-6 gap-y-1"
           >
             <span class="font-semibold">{{ t('Mihomo 内核') }} {{ versionLabel(state.mihomo_version) || '—' }}</span>
-            <span class="font-semibold">{{ t('面板') }} {{ versionLabel(state.version) || '—' }}<span v-if="state.update_channel === 'test'" class="ml-1 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-bold align-middle">{{ t('测试版') }}</span></span>
+            <span class="font-semibold">{{ t('面板') }} {{ versionLabel(state.version) || '—' }}<span v-if="state.update_channel === 'test'" class="text-amber-700">{{ t('（测试）') }}</span></span>
           </div>
         </Transition>
 
