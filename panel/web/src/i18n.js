@@ -385,6 +385,7 @@ export const EN = {
   "测试版可能不稳定，请谨慎使用。": "Test builds may be unstable. Use with care.",
   "当前为正式通道": "Current: Stable channel",
   "当前为测试通道": "Current: Test channel",
+  "升级超时，正在刷新页面……": "Upgrade timed out, refreshing the page…",
   "切换到正式通道": "Switch to stable channel",
   "将切换到正式通道并立即更新到正式版最新版本。确定切换？": "This switches to the stable channel and immediately updates to the latest stable version. Switch?",
   "测试版可能不稳定，可能出现功能异常或兼容性问题。切换后将立即更新到测试通道最新版本。确定切换？": "Test builds may be unstable and could have broken features or compatibility issues. Switching will immediately update to the latest test version. Switch?",

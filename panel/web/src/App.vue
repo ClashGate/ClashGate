@@ -1229,6 +1229,21 @@ function resetTemplateConfig() {
   })
 }
 
+async function resumeUpgradeIfRunning() {
+  // Page opened/refreshed mid-upgrade: keep tracking it and auto-refresh when done.
+  try {
+    const res = await fetch('/api/upgrade-status', {
+      headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+    if (!res.ok) return
+    const d = await res.json()
+    const age = Date.now() / 1000 - Number(d.started_at || 0)
+    if (d && d.state === 'running' && age < 600) reloadPanelAfterUpgrade(d.from || state.version)
+  } catch {}
+}
+
 async function reloadPanelAfterUpgrade(previousVersion) {
   // Upgrade runs detached on the server; the panel restarts during it.
   // Poll status (tolerating connection drops) until done, then report + reload.
@@ -1265,15 +1280,20 @@ async function reloadPanelAfterUpgrade(previousVersion) {
       if (!d || d.state !== 'done') continue
       if (Number(d.rc) === 0) {
         showToast(t('升级成功！当前版本 {v}，即将刷新页面', { v: d.version || '' }), true)
-        await new Promise((r) => setTimeout(r, 1500))
+        await new Promise((r) => setTimeout(r, 800))
         window.location.reload()
         return
       }
       showToast(t('升级失败：{msg}', { msg: d.tail || `exit ${d.rc}` }), false)
+      if (d.version && previousVersion && d.version !== previousVersion) {
+        await new Promise((r) => setTimeout(r, 2500))
+        window.location.reload()
+      }
       return
     }
-    showToast(t('升级超时，请稍后刷新页面查看版本'), false)
-    if (sawDown || previousVersion) window.location.reload()
+    showToast(t('升级超时，正在刷新页面……'), false)
+    await new Promise((r) => setTimeout(r, 1500))
+    window.location.reload()
   } finally {
     upgradeInProgress.value = false
   }
@@ -1663,6 +1683,7 @@ onMounted(() => {
     }
     activeTab.value = next
   })
+  resumeUpgradeIfRunning()
   window.addEventListener('blur', maskAllSensitive)
   document.addEventListener('visibilitychange', handleVisibilityChange)
   document.addEventListener('pointerdown', handleDocumentPointerDown)
