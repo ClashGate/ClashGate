@@ -3639,10 +3639,14 @@ def fetch_channel_tip() -> dict:
         raise RuntimeError("未能从 GitHub 解析最新版本号")
     version = m.group(1).strip()
     sha = ""
-    try:
-        sha = fetch_channel_commit_sha(slug, branch)
-    except Exception:
-        sha = ""
+    msha = re.search(r"^CS_SOURCE_SHA=([0-9A-Za-z._-]{4,80})", txt, re.M)
+    if msha:
+        sha = msha.group(1).strip()
+    if not sha:
+        try:
+            sha = fetch_channel_commit_sha(slug, branch)
+        except Exception:
+            sha = ""
     return {
         "version": version,
         "sha": sha,
