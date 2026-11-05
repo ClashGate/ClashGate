@@ -15,6 +15,7 @@ import {
   Lock,
   Check,
   CircleAlert,
+  Waypoints,
 } from 'lucide-vue-next'
 
 const icons = {
@@ -33,6 +34,7 @@ const icons = {
   lock: Lock,
   check: Check,
   alert: CircleAlert,
+  routing: Waypoints,
 }
 
 defineProps({

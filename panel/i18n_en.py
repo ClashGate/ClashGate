@@ -89,8 +89,8 @@ TABLE = [
     ("~ 重置密码「{}」", "~ Reset password “{}”"),
     ("~ 重置 API 密钥", "~ Reset API secret"),
     ("~ 更换订阅链接", "~ Change subscription link"),
-    ("+ 添加出站节点「{}」", "+ Add outbound node “{}”"),
-    ("- 删除出站节点「{}」", "- Delete outbound node “{}”"),
+    ("+ 添加服务端出站「{}」", "+ Add server outbound “{}”"),
+    ("- 删除服务端出站「{}」", "- Delete server outbound “{}”"),
     ("+ 导入订阅源「{}」", "+ Import provider “{}”"),
     ("- 删除订阅源「{}」", "- Delete provider “{}”"),
     ("证书检查 / 续期完成。", "Certificate check / renewal finished."),
@@ -151,7 +151,19 @@ TABLE = [
     ("已关闭每周自动更新。", "Weekly automatic updates are off."),
     ("设置已保存。", "Settings saved."),
     ("高级功能请到设置页开启", "This is an advanced feature. Enable it on the Settings page."),
-    ("正在向 Cloudflare 注册 MASQUE，完成后点「加入出站节点」。", "Registering a Cloudflare MASQUE node. Click “Add to outbound nodes” when it is ready."),
+
+    ("+ 添加服务端出站「{}」", "+ Add server outbound “{}”"),
+    ("- 删除服务端出站「{}」", "- Delete server outbound “{}”"),
+    ("+ 添加分流组「{}」", "+ Add routing group “{}”"),
+    ("- 删除分流组「{}」", "- Delete routing group “{}”"),
+    ("+ 引入分流组「{}」", "+ Import routing group “{}”"),
+    ("~ 重命名分流组「{}」→「{}」", "~ Rename routing group “{}” → “{}”"),
+    ("~ 调整分流顺序", "~ Reorder routing groups"),
+    ("~ 更新分流组「{}」", "~ Update routing group “{}”"),
+    ("恢复默认服务端模板", "Restore default server template"),
+    ("加入服务端出站", "Add to server outbounds"),
+
+    ("正在向 Cloudflare 注册 MASQUE，完成后点「加入服务端出站」。", "Registering a Cloudflare MASQUE node. Click “Add to server outbounds” when it is ready."),
 ]
 
 _COMPILED = []

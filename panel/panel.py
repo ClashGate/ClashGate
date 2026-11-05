@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.06 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.07 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -40,8 +40,9 @@ from urllib.parse import parse_qs, urlparse, quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
+from routing_mgr import RoutingManager, parse_yaml_document_factory  # noqa: E402
 
-VERSION = "1.06"
+VERSION = "1.07"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -58,7 +59,12 @@ PANEL_SETTINGS = CS_ROOT + "/panel_settings.json"
 MASQUE_JSON = CS_ROOT + "/masque.json"
 MASQUE_NAME = "⛅️ Cloudflare-MASQUE"
 UPDATE_CHECK_JSON = CS_ROOT + "/update_check.json"
+UPDATE_SOURCE_JSON = CS_ROOT + "/update_source.json"
 UPDATE_CHECK_INTERVAL = 7 * 24 * 3600
+UPDATE_CHANNEL_MAP = {
+    "stable": {"owner": "ClashGate", "name": "ClashGate", "branch": "main", "label": "正式"},
+    "test": {"owner": "ClashGate", "name": "ClashGate", "branch": "test", "label": "测试"},
+}
 MIHOMO_DIR = CS_ROOT
 CONF = MIHOMO_DIR + "/config.yaml"
 CUSTOM_CONF = MIHOMO_DIR + "/custom_config.yaml"
@@ -68,6 +74,11 @@ FRAG_REALITY = MIHOMO_DIR + "/listeners.reality.yaml"
 FRAG_EXTRA = MIHOMO_DIR + "/listeners.extra.yaml"
 FRAG_PROXIES = MIHOMO_DIR + "/proxies.extra.yaml"
 FRAG_PROVIDERS = MIHOMO_DIR + "/providers.extra.yaml"
+ROUTING_JSON = CS_ROOT + "/routing.json"
+ROUTING_DIR = CS_ROOT + "/routing"
+FRAG_RULE_PROVIDERS = MIHOMO_DIR + "/routing.rule-providers.yaml"
+FRAG_PROXY_GROUPS = MIHOMO_DIR + "/routing.proxy-groups.yaml"
+FRAG_RULES = MIHOMO_DIR + "/routing.rules.yaml"
 TEMPLATE = CS_ROOT + "/resources/server.yaml.tpl"
 CLIENT_TEMPLATE = CS_ROOT + "/resources/client.yaml.tpl"
 CLIENT_DIR = CS_ROOT + "/client"
@@ -236,6 +247,50 @@ def resolve_certctl_path() -> str:
     if os.path.isfile(CERTCTL):
         return CERTCTL
     return resolve_template_path("scripts/certctl.sh")
+
+
+_ROUTING = None
+
+
+def _seed_dir() -> str:
+    p1 = CS_ROOT + "/resources/routing"
+    if os.path.isdir(p1):
+        return p1
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    p2 = os.path.join(here, "resources", "routing")
+    return p2 if os.path.isdir(p2) else p1
+
+
+def _beginner_routing_state(st: dict) -> dict:
+    """Hide system groups (Node Select / Final) and raw YAML from the beginner routing UI."""
+    st = dict(st or {})
+    st["groups"] = [
+        {k: v for k, v in g.items() if k != "yaml"}
+        for g in (st.get("groups") or [])
+        if (g.get("role") or "policy") not in ("select", "final")
+    ]
+    return st
+
+
+def get_routing() -> RoutingManager:
+    global _ROUTING
+    if _ROUTING is None:
+        parse_doc = parse_yaml_document_factory(parse_yaml_lines, strip_yaml_comment)
+        _ROUTING = RoutingManager(
+            routing_json=ROUTING_JSON,
+            routing_dir=ROUTING_DIR,
+            frag_rule_providers=FRAG_RULE_PROVIDERS,
+            frag_proxy_groups=FRAG_PROXY_GROUPS,
+            frag_rules=FRAG_RULES,
+            seed_dir=_seed_dir(),
+            parse_yaml_document=parse_doc,
+            dump_yaml_map=dump_yaml_map,
+            yaml_scalar=yaml_scalar,
+            atomic_write=atomic_write,
+            extract_top_level_yaml_section=extract_top_level_yaml_section,
+            replace_top_level_yaml_section=replace_top_level_yaml_section,
+        )
+    return _ROUTING
 
 
 def ensure_unified_root():
@@ -1765,6 +1820,12 @@ def assemble_config() -> str:
                 block += f.read()
         except FileNotFoundError:
             pass
+    try:
+        get_routing().ensure_seeded()
+    except Exception as e:
+        sys.stderr.write(f"routing seed warning: {e}\n")
+    rp_block, pg_block, ru_block = get_routing().read_frags()
+
     out = []
     tpl_path = resolve_template_path("resources/server.yaml.tpl")
     with open(tpl_path) as f:
@@ -1777,6 +1838,13 @@ def assemble_config() -> str:
                     out.append(providers_block)
             elif s == "@@PROXIES@@":
                 out.append(proxies_block)
+            elif s == "@@RULE_PROVIDERS@@":
+                if rp_block.strip():
+                    out.append(rp_block if rp_block.endswith("\n") else rp_block + "\n")
+            elif s == "@@PROXY_GROUPS@@":
+                out.append(pg_block if pg_block.endswith("\n") else pg_block + "\n")
+            elif s == "@@RULES@@":
+                out.append(ru_block if ru_block.endswith("\n") else ru_block + "\n")
             elif s == "@@LISTENERS@@":
                 out.append("listeners:\n" + block if block.strip() else "listeners: []\n")
             else:
@@ -1856,13 +1924,16 @@ def forget_session(tok: str):
 
 
 def load_panel_settings() -> dict:
-    out = {"custom_server_enabled": False, "auto_update": False}
+    out = {"custom_server_enabled": False, "auto_update": False, "update_channel": ""}
     try:
         with open(PANEL_SETTINGS) as f:
             raw = json.load(f)
         if isinstance(raw, dict):
             out["custom_server_enabled"] = bool(raw.get("custom_server_enabled"))
             out["auto_update"] = bool(raw.get("auto_update"))
+            ch = str(raw.get("update_channel") or "").strip().lower()
+            if ch in ("stable", "test"):
+                out["update_channel"] = ch
     except Exception:
         pass
     return out
@@ -1873,6 +1944,10 @@ def save_panel_settings(updates: dict):
     for key in ("custom_server_enabled", "auto_update"):
         if key in updates:
             cur[key] = bool(updates[key])
+    if "update_channel" in updates:
+        ch = str(updates.get("update_channel") or "").strip().lower()
+        if ch in ("stable", "test"):
+            cur["update_channel"] = ch
     atomic_write(
         PANEL_SETTINGS,
         json.dumps(cur, indent=2) + "\n",
@@ -2595,7 +2670,29 @@ _TRACKED_DRAFT_FILES = (
     NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON,
     FRAG_REALITY, FRAG_EXTRA, FRAG_PROXIES, FRAG_PROVIDERS,
     FRAG_CONTROLLER, CUSTOM_CONF,
+    ROUTING_JSON, FRAG_RULE_PROVIDERS, FRAG_PROXY_GROUPS, FRAG_RULES,
 )
+
+
+def _all_tracked_draft_files() -> tuple:
+    """Fixed tracked files plus any per-group routing YAML currently on disk."""
+    extra = []
+    try:
+        for name in os.listdir(ROUTING_DIR):
+            if name.endswith((".yaml", ".yml")):
+                extra.append(os.path.join(ROUTING_DIR, name))
+    except FileNotFoundError:
+        pass
+    return _TRACKED_DRAFT_FILES + tuple(extra)
+
+
+def _is_tracked_draft_path(p: str) -> bool:
+    if p in _TRACKED_DRAFT_FILES:
+        return True
+    try:
+        return os.path.commonpath([p, ROUTING_DIR]) == ROUTING_DIR and p.endswith((".yaml", ".yml"))
+    except ValueError:
+        return False
 
 
 def _conf_digest() -> str:
@@ -2613,7 +2710,7 @@ def _ensure_pending_baseline():
     if has_pending and os.path.isfile(PENDING_BASELINE_JSON):
         return
     files = {}
-    for p in _TRACKED_DRAFT_FILES:
+    for p in _all_tracked_draft_files():
         try:
             with open(p) as f:
                 files[p] = f.read()
@@ -2702,6 +2799,13 @@ def _reconstruct_draft_from_live_conf():
     atomic_write(FRAG_PROVIDERS, dump_yaml_providers(new_providers), 0o640)
 
 
+    try:
+        get_routing().ensure_seeded(force=False)
+        get_routing().regenerate_frags()
+    except Exception as e:
+        sys.stderr.write(f"routing reconstruct warning: {e}\n")
+
+
 def discard_pending_reload():
     """Roll back all draft files to match current live CONF without reloading Mihomo or touching CONF."""
     global _PENDING_UFW_BASELINE
@@ -2714,7 +2818,7 @@ def discard_pending_reload():
                 cur_digest = _conf_digest()
                 if not cur_digest or snap.get("conf_sha256") == cur_digest:
                     for p, data in snap["files"].items():
-                        if p not in _TRACKED_DRAFT_FILES:
+                        if not _is_tracked_draft_path(p):
                             continue
                         if data is None:
                             if os.path.exists(p):
@@ -2731,6 +2835,24 @@ def discard_pending_reload():
         env = read_env()
         if os.path.exists(FRAG_CONTROLLER) or env.get("MODE") == "auto-cert":
             atomic_write(FRAG_CONTROLLER, render_controller_fragment(env), 0o640)
+        # Drop routing group YAML files created after the baseline snapshot
+        try:
+            with open(PENDING_BASELINE_JSON) as f:
+                snap2 = json.load(f)
+            kept = set()
+            if isinstance(snap2, dict) and isinstance(snap2.get("files"), dict):
+                for p, data in snap2["files"].items():
+                    if data is not None and _is_tracked_draft_path(p):
+                        kept.add(p)
+            if os.path.isdir(ROUTING_DIR):
+                for name in os.listdir(ROUTING_DIR):
+                    if not name.endswith((".yaml", ".yml")):
+                        continue
+                    fp = os.path.join(ROUTING_DIR, name)
+                    if fp not in kept and os.path.isfile(fp):
+                        os.remove(fp)
+        except Exception:
+            pass
     _PENDING_UFW_BASELINE = None
     _RECENT_ADD_REQS.clear()
     clear_pending_reload()
@@ -2764,6 +2886,9 @@ def record_pending_reload(op: str, name: str = "", port: int = None, kind: str =
     elif op == "add":
         items = [it for it in items if not (it.get("name") == name and it.get("op") in ("add", "delete"))]
         items.append({"op": "add", "kind": kind, "name": name, "port": port, "detail": detail})
+    elif op in ("add-routing", "delete-routing", "rename-routing", "reorder-routing", "update-routing", "import-routing"):
+        items = [it for it in items if not (it.get("op") == op and it.get("name") == name)]
+        items.append({"op": op, "kind": "routing", "name": name, "port": port, "detail": detail})
     elif op in ("add-proxy", "delete-proxy", "add-provider", "delete-provider"):
         base_kind = "proxy" if "proxy" in op else "provider"
         if op.startswith("delete-"):
@@ -3112,6 +3237,7 @@ def reset_to_template_config():
         atomic_write(FRAG_PROXIES, "", 0o640)
         atomic_write(FRAG_PROVIDERS, "", 0o640)
         atomic_write(FRAG_CONTROLLER, render_controller_fragment(env), 0o640)
+        get_routing().ensure_seeded(force=True)
         atomic_write(CONF, assemble_config(), 0o640)
         rc, out = validate_config()
         if rc != 0:
@@ -3378,41 +3504,153 @@ def _http_get_text(url: str, timeout: int = 20, headers: dict = None) -> str:
         raise RuntimeError(f"无法连接 GitHub，请检查服务器网络（{reason}）") from None
 
 
-def _resolve_repo_slug(env: dict = None) -> str:
-    """Resolve REPO_SLUG from env / scripts/lib/common.sh / defaults (ClashGate/ClashGate)."""
+def _normalize_update_channel(raw: str) -> str:
+    ch = (raw or "").strip().lower()
+    if ch in ("stable", "production", "正式"):
+        return "stable"
+    if ch in ("test", "beat", "测试"):
+        return "test"
+    return ""
+
+
+def resolve_update_channel(env: dict = None, settings: dict = None) -> str:
+    """Return stable|test. Default stable; legacy ClashGateBeat installs map to test."""
+    if settings is None:
+        settings = load_panel_settings()
+    ch = _normalize_update_channel(settings.get("update_channel") or "")
+    if ch:
+        return ch
     if env is None:
         env = read_env()
-    common_vars = {}
-    for p in (
-        CS_ROOT + "/scripts/lib/common.sh",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts/lib/common.sh"),
-    ):
-        if os.path.isfile(p):
-            try:
-                with open(p) as f:
-                    for line in f:
-                        m = re.match(r"^(REPO_OWNER|REPO_NAME)=\$\{\1:-([^}]+)\}", line.strip())
-                        if m:
-                            common_vars[m.group(1)] = m.group(2).strip()
-                break
-            except Exception:
-                pass
-    owner = os.environ.get("REPO_OWNER") or env.get("REPO_OWNER") or common_vars.get("REPO_OWNER") or REPO_OWNER
-    name = os.environ.get("REPO_NAME") or env.get("REPO_NAME") or common_vars.get("REPO_NAME") or REPO_NAME
-    return os.environ.get("REPO_SLUG") or env.get("REPO_SLUG") or f"{owner}/{name}"
+    env_ch = _normalize_update_channel(env.get("UPDATE_CHANNEL") or os.environ.get("UPDATE_CHANNEL") or "")
+    if env_ch:
+        return env_ch
+    name = (os.environ.get("REPO_NAME") or env.get("REPO_NAME") or "").strip()
+    if name.endswith("Beat"):
+        return "test"
+    return "stable"
+
+
+def resolve_update_target(env: dict = None, settings: dict = None) -> dict:
+    """Resolve repo/branch for the active update channel."""
+    if env is None:
+        env = read_env()
+    channel = resolve_update_channel(env, settings)
+    meta = dict(UPDATE_CHANNEL_MAP[channel])
+    # Until the user explicitly picks a channel, keep downloading from the installed Beat repo.
+    settings = settings if settings is not None else load_panel_settings()
+    explicit = _normalize_update_channel(settings.get("update_channel") or "")
+    env_ch = _normalize_update_channel(env.get("UPDATE_CHANNEL") or "")
+    name = (os.environ.get("REPO_NAME") or env.get("REPO_NAME") or "").strip()
+    if not explicit and not env_ch and name.endswith("Beat"):
+        owner = os.environ.get("REPO_OWNER") or env.get("REPO_OWNER") or "ClashGate"
+        return {
+            "channel": "test",
+            "owner": owner,
+            "name": name,
+            "branch": (env.get("REPO_BRANCH") or "main").strip() or "main",
+            "label": "测试",
+            "slug": f"{owner}/{name}",
+            "legacy_beat": True,
+        }
+    slug = f"{meta['owner']}/{meta['name']}"
+    return {
+        "channel": channel,
+        "owner": meta["owner"],
+        "name": meta["name"],
+        "branch": meta["branch"],
+        "label": meta["label"],
+        "slug": slug,
+        "legacy_beat": False,
+    }
+
+
+def apply_update_channel_env(channel: str):
+    """Persist channel choice into panel_settings + clashgate.env (retires Beat when set)."""
+    ch = _normalize_update_channel(channel)
+    if ch not in UPDATE_CHANNEL_MAP:
+        raise ValueError("invalid update channel")
+    meta = UPDATE_CHANNEL_MAP[ch]
+    save_panel_settings({"update_channel": ch})
+    write_env_var("UPDATE_CHANNEL", ch)
+    write_env_var("REPO_OWNER", meta["owner"])
+    write_env_var("REPO_NAME", meta["name"])
+    write_env_var("REPO_SLUG", f"{meta['owner']}/{meta['name']}")
+    write_env_var("REPO_BRANCH", meta["branch"])
+    return resolve_update_target()
+
+
+def _resolve_repo_slug(env: dict = None) -> str:
+    return resolve_update_target(env)["slug"]
+
+
+def load_update_source() -> dict:
+    out = {"channel": "", "repo": "", "branch": "", "sha": "", "version": "", "updated_at": 0}
+    try:
+        with open(UPDATE_SOURCE_JSON) as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            out.update({
+                "channel": str(raw.get("channel") or ""),
+                "repo": str(raw.get("repo") or ""),
+                "branch": str(raw.get("branch") or ""),
+                "sha": str(raw.get("sha") or ""),
+                "version": str(raw.get("version") or ""),
+                "updated_at": int(raw.get("updated_at") or 0),
+            })
+    except Exception:
+        pass
+    return out
+
+
+def save_update_source(data: dict):
+    cur = load_update_source()
+    cur.update({k: data[k] for k in data})
+    atomic_write(UPDATE_SOURCE_JSON, json.dumps(cur, ensure_ascii=False, indent=2) + "\n", 0o600)
+
+
+def fetch_channel_commit_sha(slug: str, branch: str) -> str:
+    url = f"https://api.github.com/repos/{slug}/commits/{branch}"
+    txt = _http_get_text(url, timeout=20, headers={"Accept": "application/vnd.github+json"})
+    data = json.loads(txt)
+    sha = str(data.get("sha") or "")
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError("未能从 GitHub 解析通道提交")
+    return sha
 
 
 def fetch_latest_clashgate_version() -> str:
-    slug = _resolve_repo_slug()
+    tip = fetch_channel_tip()
+    return tip["version"]
+
+
+def fetch_channel_tip() -> dict:
+    """Fetch CS_VERSION + tip SHA for the active update channel."""
+    target = resolve_update_target()
+    slug = target["slug"]
+    branch = target["branch"]
     url = os.environ.get(
         "CLASHGATE_RAW_COMMON",
-        f"https://raw.githubusercontent.com/{slug}/main/scripts/lib/common.sh",
+        f"https://raw.githubusercontent.com/{slug}/{branch}/scripts/lib/common.sh",
     )
     txt = _http_get_text(url, timeout=20)
     m = re.search(r"^CS_VERSION=([0-9A-Za-z._-]+)", txt, re.M)
     if not m:
         raise RuntimeError("未能从 GitHub 解析最新版本号")
-    return m.group(1).strip()
+    version = m.group(1).strip()
+    sha = ""
+    try:
+        sha = fetch_channel_commit_sha(slug, branch)
+    except Exception:
+        sha = ""
+    return {
+        "version": version,
+        "sha": sha,
+        "slug": slug,
+        "branch": branch,
+        "channel": target["channel"],
+        "label": target["label"],
+    }
 
 
 def fetch_latest_mihomo_release() -> dict:
@@ -3496,13 +3734,14 @@ def record_core_check(current: str, latest: str, has_update: bool):
     save_update_check(data)
 
 
-def record_panel_check(latest: str, has_update: bool):
+def record_panel_check(latest: str, has_update: bool, tip_sha: str = ""):
     data = load_update_check()
     data["panel"] = {
         "checked_at": int(time.time()),
         "current": VERSION,
         "latest": (latest or "").lstrip("vV"),
         "has_update": bool(has_update),
+        "latest_sha": (tip_sha or ""),
     }
     save_update_check(data)
 
@@ -3520,9 +3759,14 @@ def _check_due_updates():
             sys.stderr.write(f"mihomo version check failed: {e}\n")
     if _update_due(data["panel"]):
         try:
-            latest = fetch_latest_clashgate_version().lstrip("vV")
-            has = parse_version_tuple(latest) > parse_version_tuple(VERSION)
-            record_panel_check(latest, has)
+            tip = fetch_channel_tip()
+            latest = tip["version"].lstrip("vV")
+            target = resolve_update_target()
+            local_src = load_update_source()
+            ver_newer = parse_version_tuple(latest) > parse_version_tuple(VERSION)
+            sha_newer = bool(tip.get("sha") and tip["sha"] != (local_src.get("sha") or ""))
+            has = ver_newer or (target["channel"] == "test" and sha_newer)
+            record_panel_check(latest, has, tip_sha=tip.get("sha") or "")
         except Exception as e:
             sys.stderr.write(f"clashgate version check failed: {e}\n")
 
@@ -3550,9 +3794,14 @@ def _apply_auto_update():
         sys.stderr.write(f"auto update core check failed: {e}\n")
         core_has = bool(load_update_check()["core"].get("has_update"))
     try:
-        latest_cs = fetch_latest_clashgate_version().lstrip("vV")
-        panel_has = parse_version_tuple(latest_cs) > parse_version_tuple(VERSION)
-        record_panel_check(latest_cs, panel_has)
+        tip = fetch_channel_tip()
+        latest_cs = tip["version"].lstrip("vV")
+        target = resolve_update_target()
+        local_src = load_update_source()
+        ver_newer = parse_version_tuple(latest_cs) > parse_version_tuple(VERSION)
+        sha_newer = bool(tip.get("sha") and tip["sha"] != (local_src.get("sha") or ""))
+        panel_has = ver_newer or (target["channel"] == "test" and sha_newer)
+        record_panel_check(latest_cs, panel_has, tip_sha=tip.get("sha") or "")
     except Exception as e:
         sys.stderr.write(f"auto update panel check failed: {e}\n")
         panel_has = bool(load_update_check()["panel"].get("has_update"))
@@ -4012,6 +4261,7 @@ class Panel(BaseHTTPRequestHandler):
             "custom_config_mode": custom_active,
             "custom_server_enabled": bool(load_panel_settings().get("custom_server_enabled")),
             "auto_update": bool(load_panel_settings().get("auto_update")),
+            **(lambda t: {"update_channel": t["channel"], "update_channel_label": t["label"]})(resolve_update_target()),
             "custom_config_raw": cur_cfg,
             "masque": load_masque_state(),
             "update_check": public_update_check(),
@@ -4045,6 +4295,11 @@ class Panel(BaseHTTPRequestHandler):
             "all_proxies_yaml": all_proxies_yaml,
             "proxies": proxy_items,
             "providers": provider_items,
+            "routing": _beginner_routing_state(
+                get_routing().public_state(cur_cfg, custom_mode=True)
+                if custom_active
+                else get_routing().public_state()
+            ),
         }
 
     def respond_mutation(self, s, msg: str, ok: bool = True):
@@ -4140,6 +4395,8 @@ class Panel(BaseHTTPRequestHandler):
             return self.send(200, self.dashboard(s, initial_tab="inbounds"))
         if path in ("/outbounds",):
             return self.send(200, self.dashboard(s, initial_tab="outbounds"))
+        if path in ("/routing",):
+            return self.send(200, self.dashboard(s, initial_tab="routing"))
         if path in ("/readable", "/convert"):
             return self.send(200, self.dashboard(s, initial_tab="readable"))
         if path in ("/advanced", "/custom-config"):
@@ -4247,6 +4504,24 @@ class Panel(BaseHTTPRequestHandler):
             return self.do_add_provider(s, form)
         if path == "/providers/delete":
             return self.do_delete_provider(s, form.get("name", ""))
+        if path == "/routing/add":
+            return self.do_routing_add(s, form)
+        if path == "/routing/import":
+            return self.do_routing_import(s, form)
+        if path == "/routing/delete":
+            return self.do_routing_delete(s, form)
+        if path == "/routing/rename":
+            return self.do_routing_rename(s, form)
+        if path == "/routing/reorder":
+            return self.do_routing_reorder(s, form)
+        if path == "/routing/provider/add":
+            return self.do_routing_provider(s, form, add=True)
+        if path == "/routing/provider/delete":
+            return self.do_routing_provider(s, form, add=False)
+        if path == "/routing/update":
+            return self.do_routing_update(s, form)
+        if path == "/routing/rules":
+            return self.do_routing_rules(s, form)
         if path == "/config/custom":
             return self.do_save_custom_config(s, form)
         if path == "/config/reset-template":
@@ -4345,6 +4620,7 @@ class Panel(BaseHTTPRequestHandler):
 
     def do_settings(self, s, form):
         updates = {}
+        channel_raw = (form.get("update_channel") or "").strip()
         for key in ("custom_server_enabled", "auto_update"):
             if key not in form:
                 continue
@@ -4352,10 +4628,29 @@ class Panel(BaseHTTPRequestHandler):
             if raw not in ("0", "1", "false", "true", "on", "off"):
                 return self.respond_mutation(s, "设置项无效", False)
             updates[key] = raw in ("1", "true", "on")
+        if channel_raw:
+            ch = _normalize_update_channel(channel_raw)
+            if ch not in UPDATE_CHANNEL_MAP:
+                return self.respond_mutation(s, "设置项无效", False)
+            updates["update_channel"] = ch
         if not updates:
             return self.respond_mutation(s, "设置项无效", False)
         with LOCK:
-            save_panel_settings(updates)
+            if "update_channel" in updates:
+                apply_update_channel_env(updates["update_channel"])
+                # Keep other toggles if sent together.
+                other = {k: updates[k] for k in ("custom_server_enabled", "auto_update") if k in updates}
+                if other:
+                    save_panel_settings(other)
+            else:
+                save_panel_settings(updates)
+        if "update_channel" in updates and len(updates) == 1:
+            branch = UPDATE_CHANNEL_MAP[updates["update_channel"]]["branch"]
+            if updates["update_channel"] == "test":
+                msg = "已切换到测试通道（ClashGate/ClashGate@test）。请点「检查更新」拉取该通道版本。"
+            else:
+                msg = "已切换到正式通道（ClashGate/ClashGate@main）。请点「检查更新」拉取该通道版本。"
+            return self.respond_mutation(s, msg, True)
         if "auto_update" in updates and len(updates) == 1:
             if updates["auto_update"]:
                 return self.respond_mutation(s, "已开启每周自动更新。更新面板时会同时更新 Mihomo 内核。", True)
@@ -4368,7 +4663,7 @@ class Panel(BaseHTTPRequestHandler):
 
     def do_masque_register(self, s):
         start_masque_registrar(force=True)
-        return self.respond_mutation(s, "正在向 Cloudflare 注册 MASQUE，完成后点「加入出站节点」。", True)
+        return self.respond_mutation(s, "正在向 Cloudflare 注册 MASQUE，完成后点「加入服务端出站」。", True)
 
     def do_change_password(self, s, form):
         cur_pw = form.get("current_password", "")
@@ -4440,10 +4735,32 @@ class Panel(BaseHTTPRequestHandler):
                 _sync_custom_conf_listeners(cur_nodes, cur_inbs)
                 _sync_custom_conf_proxies(cur_proxies)
                 _sync_custom_conf_providers(cur_providers)
+            conf_backup = None
+            custom_backup = None
+            try:
+                with open(CONF) as f:
+                    conf_backup = f.read()
+            except FileNotFoundError:
+                conf_backup = None
+            if is_custom_config_mode():
+                try:
+                    with open(CUSTOM_CONF) as f:
+                        custom_backup = f.read()
+                except FileNotFoundError:
+                    custom_backup = None
+            try:
+                get_routing().ensure_seeded()
+                get_routing().regenerate_frags()
+            except Exception as e:
+                return self.respond_mutation(s, f"分流配置组装失败：{e}", False)
             atomic_write(CONF, assemble_config(), 0o640)
             sync_client_files()
             rc, out = validate_config()
             if rc != 0:
+                if conf_backup is not None:
+                    atomic_write(CONF, conf_backup, 0o640)
+                if custom_backup is not None:
+                    atomic_write(CUSTOM_CONF, custom_backup, 0o640)
                 return self.respond_mutation(s, f"配置校验未通过，未执行{zh}：" + out[-300:], False)
             new_specs = collect_ufw_specs(cur_nodes, cur_inbs)
             old_specs = _PENDING_UFW_BASELINE if _PENDING_UFW_BASELINE is not None else new_specs
@@ -4455,6 +4772,12 @@ class Panel(BaseHTTPRequestHandler):
                 st_now = mihomo_status()
                 if st_now["listening"] and not expected_ports.issubset(set(st_now["listening"])):
                     rc, out = run([SYSTEMCTL, "restart", "mihomo"])
+            if rc != 0:
+                if conf_backup is not None:
+                    atomic_write(CONF, conf_backup, 0o640)
+                if custom_backup is not None:
+                    atomic_write(CUSTOM_CONF, custom_backup, 0o640)
+                run([SYSTEMCTL, "restart", "mihomo"])
             if rc == 0:
                 clear_pending_reload()
                 wait_mihomo_ports()
@@ -4558,19 +4881,37 @@ class Panel(BaseHTTPRequestHandler):
 
     def do_check_update(self, s):
         try:
-            latest_cs = fetch_latest_clashgate_version()
+            tip = fetch_channel_tip()
+            latest_cs = tip["version"]
             cur_cs = VERSION
-            has_update = parse_version_tuple(latest_cs) > parse_version_tuple(cur_cs)
-            record_panel_check(latest_cs, has_update)
-            if has_update:
-                msg = f"发现新版本 v{latest_cs}（当前 v{cur_cs}）"
+            target = resolve_update_target()
+            local_src = load_update_source()
+            ver_newer = parse_version_tuple(latest_cs) > parse_version_tuple(cur_cs)
+            sha_newer = bool(tip.get("sha") and tip["sha"] != (local_src.get("sha") or ""))
+            # Stable: version only. Test: also treat a newer tip SHA as an update.
+            if target["channel"] == "test":
+                has_update = ver_newer or sha_newer
             else:
-                msg = f"当前已是最新版本（v{cur_cs}）"
+                has_update = ver_newer
+            record_panel_check(latest_cs, has_update, tip_sha=tip.get("sha") or "")
+            ch_label = target.get("label") or ("测试" if target["channel"] == "test" else "正式")
+            if has_update:
+                msg = f"发现新版本 v{latest_cs}（当前 v{cur_cs}，通道：{ch_label}"
+                if tip.get("sha"):
+                    msg += f"，{tip['sha'][:7]}"
+                msg += "）"
+            else:
+                msg = f"当前已是最新版本（v{cur_cs}，通道：{ch_label}）"
             payload = {
                 "ok": True,
                 "has_update": has_update,
                 "current_version": cur_cs,
                 "latest_version": latest_cs,
+                "update_channel": target["channel"],
+                "update_channel_label": ch_label,
+                "repo": tip.get("slug") or target["slug"],
+                "branch": tip.get("branch") or target["branch"],
+                "latest_sha": tip.get("sha") or "",
                 "msg": msg,
             }
             if not self.is_ajax():
@@ -4588,11 +4929,27 @@ class Panel(BaseHTTPRequestHandler):
             cmd_bin = CLASHGATE_BIN if os.path.isfile(CLASHGATE_BIN) else "/usr/local/bin/clashgate"
             if not os.path.isfile(cmd_bin):
                 return self.respond_mutation(s, "升级失败：未找到 clashgate 管理脚本", False)
+            # Ensure clashgate update uses the selected channel (env already written on channel change).
             rc, out = run(["bash", cmd_bin, "update"], timeout=180)
             if rc != 0:
                 tail = " | ".join(l for l in out.splitlines() if l.strip())[-300:]
                 return self.respond_mutation(s, f"升级失败：{tail}", False)
-            record_panel_check(VERSION, False)
+            tip_sha = ""
+            try:
+                tip = fetch_channel_tip()
+                tip_sha = tip.get("sha") or ""
+                target = resolve_update_target()
+                save_update_source({
+                    "channel": target["channel"],
+                    "repo": tip.get("slug") or target["slug"],
+                    "branch": tip.get("branch") or target["branch"],
+                    "sha": tip_sha,
+                    "version": tip.get("version") or VERSION,
+                    "updated_at": int(time.time()),
+                })
+            except Exception:
+                pass
+            record_panel_check(VERSION, False, tip_sha=tip_sha)
         return self.respond_mutation(s, "升级成功！ClashGate 与 Mihomo 内核已更新至最新版本。", True)
 
     def do_add(self, s, form):
@@ -4771,7 +5128,7 @@ class Panel(BaseHTTPRequestHandler):
                         kind="proxy",
                         name=p["name"],
                         port=p.get("port"),
-                        detail=f"+ 添加出站节点「{p['name']}」",
+                        detail=f"+ 添加服务端出站「{p['name']}」",
                     )
             except Exception as e:
                 return self.respond_mutation(s, f"添加服务端 proxies 节点失败：{e}", False)
@@ -4790,7 +5147,7 @@ class Panel(BaseHTTPRequestHandler):
                     op="delete-proxy",
                     kind="proxy",
                     name=name,
-                    detail=f"- 删除出站节点「{name}」",
+                    detail=f"- 删除服务端出站「{name}」",
                 )
             except Exception as e:
                 return self.respond_mutation(s, f"删除服务端节点失败：{e}", False)
@@ -4834,6 +5191,194 @@ class Panel(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.respond_mutation(s, f"删除订阅源失败：{e}", False)
         return self.respond_mutation(s, f"已删除订阅源「{name}」，请点顶部「重载配置」生效", True)
+
+
+    def do_routing_add(self, s, form):
+        name = (form.get("name") or "").strip()
+        rules_raw = form.get("rules_raw", "")
+        yaml_raw = form.get("yaml_raw", "")
+        if not name:
+            return self.respond_mutation(s, "请填写分流组名称", False)
+        if not (rules_raw or "").strip() and not (yaml_raw or "").strip():
+            return self.respond_mutation(s, "请粘贴至少一条分流规则（如 - DOMAIN-SUFFIX,example.com）", False)
+        with LOCK:
+            try:
+                _ensure_pending_baseline()
+                entry = get_routing().add_group(name=name, rules_raw=rules_raw, yaml_raw=yaml_raw)
+                record_pending_reload(
+                    op="add-routing",
+                    kind="routing",
+                    name=entry["name"],
+                    detail=f"+ 添加分流组「{entry['name']}」",
+                )
+            except Exception as e:
+                return self.respond_mutation(s, f"添加分流组失败：{e}", False)
+        return self.respond_mutation(s, f"已添加分流组「{entry['name']}」，已保存，请点顶部「重载配置」生效", True)
+
+    def do_routing_import(self, s, form):
+        name = (form.get("name") or "").strip()
+        url = (form.get("url") or "").strip()
+        if not name:
+            return self.respond_mutation(s, "请填写分流组名称", False)
+        if not url:
+            return self.respond_mutation(s, "请填写外部规则集 URL", False)
+        with LOCK:
+            try:
+                _ensure_pending_baseline()
+                entry = get_routing().import_group(name=name, url=url)
+                record_pending_reload(
+                    op="import-routing",
+                    kind="routing",
+                    name=entry["name"],
+                    detail=f"+ 引入分流组「{entry['name']}」",
+                )
+            except Exception as e:
+                return self.respond_mutation(s, f"引入分流规则失败：{e}", False)
+        return self.respond_mutation(s, f"已引入分流组「{entry['name']}」，已保存，请点顶部「重载配置」生效", True)
+
+    def do_routing_delete(self, s, form):
+        gid = (form.get("id") or "").strip()
+        with LOCK:
+            try:
+                _ensure_pending_baseline()
+                name = get_routing().delete_group(gid)
+                if not name:
+                    return self.respond_mutation(s, "已删除", True)
+                record_pending_reload(
+                    op="delete-routing",
+                    kind="routing",
+                    name=name,
+                    detail=f"- 删除分流组「{name}」",
+                )
+            except Exception as e:
+                return self.respond_mutation(s, f"删除分流组失败：{e}", False)
+        return self.respond_mutation(s, f"已删除分流组「{name}」，请点顶部「重载配置」生效", True)
+
+    def do_routing_rename(self, s, form):
+        gid = (form.get("id") or "").strip()
+        new_name = (form.get("name") or "").strip()
+        with LOCK:
+            try:
+                _ensure_pending_baseline()
+                old_name, new_name = get_routing().rename_group(gid, new_name)
+                if old_name != new_name:
+                    record_pending_reload(
+                        op="rename-routing",
+                        kind="routing",
+                        name=new_name,
+                        detail=f"~ 重命名分流组「{old_name}」→「{new_name}」",
+                    )
+            except Exception as e:
+                return self.respond_mutation(s, f"重命名分流组失败：{e}", False)
+        return self.respond_mutation(s, f"已重命名分流组为「{new_name}」，请点顶部「重载配置」生效", True)
+
+    def do_routing_provider(self, s, form, add: bool):
+        gid = (form.get("id") or "").strip()
+        pname = (form.get("provider") or "").strip()
+        with LOCK:
+            try:
+                if is_custom_config_mode():
+                    raise ValueError("自定义配置模式下请在自定义服务端里修改")
+                _ensure_pending_baseline()
+                if add:
+                    gname = get_routing().add_provider(
+                        gid, pname, form.get("url") or "",
+                        "classical",
+                        "yaml",
+                    )
+                    detail = f"+ 分流组「{gname}」添加规则集「{pname}」"
+                else:
+                    gname = get_routing().delete_provider(gid, pname)
+                    detail = f"- 分流组「{gname}」删除规则集「{pname}」"
+                record_pending_reload(op="update-routing", kind="routing", name=gname, detail=detail)
+            except Exception as e:
+                return self.respond_mutation(s, f"修改规则集失败：{e}", False)
+        return self.respond_mutation(s, f"{detail.lstrip('+- ')}，请点顶部「重载配置」生效", True)
+
+    def do_routing_reorder(self, s, form):
+        raw = (form.get("order") or "").strip()
+        with LOCK:
+            try:
+                if raw.startswith("["):
+                    order = json.loads(raw)
+                else:
+                    order = [x for x in raw.split(",") if x.strip()]
+                if not isinstance(order, list):
+                    raise ValueError("order 必须是数组")
+                order = [str(x).strip() for x in order if str(x).strip()]
+                _ensure_pending_baseline()
+                get_routing().reorder_groups(order)
+                record_pending_reload(
+                    op="reorder-routing",
+                    kind="routing",
+                    name="order",
+                    detail="~ 调整分流顺序",
+                )
+            except Exception as e:
+                return self.respond_mutation(s, f"调整分流顺序失败：{e}", False)
+        return self.respond_mutation(s, "已调整分流顺序，请点顶部「重载配置」生效", True)
+
+    def do_routing_rules(self, s, form):
+        gid = (form.get("id") or "").strip()
+        rules_raw = form.get("rules_raw", "")
+        if not gid:
+            return self.respond_mutation(s, "缺少分流组 id", False)
+        with LOCK:
+            try:
+                if is_custom_config_mode():
+                    raise ValueError("自定义配置模式下请在自定义服务端里修改")
+                _ensure_pending_baseline()
+                name = get_routing().update_group_rules(gid, rules_raw)
+                record_pending_reload(
+                    op="update-routing",
+                    kind="routing",
+                    name=name,
+                    detail=f"~ 更新分流组「{name}」规则",
+                )
+            except Exception as e:
+                return self.respond_mutation(s, f"更新分流规则失败：{e}", False)
+        return self.respond_mutation(s, f"已更新分流组「{name}」规则，请点顶部「重载配置」生效", True)
+
+    def do_routing_update(self, s, form):
+        gid = (form.get("id") or "").strip()
+        yaml_raw = form.get("yaml_raw", "")
+        with LOCK:
+            try:
+                if is_custom_config_mode():
+                    # Custom mode: rewrite sections in CUSTOM_CONF from provided group yaml
+                    _ensure_pending_baseline()
+                    with open(CUSTOM_CONF) as f:
+                        raw = f.read()
+                    # Merge: update one group's yaml inside synthetic list then rewrite
+                    st = get_routing().public_state(raw, custom_mode=True)
+                    if not st.get("ok"):
+                        raise ValueError(st.get("error") or "自定义分流无法解析")
+                    groups = st.get("groups") or []
+                    found = False
+                    for g in groups:
+                        if g.get("id") == gid:
+                            g["yaml"] = yaml_raw
+                            found = True
+                            break
+                    if not found:
+                        raise ValueError("分流组不存在")
+                    updated = get_routing().apply_custom_routing_edit(
+                        raw, groups, rule_providers_yaml=st.get("rule_providers_yaml") or ""
+                    )
+                    atomic_write(CUSTOM_CONF, updated, 0o640)
+                    name = next((g.get("name") for g in groups if g.get("id") == gid), gid)
+                else:
+                    _ensure_pending_baseline()
+                    name = get_routing().update_group_yaml(gid, yaml_raw)
+                record_pending_reload(
+                    op="update-routing",
+                    kind="routing",
+                    name=name,
+                    detail=f"~ 更新分流组「{name}」",
+                )
+            except Exception as e:
+                return self.respond_mutation(s, f"更新分流组失败：{e}", False)
+        return self.respond_mutation(s, f"已更新分流组「{name}」，请点顶部「重载配置」生效", True)
 
     def do_save_custom_config(self, s, form):
         if not load_panel_settings().get("custom_server_enabled"):
@@ -4947,7 +5492,7 @@ class Panel(BaseHTTPRequestHandler):
             f"<input id=port name=port placeholder='留空随机端口'>"
             f"<button type=submit>添加入站节点</button></form></section>"
             f"<section><h2>自定义 mihomo 服务端配置</h2>"
-            f"<form method=post action=/config/reset-template>{hid}<button type=submit>恢复标准模板</button></form></section>"
+            f"<form method=post action=/config/reset-template>{hid}<button type=submit>恢复默认服务端模板</button></form></section>"
             f"{cert_sec}</main>"
         )
         return render_spa_html("ClashGate", boot, fallback)

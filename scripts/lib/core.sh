@@ -175,8 +175,34 @@ EOF
   chmod 640 "$FRAG_CONTROLLER"; chown root:mihomo "$FRAG_CONTROLLER"
 }
 
-# config.yaml = custom_config.yaml (if active) OR template with @@CONTROLLER@@, @@PROXY_PROVIDERS@@, @@PROXIES@@, and @@LISTENERS@@.
-# Mirrors assemble_config() in panel/panel.py.
+# Seed English default server routing groups and regenerate assemble fragments via panel.py.
+seed_routing() {
+  local seed="$LIB_DIR/resources/routing"
+  [[ -d $seed ]] || return 0
+  install -d -m 755 "$ROUTING_DIR"
+  if [[ ! -f $ROUTING_JSON ]]; then
+    install -m 600 "$seed/defaults.json" "$ROUTING_JSON"
+  fi
+  local f base
+  for f in "$seed"/*.yaml; do
+    [[ -f $f ]] || continue
+    base=$(basename "$f")
+    [[ -f $ROUTING_DIR/$base ]] || install -m 640 "$f" "$ROUTING_DIR/$base"
+  done
+  if [[ -f $LIB_DIR/panel/panel.py ]]; then
+    CS_ROOT="$CS_ROOT" PYTHONPATH="$LIB_DIR/panel${PYTHONPATH:+:$PYTHONPATH}" python3 -c \
+      'import os,importlib.util; p=os.path.join(os.environ["CS_ROOT"],"panel","panel.py"); spec=importlib.util.spec_from_file_location("cg_panel_seed", p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); m.get_routing().ensure_seeded(force=False)' \
+      || warn "分流默认模板生成失败（可稍后在面板「服务端分流」中恢复）"
+  fi
+  [[ -f $FRAG_RULE_PROVIDERS ]] || : > "$FRAG_RULE_PROVIDERS"
+  [[ -f $FRAG_PROXY_GROUPS ]] || printf '%s\n' 'proxy-groups: []' > "$FRAG_PROXY_GROUPS"
+  [[ -f $FRAG_RULES ]] || printf '%s\n' 'rules:' '  - MATCH,Final' > "$FRAG_RULES"
+  chmod 640 "$FRAG_RULE_PROVIDERS" "$FRAG_PROXY_GROUPS" "$FRAG_RULES" 2>/dev/null || true
+  chown root:mihomo "$FRAG_RULE_PROVIDERS" "$FRAG_PROXY_GROUPS" "$FRAG_RULES" "$ROUTING_JSON" 2>/dev/null || true
+  chown -R root:mihomo "$ROUTING_DIR" 2>/dev/null || true
+}
+
+# config.yaml = custom / template with routing placeholders. Mirrors panel assemble_config().
 assemble_config() {
   if [[ -s $CUSTOM_CONF ]]; then
     cp -f "$CUSTOM_CONF" "$CONF.new"
@@ -187,7 +213,10 @@ assemble_config() {
   [[ -f $FRAG_CONTROLLER ]] || render_controller
   [[ -f $FRAG_PROXIES ]] || : > "$FRAG_PROXIES"
   [[ -f $FRAG_PROVIDERS ]] || : > "$FRAG_PROVIDERS"
-  awk -v c="$FRAG_CONTROLLER" -v pv="$FRAG_PROVIDERS" -v p="$FRAG_PROXIES" -v r="$FRAG_REALITY" -v e="$FRAG_EXTRA" '
+  seed_routing
+  awk -v c="$FRAG_CONTROLLER" -v pv="$FRAG_PROVIDERS" -v p="$FRAG_PROXIES" \
+      -v rp="$FRAG_RULE_PROVIDERS" -v pg="$FRAG_PROXY_GROUPS" -v ru="$FRAG_RULES" \
+      -v r="$FRAG_REALITY" -v e="$FRAG_EXTRA" '
     /^@@CONTROLLER@@$/ { while ((getline l < c) > 0) print l; next }
     /^@@PROXY_PROVIDERS@@$/ {
       has = 0
@@ -208,6 +237,9 @@ assemble_config() {
       if (!has) print "proxies: []"
       next
     }
+    /^@@RULE_PROVIDERS@@$/ { while ((getline l < rp) > 0) print l; next }
+    /^@@PROXY_GROUPS@@$/   { while ((getline l < pg) > 0) print l; next }
+    /^@@RULES@@$/          { while ((getline l < ru) > 0) print l; next }
     /^@@LISTENERS@@$/  {
       buf = ""
       while ((getline l < r) > 0) buf = buf l "\n"
@@ -252,8 +284,9 @@ render_server() {
   [[ -f $FRAG_EXTRA ]] || : > "$FRAG_EXTRA"
   [[ -f $FRAG_PROXIES ]] || : > "$FRAG_PROXIES"
   [[ -f $FRAG_PROVIDERS ]] || : > "$FRAG_PROVIDERS"
-  chmod 640 "$FRAG_REALITY" "$FRAG_EXTRA" "$FRAG_PROXIES" "$FRAG_PROVIDERS"
-  chown root:mihomo "$FRAG_REALITY" "$FRAG_EXTRA" "$FRAG_PROXIES" "$FRAG_PROVIDERS" "$STATE"
+  seed_routing
+  chmod 640 "$FRAG_REALITY" "$FRAG_EXTRA" "$FRAG_PROXIES" "$FRAG_PROVIDERS" "$FRAG_RULE_PROVIDERS" "$FRAG_PROXY_GROUPS" "$FRAG_RULES"
+  chown root:mihomo "$FRAG_REALITY" "$FRAG_EXTRA" "$FRAG_PROXIES" "$FRAG_PROVIDERS" "$FRAG_RULE_PROVIDERS" "$FRAG_PROXY_GROUPS" "$FRAG_RULES" "$STATE"
   assemble_config
   validate_conf || die "生成的服务端配置未通过校验（mihomo -t）"
 }

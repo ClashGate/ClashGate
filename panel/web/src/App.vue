@@ -60,6 +60,7 @@ const boot = window.__CS_BOOT__ || {
   all_proxies_yaml: '',
   proxies: [],
   providers: [],
+  routing: { ok: true, custom_mode: false, groups: [], error: '' },
 }
 
 const pageMode = ref(boot.page || 'dashboard')
@@ -92,8 +93,11 @@ const state = reactive({
   all_proxies_yaml: boot.all_proxies_yaml || '',
   proxies: Array.isArray(boot.proxies) ? boot.proxies : [],
   providers: Array.isArray(boot.providers) ? boot.providers : [],
+  routing: boot.routing && typeof boot.routing === 'object' ? boot.routing : { ok: true, custom_mode: false, groups: [], error: '' },
   custom_server_enabled: !!boot.custom_server_enabled,
   auto_update: !!boot.auto_update,
+  update_channel: boot.update_channel === 'test' ? 'test' : 'stable',
+  update_channel_label: boot.update_channel_label || (boot.update_channel === 'test' ? '测试' : '正式'),
   masque: {
     status: (boot.masque && boot.masque.status) || 'idle',
     name: (boot.masque && boot.masque.name) || '⛅️ Cloudflare-MASQUE',
@@ -308,10 +312,16 @@ function formatPendingItem(item) {
   if (op === 'reset-password') return t('~ 重置密码「{name}」', { name })
   if (op === 'reset-secret') return t('~ 重置 API 密钥')
   if (op === 'reset-sub') return t('~ 更换订阅链接')
-  if (op === 'add-proxy') return t('+ 添加出站节点「{name}」', { name })
-  if (op === 'delete-proxy') return t('- 删除出站节点「{name}」', { name })
+  if (op === 'add-proxy') return t('+ 添加服务端出站「{name}」', { name })
+  if (op === 'delete-proxy') return t('- 删除服务端出站「{name}」', { name })
   if (op === 'add-provider') return t('+ 导入订阅源「{name}」', { name })
   if (op === 'delete-provider') return t('- 删除订阅源「{name}」', { name })
+  if (op === 'add-routing') return t('+ 添加分流组「{name}」', { name })
+  if (op === 'import-routing') return t('+ 引入分流组「{name}」', { name })
+  if (op === 'delete-routing') return t('- 删除分流组「{name}」', { name })
+  if (op === 'rename-routing') return item.detail || t('~ 更新分流组「{name}」', { name })
+  if (op === 'reorder-routing') return t('~ 调整分流顺序')
+  if (op === 'update-routing') return t('~ 更新分流组「{name}」', { name })
   return item.detail || ''
 }
 
@@ -323,7 +333,8 @@ const topbarVersionText = computed(() => {
 const pageTitle = computed(() => {
   const titles = {
     inbounds: t('首页'),
-    outbounds: t('出站节点'),
+    outbounds: t('服务端出站'),
+    routing: t('服务端分流'),
     readable: t('节点转换'),
     certs: t('HTTPS 证书'),
     advanced: t('自定义服务端'),
@@ -378,10 +389,11 @@ const converterPlaceholder = computed(
   () => t('在此粘贴节点配置，例如：') + '\n- {"name":"VlessReality","type":"vless","server":"1.2.3.4","port":28443,...}'
 )
 
-const VALID_TABS = ['inbounds', 'outbounds', 'readable', 'certs', 'advanced', 'settings']
+const VALID_TABS = ['inbounds', 'outbounds', 'routing', 'readable', 'certs', 'advanced', 'settings']
 const TAB_PATHS = {
   inbounds: '/',
   outbounds: '/outbounds',
+  routing: '/routing',
   readable: '/readable',
   advanced: '/advanced',
   certs: '/certs',
@@ -398,6 +410,7 @@ function detectInitialTab() {
   if (p === '/advanced' || p === '/custom-config') return 'advanced'
   if (p === '/readable' || p === '/convert') return 'readable'
   if (p === '/outbounds') return 'outbounds'
+  if (p === '/routing') return 'routing'
   return 'inbounds'
 }
 
@@ -778,6 +791,8 @@ async function refreshServerStateSilent() {
         if (data.cert_hours !== undefined) state.cert_hours = data.cert_hours
         if (data.custom_server_enabled !== undefined) state.custom_server_enabled = !!data.custom_server_enabled
         if (data.auto_update !== undefined) state.auto_update = !!data.auto_update
+        if (data.update_channel !== undefined) state.update_channel = data.update_channel === 'test' ? 'test' : 'stable'
+        if (data.update_channel_label !== undefined) state.update_channel_label = data.update_channel_label || state.update_channel_label
         if (data.masque) {
           state.masque = {
             status: data.masque.status || state.masque.status,
@@ -831,6 +846,10 @@ function applyServerState(newState) {
   if (newState.custom_config_mode !== undefined) state.custom_config_mode = newState.custom_config_mode
   if (newState.custom_server_enabled !== undefined) state.custom_server_enabled = !!newState.custom_server_enabled
   if (newState.auto_update !== undefined) state.auto_update = !!newState.auto_update
+  if (newState.update_channel !== undefined) state.update_channel = newState.update_channel === 'test' ? 'test' : 'stable'
+  if (newState.update_channel_label !== undefined) {
+    state.update_channel_label = newState.update_channel_label || state.update_channel_label
+  }
   if (newState.masque && typeof newState.masque === 'object') {
     state.masque = {
       status: newState.masque.status || 'idle',
@@ -860,6 +879,7 @@ function applyServerState(newState) {
   if (newState.all_proxies_yaml !== undefined) state.all_proxies_yaml = newState.all_proxies_yaml
   if (Array.isArray(newState.proxies)) state.proxies = newState.proxies
   if (Array.isArray(newState.providers)) state.providers = newState.providers
+  if (newState.routing && typeof newState.routing === 'object') state.routing = newState.routing
 }
 
 function formatFetchError(err) {
@@ -1076,7 +1096,7 @@ async function submitAddProxies() {
 function deleteProxy(name) {
   openConfirmDialog({
     title: t('删除'),
-    message: t('确定删除出站节点「{name}」？', { name }),
+    message: t('确定删除服务端出站「{name}」？', { name }),
     confirmText: t('确认删除'),
     tone: 'rose',
     onConfirm: () => postAction('/proxies/delete', { name }, `del-proxy-${name}`),
@@ -1200,9 +1220,9 @@ async function submitCustomConfig() {
 
 function resetTemplateConfig() {
   openConfirmDialog({
-    title: t('恢复标准模板'),
-    message: t('确定恢复标准模板？这将还原内置标准服务端模板，并重新生成一个默认 VlessReality 节点（同时同步至客户端订阅）。'),
-    confirmText: t('恢复标准模板'),
+    title: t('恢复默认服务端模板'),
+    message: t('确定恢复默认服务端模板？这将还原内置标准服务端模板，并重新生成一个默认 VlessReality 节点（同时同步至客户端订阅）。'),
+    confirmText: t('恢复默认服务端模板'),
     tone: 'rose',
     onConfirm: () => postAction('/config/reset-template', {}, 'reset-template'),
   })
@@ -1234,6 +1254,250 @@ async function reloadPanelAfterUpgrade(previousVersion) {
     }
   }
   window.location.reload()
+}
+
+
+const createRoutingForm = reactive({ name: '', rules_raw: '' })
+const importRoutingForm = reactive({ name: '', url: '' })
+
+const routingGroups = computed(() => {
+  const g = state.routing && Array.isArray(state.routing.groups) ? state.routing.groups : []
+  return g
+})
+
+const CLASSICAL_RULE_TYPES = new Set([
+  'DOMAIN', 'DOMAIN-SUFFIX', 'DOMAIN-KEYWORD', 'DOMAIN-REGEX',
+  'GEOSITE', 'GEOIP', 'IP-CIDR', 'IP-CIDR6', 'IP-ASN',
+  'SRC-IP-CIDR', 'SRC-PORT', 'DST-PORT', 'PROCESS-NAME', 'PROCESS-PATH',
+  'NETWORK', 'UID', 'IN-NAME', 'IN-TYPE',
+])
+
+function routingNameTaken(name, exceptId = '') {
+  const n = String(name || '').trim()
+  return routingGroups.value.some((g) => g && g.name === n && g.id !== exceptId)
+}
+
+function validateClassicalRulesPaste(rulesRaw) {
+  const lines = String(rulesRaw || '').split(/\n/)
+  const kept = []
+  for (const rawLine of lines) {
+    let line = rawLine.trim()
+    if (!line || line.startsWith('#')) continue
+    if (line.startsWith('- ')) line = line.slice(2).trim()
+    else if (line.startsWith('-')) line = line.slice(1).trim()
+    if (!line) continue
+    const upper = line.toUpperCase()
+    if (upper.startsWith('RULE-SET,')) {
+      return { ok: false, msg: t('新建分流组请粘贴 DOMAIN / IP 等经典规则；外部分流规则集请用「引入外部分流」') }
+    }
+    if (upper.startsWith('MATCH,')) {
+      return { ok: false, msg: t('MATCH 由系统自动生成，请勿粘贴') }
+    }
+    const parts = line.split(',').map((p) => p.trim()).filter((p, i, arr) => p || i < arr.length - 1)
+    if (parts.length < 2) {
+      return { ok: false, msg: t('规则格式无效：{line}（示例：- DOMAIN-SUFFIX,example.com）', { line: rawLine.trim() }) }
+    }
+    const rtype = parts[0].toUpperCase()
+    if (!CLASSICAL_RULE_TYPES.has(rtype)) {
+      return {
+        ok: false,
+        msg: t('不支持的规则类型「{type}」。请使用 DOMAIN-SUFFIX / DOMAIN-KEYWORD / IP-CIDR 等经典规则', { type: parts[0] }),
+      }
+    }
+    kept.push(line)
+  }
+  if (!kept.length) {
+    return { ok: false, msg: t('请至少粘贴一条分流规则（如 - DOMAIN-SUFFIX,example.com）') }
+  }
+  return { ok: true, lines: kept }
+}
+
+function validateHttpUrl(url) {
+  const u = String(url || '').trim()
+  if (!u) return { ok: false, msg: t('请填写外部规则集 URL') }
+  if (!/^https?:\/\//i.test(u)) return { ok: false, msg: t('外部规则集 URL 必须以 http(s):// 开头') }
+  try {
+    const parsed = new URL(u)
+    if (!parsed.hostname) return { ok: false, msg: t('外部规则集 URL 无效') }
+  } catch {
+    return { ok: false, msg: t('外部规则集 URL 无效') }
+  }
+  return { ok: true }
+}
+
+async function createRoutingGroup() {
+  const name = createRoutingForm.name.trim()
+  if (!name) {
+    showToast(t('请填写分流组名称'), false)
+    return
+  }
+  if (routingNameTaken(name)) {
+    showToast(t('分流组名称已存在：{name}', { name }), false)
+    return
+  }
+  const check = validateClassicalRulesPaste(createRoutingForm.rules_raw)
+  if (!check.ok) {
+    showToast(check.msg, false)
+    return
+  }
+  const res = await postAction(
+    '/routing/add',
+    { name, rules_raw: createRoutingForm.rules_raw },
+    'routing-add',
+  )
+  if (res && res.ok) {
+    createRoutingForm.name = ''
+    createRoutingForm.rules_raw = ''
+  }
+}
+
+async function importRoutingGroup() {
+  const name = importRoutingForm.name.trim()
+  const url = importRoutingForm.url.trim()
+  if (!name) {
+    showToast(t('请填写分流组名称'), false)
+    return
+  }
+  if (routingNameTaken(name)) {
+    showToast(t('分流组名称已存在：{name}', { name }), false)
+    return
+  }
+  const urlCheck = validateHttpUrl(url)
+  if (!urlCheck.ok) {
+    showToast(urlCheck.msg, false)
+    return
+  }
+  const res = await postAction('/routing/import', { name, url }, 'routing-import')
+  if (res && res.ok) {
+    importRoutingForm.name = ''
+    importRoutingForm.url = ''
+  }
+}
+
+function confirmDeleteRouting(g) {
+  if (!g || !g.deletable) {
+    showToast(t('该分流组不可删除'), false)
+    return
+  }
+  openConfirmDialog({ tone: 'rose', confirmText: t('删除'),
+    title: t('分流组'),
+    message: t('确定删除分流组「{name}」？', { name: g.name }),
+    onConfirm: () => postAction('/routing/delete', { id: g.id }, `routing-del-${g.id}`),
+  })
+}
+
+async function renameRouting(g) {
+  if (!g) return
+  renameDialog.id = g.id
+  renameDialog.oldName = g.name
+  renameDialog.name = g.name
+  renameDialog.show = true
+  nextTick(() => { const el = document.getElementById('rename-input'); if (el) { el.focus(); el.select() } })
+}
+
+const renameDialog = reactive({ show: false, id: '', oldName: '', name: '' })
+function closeRenameDialog() { renameDialog.show = false }
+async function acceptRenameDialog() {
+  const trimmed = String(renameDialog.name || '').trim()
+  if (!trimmed) {
+    showToast(t('请填写分流组名称'), false)
+    return
+  }
+  if (routingNameTaken(trimmed, renameDialog.id)) {
+    showToast(t('分流组名称已存在：{name}', { name: trimmed }), false)
+    return
+  }
+  const id = renameDialog.id
+  renameDialog.show = false
+  if (trimmed === renameDialog.oldName) return
+  await postAction('/routing/rename', { id, name: trimmed }, `routing-rename-${id}`)
+}
+
+const routingPanelOpen = ref('')
+const routingRuleDraft = reactive({})
+const routingProvForm = reactive({ provider: '', url: '' })
+
+function isLocalRoutingGroup(g) {
+  return g && (g.kind === 'local' || (!g.kind && !(g.rule_providers || []).length))
+}
+
+function toggleRoutingPanel(g) {
+  if (!g) return
+  if (routingPanelOpen.value === g.id) {
+    routingPanelOpen.value = ''
+    return
+  }
+  routingPanelOpen.value = g.id
+  if (isLocalRoutingGroup(g)) {
+    const lines = Array.isArray(g.classical_rules) ? g.classical_rules : []
+    routingRuleDraft[g.id] = lines.map((r) => `- ${r}`).join('\n')
+  } else {
+    routingProvForm.provider = ''
+    routingProvForm.url = ''
+  }
+}
+
+async function saveLocalRoutingRules(g) {
+  if (!g) return
+  const raw = routingRuleDraft[g.id] || ''
+  const check = validateClassicalRulesPaste(raw)
+  if (!check.ok) {
+    showToast(check.msg, false)
+    return
+  }
+  await postAction('/routing/rules', { id: g.id, rules_raw: raw }, `routing-rules-${g.id}`)
+}
+
+async function addRoutingProvider(g) {
+  const provider = routingProvForm.provider.trim()
+  const url = routingProvForm.url.trim()
+  if (!provider) {
+    showToast(t('请填写规则集名称（英文）'), false)
+    return
+  }
+  if (!/^[A-Za-z0-9_.-]{1,64}$/.test(provider)) {
+    showToast(t('规则集名称只能用英文字母、数字、- _ .'), false)
+    return
+  }
+  const urlCheck = validateHttpUrl(url)
+  if (!urlCheck.ok) {
+    showToast(urlCheck.msg, false)
+    return
+  }
+  const res = await postAction('/routing/provider/add', { id: g.id, provider, url }, 'routing-prov-add')
+  if (res && res.ok) { routingProvForm.provider = ''; routingProvForm.url = '' }
+}
+
+function deleteRoutingProvider(g, p) {
+  if (!g || !p) {
+    showToast(t('规则集不存在'), false)
+    return
+  }
+  openConfirmDialog({ tone: 'rose', confirmText: t('删除'),
+    title: t('规则集'),
+    message: t('确定删除规则集「{name}」？', { name: p.name }),
+    onConfirm: () => postAction('/routing/provider/delete', { id: g.id, provider: p.name }, `routing-prov-del-${p.name}`),
+  })
+}
+
+const routingDragIdx = ref(-1)
+const routingDragOver = ref(-1)
+
+function onRoutingDragStart(idx, ev) {
+  routingDragIdx.value = idx
+  try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(idx)) } catch (_) {}
+}
+
+async function onRoutingDrop(idx) {
+  const from = routingDragIdx.value
+  routingDragIdx.value = -1
+  routingDragOver.value = -1
+  if (from < 0 || from === idx) return
+  const groups = routingGroups.value.slice()
+  const [moved] = groups.splice(from, 1)
+  groups.splice(idx, 0, moved)
+  if (state.routing && Array.isArray(state.routing.groups)) state.routing.groups = groups
+  await postAction('/routing/reorder', { order: JSON.stringify(groups.map((g) => g.id)) }, 'routing-reorder')
 }
 
 function selectTab(tab) {
@@ -1268,6 +1532,20 @@ async function toggleAutoUpdate() {
     { auto_update: next ? '1' : '0' },
     '/action/settings'
   )
+}
+
+async function setUpdateChannel(channel) {
+  const next = channel === 'test' ? 'test' : 'stable'
+  if (state.update_channel === next) return
+  const res = await postAction(
+    '/action/settings',
+    { update_channel: next },
+    '/action/settings'
+  )
+  if (res && res.ok) {
+    state.update_channel = next
+    state.update_channel_label = next === 'test' ? t('测试') : t('正式')
+  }
 }
 
 function masqueNodeName(name) {
@@ -1438,6 +1716,30 @@ onUnmounted(() => {
         <span class="break-all leading-snug">{{ toast.msg }}</span>
       </div>
     </transition>
+
+    <!-- In-Panel Rename Modal -->
+    <Transition name="cg-modal">
+      <div
+        v-if="renameDialog.show"
+        id="rename-modal"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/25 backdrop-blur-[2px]"
+        @click.self="closeRenameDialog"
+      >
+        <div class="cg-modal-panel w-full max-w-md bg-white rounded-2xl border border-slate-200/90 p-6 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18)] space-y-4">
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="text-base font-bold text-slate-900 tracking-tight">{{ t('重命名') }}</h3>
+            <button type="button" @click="closeRenameDialog" class="text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-sm w-7 h-7 flex items-center justify-center rounded-lg transition cursor-pointer">✕</button>
+          </div>
+          <label class="block text-xs font-medium text-slate-500">{{ t('新名称') }}
+            <input id="rename-input" v-model="renameDialog.name" @keydown.enter.prevent="acceptRenameDialog" @keydown.esc="closeRenameDialog" class="cg-input mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 text-sm" />
+          </label>
+          <div class="flex items-center justify-end gap-2.5 pt-2">
+            <button type="button" @click="closeRenameDialog" class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition cursor-pointer">{{ t('取消') }}</button>
+            <button type="button" @click="acceptRenameDialog" :disabled="!String(renameDialog.name || '').trim()" class="cg-btn-primary px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer">{{ t('确认') }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
 
     <!-- In-Panel Confirmation Modal -->
     <Transition name="cg-modal">
@@ -1639,7 +1941,10 @@ onUnmounted(() => {
             <CgIcon name="house" />{{ t('首页') }}
           </button>
           <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'outbounds' }" @click="selectTab('outbounds')">
-            <CgIcon name="outbound" />{{ t('出站节点') }}
+            <CgIcon name="outbound" />{{ t('服务端出站') }}
+          </button>
+          <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
+            <CgIcon name="routing" />{{ t('服务端分流') }}
           </button>
           <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
             <CgIcon name="convert" />{{ t('节点转换') }}
@@ -1705,6 +2010,11 @@ onUnmounted(() => {
               {{ state.pending_reload_count }}
             </span>
           </button>
+          <span
+            v-if="state.update_channel === 'test'"
+            class="px-2 py-1 rounded-lg text-[10px] font-bold tracking-wide uppercase bg-amber-100 text-amber-800 border border-amber-200"
+            :title="t('当前为测试更新通道')"
+          >{{ t('测试通道') }}</span>
           <button
             type="button"
             :disabled="busyKey === '/action/check-update' || busyKey === '/action/upgrade-self'"
@@ -1768,7 +2078,7 @@ onUnmounted(() => {
             ></span>
             <span class="cg-rail-label">{{ t('运行状态') }}</span>
             <span class="cg-rail-strong">{{ t(state.status.state_txt || '未知') }}</span>
-            <span class="cg-stat-mode">{{ state.custom_config_mode ? t('自定义服务端') : t('标准模板') }}</span>
+            <span class="cg-stat-mode">{{ state.custom_config_mode ? t('自定义服务端') : t('默认服务端模板') }}</span>
           </article>
 
           <article
@@ -1870,7 +2180,10 @@ onUnmounted(() => {
           <CgIcon name="house" :size="15" />{{ t('首页') }}
         </button>
         <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'outbounds' }" @click="selectTab('outbounds')">
-          <CgIcon name="outbound" :size="15" />{{ t('出站节点') }}
+          <CgIcon name="outbound" :size="15" />{{ t('服务端出站') }}
+        </button>
+        <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
+          <CgIcon name="routing" :size="15" />{{ t('服务端分流') }}
         </button>
         <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
           <CgIcon name="convert" :size="15" />{{ t('节点转换') }}
@@ -2331,7 +2644,7 @@ onUnmounted(() => {
           <!-- 服务端手工出站节点 (proxies) -->
           <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
             <div class="flex items-center gap-2.5">
-              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('服务端出站节点 (proxies)') }}</h2>
+              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('服务端出站 (proxies)') }}</h2>
               <span
                 class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 tabular-nums"
               >
@@ -2343,7 +2656,7 @@ onUnmounted(() => {
               v-if="state.proxies.length === 0"
               class="py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-400"
             >
-              {{ t('暂无手工出站节点，在下方粘贴单行 JSON 或多行 YAML 即可添加') }}
+              {{ t('暂无手工服务端出站，在下方粘贴单行 JSON 或多行 YAML 即可添加') }}
             </div>
 
             <div
@@ -2400,7 +2713,7 @@ onUnmounted(() => {
                   :disabled="busyKey === 'add-proxies'"
                   class="cg-btn-primary px-4 py-2 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer"
                 >
-                  {{ busyKey === 'add-proxies' ? t('添加中…') : t('添加出站节点') }}
+                  {{ busyKey === 'add-proxies' ? t('添加中…') : t('添加服务端出站') }}
                 </button>
                 <label
                   class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-medium transition cursor-pointer"
@@ -2455,7 +2768,7 @@ onUnmounted(() => {
                 @click="addMasqueOutbound"
                 class="cg-btn-primary px-3.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 cursor-pointer shrink-0"
               >
-                {{ busyKey === 'add-masque' ? t('添加中…') : t('加入出站节点') }}
+                {{ busyKey === 'add-masque' ? t('添加中…') : t('加入服务端出站') }}
               </button>
               <button
                 v-else
@@ -2476,7 +2789,7 @@ onUnmounted(() => {
             <div v-if="state.masque.status === 'error'" class="mt-3">
               <p class="text-xs text-rose-700 leading-relaxed break-all">{{ state.masque.error || t('注册失败') }}</p>
             </div>
-            <p v-else-if="state.masque.status === 'pending'" class="text-xs text-slate-500 mt-3">{{ t('正在向 Cloudflare 注册，完成后这里会出现「加入出站节点」。') }}</p>
+            <p v-else-if="state.masque.status === 'pending'" class="text-xs text-slate-500 mt-3">{{ t('正在向 Cloudflare 注册，完成后这里会出现「加入服务端出站」。') }}</p>
           </section>
           <!-- 导入外部订阅 (proxy-providers) -->
           <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
@@ -2567,6 +2880,175 @@ onUnmounted(() => {
         </div>
 
       <!-- TAB 3: 易读配置转换 (Dedicated Converter Page) -->
+
+      <!-- TAB: 服务端分流 -->
+        <div v-else-if="activeTab === 'routing'" key="routing" class="space-y-4">
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3">
+            <div class="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('服务端分流') }}</h2>
+                <p class="text-xs text-slate-500 mt-1">{{ t('分流写在独立文件，通过主配置引入。改完点顶部「重载配置」生效。') }}</p>
+              </div>
+              <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-sky-50 text-sky-700 border border-sky-200/60 tabular-nums">
+                {{ routingGroups.length }}
+              </span>
+            </div>
+            <p v-if="state.routing && state.routing.error" class="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+              {{ state.routing.error || t('自定义模式下分流解析失败') }}
+            </p>
+          </section>
+
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3">
+            <h3 class="text-sm font-bold text-slate-900">{{ t('分流组') }}</h3>
+            <p class="text-xs text-slate-500">{{ t('拖动调整顺序（与主配置一致），点顶部「重载配置」后生效。') }}</p>
+            <div v-if="routingGroups.length === 0" class="text-sm text-slate-500 py-6 text-center">{{ t('暂无分流组') }}</div>
+            <div v-else class="space-y-2">
+              <div
+                v-for="(g, idx) in routingGroups"
+                :key="g.id"
+                draggable="true"
+                class="rounded-xl border bg-white px-3.5 py-3 cursor-move select-none transition"
+                :class="[routingDragOver === idx ? 'border-sky-400 ring-2 ring-sky-100' : 'border-slate-200', routingDragIdx === idx ? 'opacity-50' : '']"
+                @dragstart="onRoutingDragStart(idx, $event)"
+                @dragover.prevent="routingDragOver = idx"
+                @dragleave="routingDragOver === idx && (routingDragOver = -1)"
+                @drop.prevent="onRoutingDrop(idx)"
+                @dragend="routingDragIdx = -1; routingDragOver = -1"
+              >
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-slate-400 text-lg leading-none" aria-hidden="true">⋮⋮</span>
+                  <span class="text-xs text-slate-400 tabular-nums w-5">{{ idx + 1 }}</span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <div class="font-semibold text-slate-900 truncate">{{ g.name }}</div>
+                      <span
+                        class="shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-semibold border"
+                        :class="isLocalRoutingGroup(g) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-violet-50 text-violet-700 border-violet-200'"
+                      >{{ isLocalRoutingGroup(g) ? t('本地规则') : t('外部分流') }}</span>
+                    </div>
+                    <div class="text-[11px] text-slate-500 mt-0.5">
+                      <template v-if="isLocalRoutingGroup(g)">{{ t('{n} 条规则', { n: (g.classical_rules || []).length }) }}</template>
+                      <template v-else>{{ t('{n} 个规则集', { n: (g.rule_providers || []).length }) }}</template>
+                    </div>
+                    <div v-if="g.error" class="text-xs text-rose-600 mt-1">{{ g.error }}</div>
+                  </div>
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      v-if="!state.custom_config_mode"
+                      type="button"
+                      class="px-2 py-1 rounded-lg text-xs bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200"
+                      @click.stop="toggleRoutingPanel(g)"
+                    >{{ isLocalRoutingGroup(g) ? t('编辑规则') : t('规则集') }}</button>
+                    <button type="button" class="px-2 py-1 rounded-lg text-xs bg-slate-100 hover:bg-slate-200 text-slate-700" @click.stop="renameRouting(g)">{{ t('重命名') }}</button>
+                    <button
+                      v-if="g.deletable"
+                      type="button"
+                      class="px-2 py-1 rounded-lg text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200"
+                      @click.stop="confirmDeleteRouting(g)"
+                    >{{ t('删除') }}</button>
+                  </div>
+                </div>
+
+                <div
+                  v-if="routingPanelOpen === g.id && isLocalRoutingGroup(g)"
+                  class="mt-3 space-y-2 border-t border-slate-100 pt-3"
+                  draggable="true"
+                  @dragstart.stop.prevent
+                >
+                  <p class="text-xs text-slate-500">{{ t('每行一条经典规则，例如 - DOMAIN-SUFFIX,example.com。保存后写入本地规则文件，由主配置引入。') }}</p>
+                  <textarea
+                    v-model="routingRuleDraft[g.id]"
+                    rows="6"
+                    class="cg-input w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono"
+                    :placeholder="'- DOMAIN-SUFFIX,example.com\n- DOMAIN-KEYWORD,openai'"
+                  ></textarea>
+                  <div class="flex justify-end">
+                    <button
+                      type="button"
+                      class="cg-btn-primary h-9 px-3 rounded-xl text-xs font-semibold"
+                      :disabled="busyKey === `routing-rules-${g.id}`"
+                      @click="saveLocalRoutingRules(g)"
+                    >{{ busyKey === `routing-rules-${g.id}` ? t('保存中…') : t('保存规则') }}</button>
+                  </div>
+                </div>
+
+                <div
+                  v-else-if="routingPanelOpen === g.id"
+                  class="mt-3 space-y-2 border-t border-slate-100 pt-3"
+                  draggable="true"
+                  @dragstart.stop.prevent
+                >
+                  <div v-if="!(g.rule_providers || []).length" class="text-xs text-slate-500">{{ t('暂无规则集') }}</div>
+                  <div v-for="p in (g.rule_providers || [])" :key="p.name" class="flex items-center gap-2 text-xs">
+                    <span class="font-semibold text-slate-800">{{ p.name }}</span>
+                    <span class="text-slate-500 truncate flex-1 min-w-0">{{ p.url }}</span>
+                    <button type="button" class="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200" @click="deleteRoutingProvider(g, p)">{{ t('删除') }}</button>
+                  </div>
+                  <p class="text-xs text-slate-500">{{ t('可再为此组分追加一个规则集（名称 + URL）。新建整组请用下方「引入外部分流」。') }}</p>
+                  <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                    <input v-model="routingProvForm.provider" :placeholder="t('规则集名称（英文）')" class="cg-input h-9 px-3 rounded-xl border border-slate-200 text-xs" />
+                    <input v-model="routingProvForm.url" placeholder="https://" class="cg-input sm:col-span-2 h-9 px-3 rounded-xl border border-slate-200 text-xs font-mono" />
+                    <button type="button" class="cg-btn-primary h-9 px-3 rounded-xl text-xs font-semibold" :disabled="busyKey === 'routing-prov-add'" @click="addRoutingProvider(g)">{{ t('添加规则集') }}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section
+            class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3"
+            v-if="!(state.routing && state.routing.error && state.custom_config_mode)"
+          >
+            <h3 class="text-sm font-bold text-slate-900">{{ t('新建分流组') }}</h3>
+            <p class="text-xs text-slate-500">{{ t('粘贴 DOMAIN-SUFFIX / DOMAIN-KEYWORD / IP-CIDR 等经典规则，保存为本地规则文件并由主配置引入。') }}</p>
+            <label class="block text-xs font-medium text-slate-500">{{ t('分流组名称') }}
+              <input v-model="createRoutingForm.name" class="cg-input mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 text-sm" />
+            </label>
+            <label class="block text-xs font-medium text-slate-500">{{ t('规则（每行一条）') }}
+              <textarea
+                v-model="createRoutingForm.rules_raw"
+                rows="5"
+                class="cg-input mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono"
+                :placeholder="'- DOMAIN-SUFFIX,example.com\n- DOMAIN-KEYWORD,openai\n- IP-CIDR,1.1.1.1/32'"
+              ></textarea>
+            </label>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                class="cg-btn-primary px-3.5 py-1.5 rounded-xl text-xs font-semibold"
+                :disabled="busyKey === 'routing-add'"
+                @click="createRoutingGroup"
+              >
+                {{ busyKey === 'routing-add' ? t('创建中…') : t('新建分流组') }}
+              </button>
+            </div>
+          </section>
+
+          <section
+            class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3"
+            v-if="!(state.routing && state.routing.error && state.custom_config_mode)"
+          >
+            <h3 class="text-sm font-bold text-slate-900">{{ t('引入外部分流') }}</h3>
+            <p class="text-xs text-slate-500">{{ t('只填名称和规则集 URL。会写入 rule-providers、proxy-groups，并在 rules 里加 RULE-SET（不下载远程内容）。') }}</p>
+            <label class="block text-xs font-medium text-slate-500">{{ t('分流组名称') }}
+              <input v-model="importRoutingForm.name" class="cg-input mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 text-sm" />
+            </label>
+            <label class="block text-xs font-medium text-slate-500">{{ t('规则集 URL') }}
+              <input v-model="importRoutingForm.url" class="cg-input mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 text-sm font-mono" placeholder="https://" />
+            </label>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                class="cg-btn-primary px-3.5 py-1.5 rounded-xl text-xs font-semibold"
+                :disabled="busyKey === 'routing-import'"
+                @click="importRoutingGroup"
+              >
+                {{ busyKey === 'routing-import' ? t('引入中…') : t('引入外部分流') }}
+              </button>
+            </div>
+          </section>
+        </div>
+
         <div v-else-if="activeTab === 'readable'" key="readable" class="space-y-6">
           <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-5">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -2684,7 +3166,7 @@ onUnmounted(() => {
                         : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
                     "
                   >
-                    {{ state.custom_config_mode ? t('当前：自定义配置') : t('当前：标准模板') }}
+                    {{ state.custom_config_mode ? t('当前：自定义配置') : t('当前：默认服务端模板') }}
                   </span>
                 </div>
                 <p class="text-xs text-slate-500">
@@ -2699,7 +3181,7 @@ onUnmounted(() => {
                 @click="resetTemplateConfig"
                 class="px-4 py-2 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200/90 disabled:opacity-50 transition cursor-pointer shrink-0"
               >
-                {{ busyKey === 'reset-template' ? t('正在恢复标准模板…') : t('恢复标准模板') }}
+                {{ busyKey === 'reset-template' ? t('正在恢复默认服务端模板…') : t('恢复默认服务端模板') }}
               </button>
             </div>
 
@@ -3034,6 +3516,39 @@ onUnmounted(() => {
                 <span></span>
               </button>
             </div>
+          </section>
+
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4 lg:col-span-2">
+            <div>
+              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('更新通道') }}</h2>
+              <p class="text-xs text-slate-500 mt-1 leading-relaxed max-w-2xl">
+                {{ t('正式通道跟随 ClashGate 主分支；测试通道跟随 test 分支，方便提前体验新功能。默认正式，切换后请点顶部「检查更新」。') }}
+              </p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                class="px-3.5 py-2 rounded-xl text-sm font-semibold border transition cursor-pointer"
+                :class="state.update_channel === 'stable'
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'"
+                :disabled="busyKey === '/action/settings'"
+                @click="setUpdateChannel('stable')"
+              >{{ t('正式') }}</button>
+              <button
+                type="button"
+                class="px-3.5 py-2 rounded-xl text-sm font-semibold border transition cursor-pointer"
+                :class="state.update_channel === 'test'
+                  ? 'bg-amber-500 text-white border-amber-500'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'"
+                :disabled="busyKey === '/action/settings'"
+                @click="setUpdateChannel('test')"
+              >{{ t('测试') }}</button>
+            </div>
+            <p class="text-[11px] text-slate-500 font-mono">
+              ClashGate/ClashGate@{{ state.update_channel === 'test' ? 'test' : 'main' }}
+              <span v-if="state.update_channel === 'test'" class="ml-2 text-amber-700 font-sans font-semibold">{{ t('当前为测试更新通道') }}</span>
+            </p>
           </section>
 
           <section class="cg-surface rounded-2xl">

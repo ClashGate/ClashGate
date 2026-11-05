@@ -1,0 +1,10 @@
+# ClashGate routing group: Final / catch-all (non-deletable)
+proxy-groups:
+  - name: Final
+    type: select
+    include-all: true
+    proxies:
+      - Node Select
+      - DIRECT
+rules:
+  - MATCH,Final

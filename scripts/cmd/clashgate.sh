@@ -287,7 +287,8 @@ update_self() {
   assemble_config
   if validate_conf; then rm -f "$CONF.bak"; else mv -f "$CONF.bak" "$CONF"; warn "新模板生成的配置未通过校验，已保留原配置"; fi
   render_client >/dev/null 2>&1 || true
-  info "ClashGate 已更新到 GitHub main 最新版"
+  record_update_source || true
+  info "ClashGate 已更新到 GitHub ${REPO_BRANCH:-main} 最新版（通道：${UPDATE_CHANNEL:-default}）"
 }
 
 do_cert() { # 立即申请 / 续期 / 校验证书

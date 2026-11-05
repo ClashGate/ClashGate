@@ -4,12 +4,15 @@
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/i18n.sh"   # CLASHGATE_LANG=en|zh；默认中文
 
-CS_VERSION=1.06
+CS_VERSION=1.07
 REPO_OWNER=${REPO_OWNER:-ClashGate}
 REPO_NAME=${REPO_NAME:-ClashGate}
 REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
-REPO_TARBALL=${REPO_TARBALL:-https://github.com/$REPO_SLUG/archive/refs/heads/main.tar.gz}
-INSTALL_RAW_URL=https://raw.githubusercontent.com/$REPO_SLUG/main/install.sh
+# Update channel: stable (正式) → ClashGate/ClashGate@main ; test (测试) → ClashGate/ClashGate@test
+UPDATE_CHANNEL=${UPDATE_CHANNEL:-}
+REPO_BRANCH=${REPO_BRANCH:-test}
+REPO_TARBALL=${REPO_TARBALL:-https://github.com/$REPO_SLUG/archive/refs/heads/$REPO_BRANCH.tar.gz}
+INSTALL_RAW_URL=https://raw.githubusercontent.com/$REPO_SLUG/$REPO_BRANCH/install.sh
 CS_ROOT=/etc/clashgate
 SELF_BIN=/usr/local/bin/clashgate
 BIN=$CS_ROOT/mihomo
@@ -21,6 +24,11 @@ FRAG_REALITY=$CONF_DIR/listeners.reality.yaml
 FRAG_EXTRA=$CONF_DIR/listeners.extra.yaml    # owned by the panel
 FRAG_PROXIES=$CONF_DIR/proxies.extra.yaml    # outbound proxies owned by the panel
 FRAG_PROVIDERS=$CONF_DIR/providers.extra.yaml # outbound proxy-providers owned by the panel
+FRAG_RULE_PROVIDERS=$CONF_DIR/routing.rule-providers.yaml
+FRAG_PROXY_GROUPS=$CONF_DIR/routing.proxy-groups.yaml
+FRAG_RULES=$CONF_DIR/routing.rules.yaml
+ROUTING_JSON=$CS_ROOT/routing.json
+ROUTING_DIR=$CS_ROOT/routing
 CUSTOM_CONF=$CONF_DIR/custom_config.yaml     # user-supplied full server config (custom mode)
 CLIENT_DIR=$CS_ROOT/client
 UNIT=/etc/systemd/system/mihomo.service
@@ -115,21 +123,53 @@ arch() {
   esac
 }
 
+apply_update_channel() { # map UPDATE_CHANNEL → repo + branch (does not override explicit REPO_TARBALL pin)
+  case ${UPDATE_CHANNEL:-} in
+    stable|production|正式)
+      UPDATE_CHANNEL=stable
+      REPO_OWNER=ClashGate
+      REPO_NAME=ClashGate
+      REPO_BRANCH=main
+      ;;
+    test|beat|测试)
+      UPDATE_CHANNEL=test
+      REPO_OWNER=ClashGate
+      REPO_NAME=ClashGate
+      REPO_BRANCH=test
+      ;;
+  esac
+  REPO_SLUG=${REPO_OWNER}/${REPO_NAME}
+  if [[ -z ${REPO_TARBALL_PINNED:-} ]]; then
+    REPO_TARBALL=https://github.com/$REPO_SLUG/archive/refs/heads/$REPO_BRANCH.tar.gz
+  fi
+  INSTALL_RAW_URL=https://raw.githubusercontent.com/$REPO_SLUG/$REPO_BRANCH/install.sh
+}
+
 load_env() { # persisted install settings; CLI flags given this run win
   [[ -r $ENV_FILE ]] || return 0
   local k v
+  # Preserve an explicit REPO_TARBALL pin (InstaBox / commit pin) across channel resolution.
+  if [[ -n ${REPO_TARBALL:-} ]]; then REPO_TARBALL_PINNED=1; fi
   while IFS='=' read -r k v; do
     v=${v%\"}; v=${v#\"}
     case "$k" in
       VPS_NAME)   [[ -n $VPS_NAME ]]  || VPS_NAME=$v ;;
       SERVER_IP)  [[ -n $SERVER_IP ]] || SERVER_IP=$v ;;
-      REPO_OWNER|REPO_NAME|REPO_SLUG) printf -v "$k" '%s' "$v" ;;
+      REPO_OWNER|REPO_NAME|REPO_SLUG|REPO_BRANCH|UPDATE_CHANNEL) printf -v "$k" '%s' "$v" ;;
       MODE|CERT_MODE|CF_TOKEN|DOMAIN|TLS|EMAIL|PANEL_PORT|CONTROLLER_PORT|MIHOMO_SECRET) printf -v "$k" '%s' "$v" ;;
     esac
   done < "$ENV_FILE"
-  REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
-  REPO_TARBALL=https://github.com/$REPO_SLUG/archive/refs/heads/main.tar.gz
-  INSTALL_RAW_URL=https://raw.githubusercontent.com/$REPO_SLUG/main/install.sh
+  # Legacy Beat installs without UPDATE_CHANNEL keep ClashGateBeat until the panel sets a channel.
+  if [[ -z ${UPDATE_CHANNEL:-} && ${REPO_NAME:-} == ClashGateBeat ]]; then
+    REPO_BRANCH=${REPO_BRANCH:-main}
+    REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
+    if [[ -z ${REPO_TARBALL_PINNED:-} ]]; then
+      REPO_TARBALL=${REPO_TARBALL:-https://github.com/$REPO_SLUG/archive/refs/heads/$REPO_BRANCH.tar.gz}
+    fi
+    INSTALL_RAW_URL=${INSTALL_RAW_URL:-https://raw.githubusercontent.com/$REPO_SLUG/$REPO_BRANCH/install.sh}
+    return 0
+  fi
+  apply_update_channel
 }
 
 save_env() {
@@ -147,6 +187,11 @@ PANEL_PORT="$PANEL_PORT"
 CONTROLLER_PORT="$CONTROLLER_PORT"
 MIHOMO_SECRET="$MIHOMO_SECRET"
 CF_TOKEN="$CF_TOKEN"
+UPDATE_CHANNEL="${UPDATE_CHANNEL:-}"
+REPO_OWNER="${REPO_OWNER:-ClashGate}"
+REPO_NAME="${REPO_NAME:-ClashGate}"
+REPO_SLUG="${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
 EOF
   # 开发用（不写入用户文档）：指向本地 pebble 等 ACME 测试服务，定时续期也沿用
   if [[ -n ${CS_ACME_SERVER:-} ]]; then printf 'CS_ACME_SERVER="%s"\n' "$CS_ACME_SERVER" >> "$ENV_FILE"; fi
@@ -205,8 +250,20 @@ mode_label() {
   fi
 }
 
-fetch_repo() { # 下载公开仓库 main 分支到目录 $1（直连 GitHub，不用任何代理）
-  printf '正在从 GitHub (%s) 下载安装文件……\n' "$REPO_SLUG"
+record_update_source() { # persist channel tip SHA after a successful self-update
+  local sha="" branch=${REPO_BRANCH:-main} slug=${REPO_SLUG:-ClashGate/ClashGate} channel=${UPDATE_CHANNEL:-}
+  sha=$(curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json'     "https://api.github.com/repos/$slug/commits/$branch" 2>/dev/null     | sed -n 's/.*"sha": *"\([0-9a-f]\{40\}\)".*/\1/p' | head -n1)
+  [[ -n $sha ]] || return 0
+  umask 077
+  cat > "$CS_ROOT/update_source.json" <<EOF
+{"channel":"$channel","repo":"$slug","branch":"$branch","sha":"$sha","version":"$CS_VERSION","updated_at":$(date +%s)}
+EOF
+  chmod 600 "$CS_ROOT/update_source.json" 2>/dev/null || true
+}
+
+fetch_repo() { # 下载公开仓库当前通道分支到目录 $1（直连 GitHub，不用任何代理）
+  local branch=${REPO_BRANCH:-main}
+  printf '正在从 GitHub (%s @ %s) 下载安装文件……\n' "$REPO_SLUG" "$branch"
   curl -fsSL --retry 3 "$REPO_TARBALL" | tar -xz -C "$1" --strip-components=1 \
     || { rm -rf "$1"; die "下载失败：$REPO_TARBALL（请确认服务器可以访问 GitHub）"; }
   [[ -f $1/install.sh && -f $1/scripts/cmd/clashgate.sh ]] || { rm -rf "$1"; die "下载的文件不完整"; }

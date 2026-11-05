@@ -1,0 +1,7 @@
+# ClashGate routing group: Node Select (non-deletable)
+proxy-groups:
+  - name: Node Select
+    type: select
+    include-all: true
+    proxies:
+      - DIRECT

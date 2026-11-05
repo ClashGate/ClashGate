@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "id": "node-select",
+      "name": "Node Select",
+      "file": "node-select.yaml",
+      "deletable": false,
+      "role": "select",
+      "kind": "select"
+    },
+    {
+      "id": "final",
+      "name": "Final",
+      "file": "final.yaml",
+      "deletable": false,
+      "role": "final",
+      "kind": "final"
+    }
+  ]
+}
