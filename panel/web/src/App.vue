@@ -757,6 +757,7 @@ async function checkUpdateAndPrompt() {
   if (res.msg) showToast(res.msg, true)
 }
 
+const upgradeInProgress = ref(false)
 let statePollTimer = null
 
 async function refreshServerStateSilent() {
@@ -1228,32 +1229,74 @@ function resetTemplateConfig() {
   })
 }
 
+async function resumeUpgradeIfRunning() {
+  // Page opened/refreshed mid-upgrade: keep tracking it and auto-refresh when done.
+  try {
+    const res = await fetch('/api/upgrade-status', {
+      headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+    if (!res.ok) return
+    const d = await res.json()
+    const age = Date.now() / 1000 - Number(d.started_at || 0)
+    if (d && d.state === 'running' && age < 600) reloadPanelAfterUpgrade(d.from || state.version)
+  } catch {}
+}
+
 async function reloadPanelAfterUpgrade(previousVersion) {
-  const deadline = Date.now() + 45000
+  // Upgrade runs detached on the server; the panel restarts during it.
+  // Poll status (tolerating connection drops) until done, then report + reload.
+  const deadline = Date.now() + 360000
   let sawDown = false
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 800))
-    try {
-      const stRes = await fetch('/api/state', {
-        headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
-        credentials: 'same-origin',
-        cache: 'no-store',
-      })
-      if (!stRes.ok) {
+  let stage = ''
+  upgradeInProgress.value = true
+  try {
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 2000))
+      let d = null
+      try {
+        const res = await fetch('/api/upgrade-status', {
+          headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
+          credentials: 'same-origin',
+          cache: 'no-store',
+        })
+        if (res.status === 401) { window.location.reload(); return }
+        if (!res.ok) { sawDown = true; continue }
+        d = await res.json()
+      } catch {
         sawDown = true
+        if (stage !== 'restart') { stage = 'restart'; showToast(t('面板正在重启，请稍候……'), true) }
         continue
       }
-      const stData = await stRes.json()
-      const ver = stData && stData.version
-      if (sawDown || (ver && previousVersion && ver !== previousVersion)) {
+      // Panel came back on a different version: the upgrade landed even if the
+      // status file is missing/unreadable (older builds wrote invalid JSON).
+      if (d && d.version && previousVersion && d.version !== previousVersion && d.state !== 'running') {
+        d = { state: 'done', rc: 0, version: d.version }
+      }
+      if (d && d.state === 'running' && d.version && previousVersion && d.version !== previousVersion && sawDown) {
+        d = { state: 'done', rc: 0, version: d.version }
+      }
+      if (!d || d.state !== 'done') continue
+      if (Number(d.rc) === 0) {
+        showToast(t('升级成功！当前版本 {v}，即将刷新页面', { v: d.version || '' }), true)
+        await new Promise((r) => setTimeout(r, 800))
         window.location.reload()
         return
       }
-    } catch {
-      sawDown = true
+      showToast(t('升级失败：{msg}', { msg: d.tail || `exit ${d.rc}` }), false)
+      if (d.version && previousVersion && d.version !== previousVersion) {
+        await new Promise((r) => setTimeout(r, 2500))
+        window.location.reload()
+      }
+      return
     }
+    showToast(t('升级超时，正在刷新页面……'), false)
+    await new Promise((r) => setTimeout(r, 1500))
+    window.location.reload()
+  } finally {
+    upgradeInProgress.value = false
   }
-  window.location.reload()
 }
 
 
@@ -1506,6 +1549,10 @@ function selectTab(tab) {
     showToast(t('高级功能请到设置页开启'), false)
     return
   }
+  if (tab === 'routing' && state.custom_server_enabled) {
+    showToast(t('已启用自定义服务端配置，请自行修改相关配置'), false)
+    return
+  }
   activeTab.value = tab
   const targetPath = TAB_PATHS[tab] || '/'
   try {
@@ -1523,6 +1570,7 @@ async function toggleCustomServer() {
     '/action/settings'
   )
   if (res && res.ok && !next && activeTab.value === 'advanced') selectTab('inbounds')
+  if (res && res.ok && next && activeTab.value === 'routing') selectTab('inbounds')
 }
 
 async function toggleAutoUpdate() {
@@ -1539,7 +1587,17 @@ function setUpdateChannel(channel) {
   if (next === 'test' && state.update_channel !== 'test') {
     openConfirmDialog({
       title: t('切换到测试通道'),
-      message: t('测试版可能不稳定，可能出现功能异常或兼容性问题。确定切换到测试通道？'),
+      message: t('测试版可能不稳定，可能出现功能异常或兼容性问题。切换后将立即更新到测试通道最新版本，确定切换？'),
+      confirmText: t('确认切换'),
+      tone: 'amber',
+      onConfirm: () => applyUpdateChannel(next),
+    })
+    return
+  }
+  if (next === 'stable' && state.update_channel !== 'stable') {
+    openConfirmDialog({
+      title: t('切换到正式通道'),
+      message: t('切换到正式通道并立即更新到正式版最新版本，确定切换？'),
       confirmText: t('确认切换'),
       tone: 'amber',
       onConfirm: () => applyUpdateChannel(next),
@@ -1550,6 +1608,7 @@ function setUpdateChannel(channel) {
 }
 
 async function applyUpdateChannel(next) {
+  const prev = state.update_channel
   // Always POST so legacy Beat installs migrate env to ClashGate/ClashGate@branch even if UI already shows 测试.
   const res = await postAction(
     '/action/settings',
@@ -1559,6 +1618,11 @@ async function applyUpdateChannel(next) {
   if (res && res.ok) {
     state.update_channel = next
     state.update_channel_label = next === 'test' ? t('测试') : t('正式')
+    // Every real channel switch pulls that channel's latest build right away.
+    if (prev !== next) {
+      showToast(t('已切换通道，正在更新到该通道最新版本……'), true)
+      await postAction('/action/upgrade-self', {}, '/action/upgrade-self')
+    }
   }
 }
 
@@ -1601,6 +1665,10 @@ onMounted(() => {
     activeTab.value = 'inbounds'
     showToast(t('高级功能请到设置页开启'), false)
   }
+  if (activeTab.value === 'routing' && state.custom_server_enabled) {
+    activeTab.value = 'inbounds'
+    showToast(t('已启用自定义服务端配置，请自行修改相关配置'), false)
+  }
   window.addEventListener('popstate', () => {
     const next = detectInitialTab()
     if (next === 'advanced' && !state.custom_server_enabled) {
@@ -1608,8 +1676,14 @@ onMounted(() => {
       showToast(t('高级功能请到设置页开启'), false)
       return
     }
+    if (next === 'routing' && state.custom_server_enabled) {
+      activeTab.value = 'inbounds'
+      showToast(t('已启用自定义服务端配置，请自行修改相关配置'), false)
+      return
+    }
     activeTab.value = next
   })
+  resumeUpgradeIfRunning()
   window.addEventListener('blur', maskAllSensitive)
   document.addEventListener('visibilitychange', handleVisibilityChange)
   document.addEventListener('pointerdown', handleDocumentPointerDown)
@@ -1957,8 +2031,8 @@ onUnmounted(() => {
           <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'outbounds' }" @click="selectTab('outbounds')">
             <CgIcon name="outbound" />{{ t('服务端出站') }}
           </button>
-          <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
-            <CgIcon name="routing" />{{ t('服务端分流') }}
+          <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
+            <CgIcon :name="state.custom_server_enabled ? 'lock' : 'routing'" />{{ t('服务端分流') }}
           </button>
           <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
             <CgIcon name="convert" />{{ t('节点转换') }}
@@ -2026,14 +2100,14 @@ onUnmounted(() => {
           </button>
           <button
             type="button"
-            :disabled="busyKey === '/action/check-update' || busyKey === '/action/upgrade-self'"
+            :disabled="busyKey === '/action/check-update' || busyKey === '/action/upgrade-self' || upgradeInProgress"
             @click="checkUpdateAndPrompt"
             class="cg-tool px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 disabled:opacity-50 text-slate-700 transition cursor-pointer inline-flex items-center gap-1.5"
             :class="{ 'is-update': panelUpdate.has_update }"
             :title="panelUpdate.has_update ? updateHint(panelUpdate.latest) : undefined"
           >
             <span>{{
-              busyKey === '/action/upgrade-self'
+              busyKey === '/action/upgrade-self' || upgradeInProgress
                 ? t('升级中…')
                 : busyKey === '/action/check-update'
                   ? t('检查中…')
@@ -2126,7 +2200,7 @@ onUnmounted(() => {
             class="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-sm text-slate-800 flex flex-wrap items-center gap-x-6 gap-y-1"
           >
             <span class="font-semibold">{{ t('Mihomo 内核') }} {{ versionLabel(state.mihomo_version) || '—' }}</span>
-            <span class="font-semibold">{{ t('面板') }} {{ versionLabel(state.version) || '—' }}</span>
+            <span class="font-semibold">{{ t('面板') }} {{ versionLabel(state.version) || '—' }}<span v-if="state.update_channel === 'test'" class="text-amber-700">{{ t('（测试）') }}</span></span>
           </div>
         </Transition>
 
@@ -2191,8 +2265,8 @@ onUnmounted(() => {
         <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'outbounds' }" @click="selectTab('outbounds')">
           <CgIcon name="outbound" :size="15" />{{ t('服务端出站') }}
         </button>
-        <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
-          <CgIcon name="routing" :size="15" />{{ t('服务端分流') }}
+        <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
+          <CgIcon :name="state.custom_server_enabled ? 'lock' : 'routing'" :size="15" />{{ t('服务端分流') }}
         </button>
         <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
           <CgIcon name="convert" :size="15" />{{ t('节点转换') }}
@@ -2892,17 +2966,13 @@ onUnmounted(() => {
 
       <!-- TAB: 服务端分流 -->
         <div v-else-if="activeTab === 'routing'" key="routing" class="space-y-4">
-          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3">
-            <div class="flex items-start justify-between gap-3 flex-wrap">
-              <div>
-                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('服务端分流') }}</h2>
-                <p class="text-xs text-slate-500 mt-1">{{ t('分流写在独立文件，通过主配置引入。改完点顶部「重载配置」生效。') }}</p>
-              </div>
-            </div>
+          <div v-if="state.custom_server_enabled" class="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm font-semibold text-amber-800">
+            {{ t('已启用自定义服务端配置，请自行修改相关配置') }}
+          </div>
+          <div class="space-y-4" :class="state.custom_server_enabled ? 'opacity-50 pointer-events-none select-none' : ''" :inert="state.custom_server_enabled || undefined" :aria-disabled="state.custom_server_enabled ? 'true' : undefined">
             <p v-if="state.routing && state.routing.error" class="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
               {{ state.routing.error || t('自定义模式下分流解析失败') }}
             </p>
-          </section>
 
           <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
             <div class="flex items-start justify-between gap-3 flex-wrap">
@@ -3071,6 +3141,7 @@ onUnmounted(() => {
                 </button>
               </div>
             </section>
+          </div>
           </div>
         </div>
 
