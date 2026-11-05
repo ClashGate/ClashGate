@@ -1,10 +1,10 @@
 # ClashGate routing group: Final / catch-all (non-deletable)
 proxy-groups:
-  - name: Final
+  - name: "🐟 漏网之鱼"
     type: select
     include-all: true
     proxies:
-      - Node Select
+      - "🚀 节点选择"
       - DIRECT
 rules:
-  - MATCH,Final
+  - MATCH,🐟 漏网之鱼

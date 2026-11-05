@@ -3,7 +3,7 @@
   "groups": [
     {
       "id": "node-select",
-      "name": "Node Select",
+      "name": "🚀 节点选择",
       "file": "node-select.yaml",
       "deletable": false,
       "role": "select",
@@ -11,7 +11,7 @@
     },
     {
       "id": "final",
-      "name": "Final",
+      "name": "🐟 漏网之鱼",
       "file": "final.yaml",
       "deletable": false,
       "role": "final",
