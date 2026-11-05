@@ -1536,7 +1536,7 @@ async function toggleAutoUpdate() {
 
 async function setUpdateChannel(channel) {
   const next = channel === 'test' ? 'test' : 'stable'
-  if (state.update_channel === next) return
+  // Always POST so legacy Beat installs migrate env to ClashGate/ClashGate@branch even if UI already shows 测试.
   const res = await postAction(
     '/action/settings',
     { update_channel: next },
