@@ -385,6 +385,7 @@ export const EN = {
   "测试版可能不稳定，请谨慎使用。": "Test builds may be unstable. Use with care.",
   "当前为正式通道": "Current: Stable channel",
   "当前为测试通道": "Current: Test channel",
+  "已启用自定义服务端配置，请自行修改相关配置": "Custom server config is enabled. Please edit the related settings yourself.",
   "切换到测试通道": "Switch to test channel",
   "测试版可能不稳定，可能出现功能异常或兼容性问题。确定切换到测试通道？": "Test builds may be unstable and could have broken features or compatibility issues. Switch to the test channel?",
   "确认切换": "Switch",

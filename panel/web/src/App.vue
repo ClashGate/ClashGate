@@ -1957,7 +1957,7 @@ onUnmounted(() => {
           <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'outbounds' }" @click="selectTab('outbounds')">
             <CgIcon name="outbound" />{{ t('服务端出站') }}
           </button>
-          <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
+          <button type="button" class="cg-nav" :class="[{ 'is-active': activeTab === 'routing' }, state.custom_server_enabled ? 'opacity-50' : '']" @click="selectTab('routing')">
             <CgIcon name="routing" />{{ t('服务端分流') }}
           </button>
           <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
@@ -2191,7 +2191,7 @@ onUnmounted(() => {
         <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'outbounds' }" @click="selectTab('outbounds')">
           <CgIcon name="outbound" :size="15" />{{ t('服务端出站') }}
         </button>
-        <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
+        <button type="button" class="cg-nav" :class="[{ 'is-active': activeTab === 'routing' }, state.custom_server_enabled ? 'opacity-50' : '']" @click="selectTab('routing')">
           <CgIcon name="routing" :size="15" />{{ t('服务端分流') }}
         </button>
         <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
@@ -2892,6 +2892,10 @@ onUnmounted(() => {
 
       <!-- TAB: 服务端分流 -->
         <div v-else-if="activeTab === 'routing'" key="routing" class="space-y-4">
+          <div v-if="state.custom_server_enabled" class="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm font-semibold text-amber-800">
+            {{ t('已启用自定义服务端配置，请自行修改相关配置') }}
+          </div>
+          <div class="space-y-4" :class="state.custom_server_enabled ? 'opacity-50 pointer-events-none select-none' : ''" :inert="state.custom_server_enabled || undefined" :aria-disabled="state.custom_server_enabled ? 'true' : undefined">
           <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3">
             <div class="flex items-start justify-between gap-3 flex-wrap">
               <div>
@@ -3071,6 +3075,7 @@ onUnmounted(() => {
                 </button>
               </div>
             </section>
+          </div>
           </div>
         </div>
 
