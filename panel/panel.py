@@ -4651,9 +4651,9 @@ class Panel(BaseHTTPRequestHandler):
         if "update_channel" in updates and len(updates) == 1:
             branch = UPDATE_CHANNEL_MAP[updates["update_channel"]]["branch"]
             if updates["update_channel"] == "test":
-                msg = "已切换到测试通道（ClashGate/ClashGate@test）。请点「检查更新」拉取该通道版本。"
+                msg = "已切换到测试通道，请点「检查更新」。"
             else:
-                msg = "已切换到正式通道（ClashGate/ClashGate@main）。请点「检查更新」拉取该通道版本。"
+                msg = "已切换到正式通道，请点「检查更新」。"
             return self.respond_mutation(s, msg, True)
         if "auto_update" in updates and len(updates) == 1:
             if updates["auto_update"]:

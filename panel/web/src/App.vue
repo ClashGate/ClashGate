@@ -1534,8 +1534,22 @@ async function toggleAutoUpdate() {
   )
 }
 
-async function setUpdateChannel(channel) {
+function setUpdateChannel(channel) {
   const next = channel === 'test' ? 'test' : 'stable'
+  if (next === 'test' && state.update_channel !== 'test') {
+    openConfirmDialog({
+      title: t('切换到测试通道'),
+      message: t('测试版可能不稳定，可能出现功能异常或兼容性问题。确定切换到测试通道？'),
+      confirmText: t('确认切换'),
+      tone: 'amber',
+      onConfirm: () => applyUpdateChannel(next),
+    })
+    return
+  }
+  return applyUpdateChannel(next)
+}
+
+async function applyUpdateChannel(next) {
   // Always POST so legacy Beat installs migrate env to ClashGate/ClashGate@branch even if UI already shows 测试.
   const res = await postAction(
     '/action/settings',
@@ -2010,11 +2024,6 @@ onUnmounted(() => {
               {{ state.pending_reload_count }}
             </span>
           </button>
-          <span
-            v-if="state.update_channel === 'test'"
-            class="px-2 py-1 rounded-lg text-[10px] font-bold tracking-wide uppercase bg-amber-100 text-amber-800 border border-amber-200"
-            :title="t('当前为测试更新通道')"
-          >{{ t('测试通道') }}</span>
           <button
             type="button"
             :disabled="busyKey === '/action/check-update' || busyKey === '/action/upgrade-self'"
@@ -2889,9 +2898,6 @@ onUnmounted(() => {
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('服务端分流') }}</h2>
                 <p class="text-xs text-slate-500 mt-1">{{ t('分流写在独立文件，通过主配置引入。改完点顶部「重载配置」生效。') }}</p>
               </div>
-              <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-sky-50 text-sky-700 border border-sky-200/60 tabular-nums">
-                {{ t('{n} 组', { n: routingGroups.length }) }}
-              </span>
             </div>
             <p v-if="state.routing && state.routing.error" class="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
               {{ state.routing.error || t('自定义模式下分流解析失败') }}
@@ -3038,7 +3044,7 @@ onUnmounted(() => {
             <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3 h-full flex flex-col">
               <div>
                 <div class="flex items-center gap-2">
-                  <span class="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-200/70">本地</span>
+                  <span class="inline-flex h-6 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200/70 px-1.5">{{ t('本地') }}</span>
                   <h3 class="text-sm font-bold text-slate-900">{{ t('新建分流组') }}</h3>
                 </div>
                 <p class="text-xs text-slate-500 mt-1.5 leading-relaxed">{{ t('粘贴 DOMAIN-SUFFIX / DOMAIN-KEYWORD / IP-CIDR 等经典规则，保存为本地规则文件并由主配置引入。') }}</p>
@@ -3537,37 +3543,31 @@ onUnmounted(() => {
             </div>
           </section>
 
-          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4 lg:col-span-2">
-            <div>
-              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('更新通道') }}</h2>
-              <p class="text-xs text-slate-500 mt-1 leading-relaxed max-w-2xl">
-                {{ t('正式通道跟随 ClashGate 主分支；测试通道跟随 test 分支，方便提前体验新功能。默认正式，切换后请点顶部「检查更新」。') }}
-              </p>
+          <section class="cg-surface rounded-2xl p-5 sm:p-6">
+            <div class="flex items-center justify-between gap-4">
+              <div class="min-w-0">
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('更新通道') }}</h2>
+                <p class="text-xs mt-1 leading-relaxed" :class="state.update_channel === 'test' ? 'text-amber-700' : 'text-slate-500'">
+                  {{ state.update_channel === 'test' ? t('当前为测试通道') : t('当前为正式通道') }} · {{ t('测试版可能不稳定，请谨慎使用。') }}
+                </p>
+              </div>
+              <div class="flex shrink-0 rounded-lg border border-slate-200 p-0.5 bg-white">
+                <button
+                  type="button"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                  :class="state.update_channel === 'stable' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  :disabled="busyKey === '/action/settings'"
+                  @click="setUpdateChannel('stable')"
+                >{{ t('正式') }}</button>
+                <button
+                  type="button"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                  :class="state.update_channel === 'test' ? 'bg-amber-500 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  :disabled="busyKey === '/action/settings'"
+                  @click="setUpdateChannel('test')"
+                >{{ t('测试') }}</button>
+              </div>
             </div>
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                class="px-3.5 py-2 rounded-xl text-sm font-semibold border transition cursor-pointer"
-                :class="state.update_channel === 'stable'
-                  ? 'bg-slate-900 text-white border-slate-900'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'"
-                :disabled="busyKey === '/action/settings'"
-                @click="setUpdateChannel('stable')"
-              >{{ t('正式') }}</button>
-              <button
-                type="button"
-                class="px-3.5 py-2 rounded-xl text-sm font-semibold border transition cursor-pointer"
-                :class="state.update_channel === 'test'
-                  ? 'bg-amber-500 text-white border-amber-500'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'"
-                :disabled="busyKey === '/action/settings'"
-                @click="setUpdateChannel('test')"
-              >{{ t('测试') }}</button>
-            </div>
-            <p class="text-[11px] text-slate-500 font-mono">
-              ClashGate/ClashGate@{{ state.update_channel === 'test' ? 'test' : 'main' }}
-              <span v-if="state.update_channel === 'test'" class="ml-2 text-amber-700 font-sans font-semibold">{{ t('当前为测试更新通道') }}</span>
-            </p>
           </section>
 
           <section class="cg-surface rounded-2xl">

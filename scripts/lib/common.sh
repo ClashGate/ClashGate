@@ -162,7 +162,7 @@ load_env() { # persisted install settings; CLI flags given this run win
   done < "$ENV_FILE"
   # Legacy Beat installs without UPDATE_CHANNEL keep ClashGateBeat until the panel sets a channel.
   if [[ -z ${UPDATE_CHANNEL:-} && ${REPO_NAME:-} == ClashGateBeat ]]; then
-    REPO_BRANCH=${REPO_BRANCH:-test}
+    REPO_BRANCH=${REPO_BRANCH:-main}
     REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
     if [[ -z ${REPO_TARBALL_PINNED:-} ]]; then
       REPO_TARBALL=${REPO_TARBALL:-https://github.com/$REPO_SLUG/archive/refs/heads/$REPO_BRANCH.tar.gz}
