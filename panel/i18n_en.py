@@ -102,6 +102,8 @@ TABLE = [
     ("检查更新失败：无法连接 GitHub 获取最新版本（{}）", "Update check failed: cannot reach GitHub for the latest version ({})"),
     ("升级失败：未找到 clashgate 管理脚本", "Upgrade failed: clashgate management script not found"),
     ("升级失败：{}", "Upgrade failed: {}"),
+    ("已开始升级，完成后面板会自动重启并刷新（约 1 分钟）……", "Upgrade started. The panel will restart and refresh automatically when done (about 1 minute)…"),
+    ("升级正在进行中，请稍候……", "An upgrade is already in progress, please wait…"),
     ("升级成功！ClashGate 与 Mihomo 内核已更新至最新版本。", "Upgrade succeeded! ClashGate and the Mihomo core are up to date."),
     ("已添加 {} 节点「{}」（端口 {}），已保存，请点顶部「重载配置」生效", "Added {} node “{}” (port {}). Saved; click “Reload config” at the top to apply"),
     ("节点名称重复，添加失败", "Duplicate node name; add failed"),

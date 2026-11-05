@@ -4,8 +4,8 @@
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/i18n.sh"   # CLASHGATE_LANG=en|zh；默认中文
 
-CS_VERSION=1.07.2
-CS_SOURCE_SHA=20261105-channel2
+CS_VERSION=1.07.3
+CS_SOURCE_SHA=20261105-channel3
 REPO_OWNER=${REPO_OWNER:-ClashGate}
 REPO_NAME=${REPO_NAME:-ClashGate}
 REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
@@ -255,6 +255,7 @@ record_update_source() { # persist channel tip id after a successful self-update
   local sha="" branch=${REPO_BRANCH:-main} slug=${REPO_SLUG:-ClashGate/ClashGate} channel=${UPDATE_CHANNEL:-}
   if [[ -f $LIB_DIR/scripts/lib/common.sh ]]; then
     sha=$(sed -n 's/^CS_SOURCE_SHA=//p' "$LIB_DIR/scripts/lib/common.sh" | head -n1)
+    [[ -n $sha ]] && sha="$sha+$(sed -n 's/^CS_VERSION=//p' "$LIB_DIR/scripts/lib/common.sh" | head -n1)"
   fi
   if [[ -z $sha ]]; then
     sha=$(curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json'       "https://api.github.com/repos/$slug/commits/$branch" 2>/dev/null       | sed -n 's/.*"sha": *"\([0-9a-f]\{40\}\)".*/\1/p' | head -n1)

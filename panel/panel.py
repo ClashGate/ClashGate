@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.07.2 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.07.3 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -22,6 +22,7 @@ import os
 import random
 import re
 import secrets
+import shlex
 import shutil
 import socket
 import ssl
@@ -42,7 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 from routing_mgr import RoutingManager, parse_yaml_document_factory  # noqa: E402
 
-VERSION = "1.07.2"
+VERSION = "1.07.3"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -3641,7 +3642,8 @@ def fetch_channel_tip() -> dict:
     sha = ""
     msha = re.search(r"^CS_SOURCE_SHA=([0-9A-Za-z._-]{4,80})", txt, re.M)
     if msha:
-        sha = msha.group(1).strip()
+        # Marker + version so every version bump is visible on the test channel.
+        sha = f"{msha.group(1).strip()}+{version}"
     if not sha:
         try:
             sha = fetch_channel_commit_sha(slug, branch)
@@ -3655,6 +3657,45 @@ def fetch_channel_tip() -> dict:
         "channel": target["channel"],
         "label": target["label"],
     }
+
+
+UPGRADE_STATUS_JSON = CS_ROOT + "/upgrade_status.json"
+UPGRADE_LOG = CS_ROOT + "/upgrade.log"
+
+
+def load_upgrade_status() -> dict:
+    try:
+        with open(UPGRADE_STATUS_JSON) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def start_upgrade_job(cmd_bin: str) -> str:
+    """Launch the self-update outside the panel's cgroup. Returns error text or ''."""
+    started = int(time.time())
+    atomic_write(UPGRADE_STATUS_JSON, json.dumps({"state": "running", "started_at": started, "from": VERSION}) + "\n", 0o600)
+    st, lg = shlex.quote(UPGRADE_STATUS_JSON), shlex.quote(UPGRADE_LOG)
+    script = (
+        f"sleep 1; bash {shlex.quote(cmd_bin)} update > {lg} 2>&1; rc=$?; "
+        f"tail=$(grep -v '^\\s*$' {lg} | tail -n 4 | tr '\\n\"\\\\' '   ' | cut -c1-300); "
+        f"printf '{{\"state\":\"done\",\"rc\":%d,\"started_at\":{started},\"finished_at\":%d,\"tail\":\"%s\"}}\\n' "
+        f"$rc $(date +%s) \"$tail\" > {st}.tmp && mv -f {st}.tmp {st}"
+    )
+    unit = f"clashgate-upgrade-{started}"
+    try:
+        if shutil.which("systemd-run"):
+            rc, out = run(["systemd-run", "--unit", unit, "--collect", "--quiet",
+                           "-p", "KillMode=process", "/bin/bash", "-c", script], timeout=15)
+            if rc == 0:
+                return ""
+        subprocess.Popen(["setsid", "/bin/bash", "-c", script], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        return ""
+    except Exception as e:
+        atomic_write(UPGRADE_STATUS_JSON, json.dumps({"state": "done", "rc": 127, "started_at": started, "tail": str(e)}) + "\n", 0o600)
+        return str(e)
 
 
 def fetch_latest_mihomo_release() -> dict:
@@ -3820,16 +3861,14 @@ def _apply_auto_update():
         data["auto_applied_at"] = int(time.time())
         save_update_check(data)
         return
-    rc, out = run(["bash", cmd_bin, "update"], timeout=180)
-    data = load_update_check()
+    # Mark first: the update restarts this service, so nothing after it would run.
     data["auto_applied_at"] = int(time.time())
     save_update_check(data)
-    if rc != 0:
-        tail = " | ".join(l for l in (out or "").splitlines() if l.strip())[-300:]
-        sys.stderr.write(f"auto update failed: {tail}\n")
+    err = start_upgrade_job(cmd_bin)
+    if err:
+        sys.stderr.write(f"auto update failed to start: {err}\n")
         return
-    record_panel_check(VERSION, False)
-    sys.stderr.write("auto update applied: panel and mihomo core\n")
+    sys.stderr.write("auto update started (detached): panel and mihomo core\n")
 
 
 def start_weekly_update_check():
@@ -4411,6 +4450,17 @@ class Panel(BaseHTTPRequestHandler):
             return self.send(200, self.dashboard(s, initial_tab="settings"))
         if path == "/api/state":
             return self.send(200, json.dumps(self.build_client_state(s), ensure_ascii=False), "application/json; charset=utf-8")
+        if path == "/api/upgrade-status":
+            d = load_upgrade_status()
+            d["version"] = VERSION
+            if d.get("state") == "done" and d.get("rc") == 0 and not d.get("recorded"):
+                try:
+                    record_panel_check(VERSION, False)
+                    d["recorded"] = True
+                    atomic_write(UPGRADE_STATUS_JSON, json.dumps(d) + "\n", 0o600)
+                except Exception:
+                    pass
+            return self.send(200, json.dumps(d, ensure_ascii=False), "application/json; charset=utf-8")
         if path == "/api/update-core-status":
             with _CORE_UPDATE_TASK_LOCK:
                 tstate = dict(_CORE_UPDATE_TASK)
@@ -4929,32 +4979,24 @@ class Panel(BaseHTTPRequestHandler):
                              "application/json; charset=utf-8")
 
     def do_upgrade_self(self, s):
+        """Start `clashgate update` detached and answer immediately.
+
+        The update restarts the clashgate (panel) service itself, so running it
+        inside the request killed the handler before any response was sent and
+        the UI hung. Now it runs in its own transient unit (outside our cgroup);
+        the client polls /api/upgrade-status and the restarted panel.
+        """
+        cmd_bin = CLASHGATE_BIN if os.path.isfile(CLASHGATE_BIN) else "/usr/local/bin/clashgate"
+        if not os.path.isfile(cmd_bin):
+            return self.respond_mutation(s, "升级失败：未找到 clashgate 管理脚本", False)
         with LOCK:
-            cmd_bin = CLASHGATE_BIN if os.path.isfile(CLASHGATE_BIN) else "/usr/local/bin/clashgate"
-            if not os.path.isfile(cmd_bin):
-                return self.respond_mutation(s, "升级失败：未找到 clashgate 管理脚本", False)
-            # Ensure clashgate update uses the selected channel (env already written on channel change).
-            rc, out = run(["bash", cmd_bin, "update"], timeout=180)
-            if rc != 0:
-                tail = " | ".join(l for l in out.splitlines() if l.strip())[-300:]
-                return self.respond_mutation(s, f"升级失败：{tail}", False)
-            tip_sha = ""
-            try:
-                tip = fetch_channel_tip()
-                tip_sha = tip.get("sha") or ""
-                target = resolve_update_target()
-                save_update_source({
-                    "channel": target["channel"],
-                    "repo": tip.get("slug") or target["slug"],
-                    "branch": tip.get("branch") or target["branch"],
-                    "sha": tip_sha,
-                    "version": tip.get("version") or VERSION,
-                    "updated_at": int(time.time()),
-                })
-            except Exception:
-                pass
-            record_panel_check(VERSION, False, tip_sha=tip_sha)
-        return self.respond_mutation(s, "升级成功！ClashGate 与 Mihomo 内核已更新至最新版本。", True)
+            cur = load_upgrade_status()
+            if cur.get("state") == "running" and time.time() - float(cur.get("started_at") or 0) < 600:
+                return self.respond_mutation(s, "升级正在进行中，请稍候……", True)
+            err = start_upgrade_job(cmd_bin)
+        if err:
+            return self.respond_mutation(s, f"升级失败：{err}", False)
+        return self.respond_mutation(s, "已开始升级，完成后面板会自动重启并刷新（约 1 分钟）……", True)
 
     def do_add(self, s, form):
         env = read_env()

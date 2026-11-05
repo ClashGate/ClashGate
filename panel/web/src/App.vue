@@ -757,6 +757,7 @@ async function checkUpdateAndPrompt() {
   if (res.msg) showToast(res.msg, true)
 }
 
+const upgradeInProgress = ref(false)
 let statePollTimer = null
 
 async function refreshServerStateSilent() {
@@ -1229,31 +1230,45 @@ function resetTemplateConfig() {
 }
 
 async function reloadPanelAfterUpgrade(previousVersion) {
-  const deadline = Date.now() + 45000
+  // Upgrade runs detached on the server; the panel restarts during it.
+  // Poll status (tolerating connection drops) until done, then report + reload.
+  const deadline = Date.now() + 360000
   let sawDown = false
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 800))
-    try {
-      const stRes = await fetch('/api/state', {
-        headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
-        credentials: 'same-origin',
-        cache: 'no-store',
-      })
-      if (!stRes.ok) {
+  let stage = ''
+  upgradeInProgress.value = true
+  try {
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 2000))
+      let d = null
+      try {
+        const res = await fetch('/api/upgrade-status', {
+          headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
+          credentials: 'same-origin',
+          cache: 'no-store',
+        })
+        if (res.status === 401) { window.location.reload(); return }
+        if (!res.ok) { sawDown = true; continue }
+        d = await res.json()
+      } catch {
         sawDown = true
+        if (stage !== 'restart') { stage = 'restart'; showToast(t('面板正在重启，请稍候……'), true) }
         continue
       }
-      const stData = await stRes.json()
-      const ver = stData && stData.version
-      if (sawDown || (ver && previousVersion && ver !== previousVersion)) {
+      if (!d || d.state !== 'done') continue
+      if (Number(d.rc) === 0) {
+        showToast(t('升级成功！当前版本 {v}，即将刷新页面', { v: d.version || '' }), true)
+        await new Promise((r) => setTimeout(r, 1500))
         window.location.reload()
         return
       }
-    } catch {
-      sawDown = true
+      showToast(t('升级失败：{msg}', { msg: d.tail || `exit ${d.rc}` }), false)
+      return
     }
+    showToast(t('升级超时，请稍后刷新页面查看版本'), false)
+    if (sawDown || previousVersion) window.location.reload()
+  } finally {
+    upgradeInProgress.value = false
   }
-  window.location.reload()
 }
 
 
@@ -2026,14 +2041,14 @@ onUnmounted(() => {
           </button>
           <button
             type="button"
-            :disabled="busyKey === '/action/check-update' || busyKey === '/action/upgrade-self'"
+            :disabled="busyKey === '/action/check-update' || busyKey === '/action/upgrade-self' || upgradeInProgress"
             @click="checkUpdateAndPrompt"
             class="cg-tool px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 disabled:opacity-50 text-slate-700 transition cursor-pointer inline-flex items-center gap-1.5"
             :class="{ 'is-update': panelUpdate.has_update }"
             :title="panelUpdate.has_update ? updateHint(panelUpdate.latest) : undefined"
           >
             <span>{{
-              busyKey === '/action/upgrade-self'
+              busyKey === '/action/upgrade-self' || upgradeInProgress
                 ? t('升级中…')
                 : busyKey === '/action/check-update'
                   ? t('检查中…')
