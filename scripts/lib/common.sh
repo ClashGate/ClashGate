@@ -251,9 +251,14 @@ mode_label() {
   fi
 }
 
-record_update_source() { # persist channel tip SHA after a successful self-update
+record_update_source() { # persist channel tip id after a successful self-update
   local sha="" branch=${REPO_BRANCH:-main} slug=${REPO_SLUG:-ClashGate/ClashGate} channel=${UPDATE_CHANNEL:-}
-  sha=$(curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json'     "https://api.github.com/repos/$slug/commits/$branch" 2>/dev/null     | sed -n 's/.*"sha": *"\([0-9a-f]\{40\}\)".*/\1/p' | head -n1)
+  if [[ -f $LIB_DIR/scripts/lib/common.sh ]]; then
+    sha=$(sed -n 's/^CS_SOURCE_SHA=//p' "$LIB_DIR/scripts/lib/common.sh" | head -n1)
+  fi
+  if [[ -z $sha ]]; then
+    sha=$(curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json'       "https://api.github.com/repos/$slug/commits/$branch" 2>/dev/null       | sed -n 's/.*"sha": *"\([0-9a-f]\{40\}\)".*/\1/p' | head -n1)
+  fi
   [[ -n $sha ]] || return 0
   umask 077
   cat > "$CS_ROOT/update_source.json" <<EOF
