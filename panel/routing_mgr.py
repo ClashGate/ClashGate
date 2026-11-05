@@ -1,4 +1,4 @@
-"""ClashGate 1.07 server-side routing (服务端分流).
+"""ClashGate 1.08 server-side routing (服务端分流).
 
 Groups live as separate YAML files under /etc/clashgate/routing/, indexed by
 routing.json. Assemble merges them into rule-providers / proxy-groups / rules
@@ -1006,7 +1006,7 @@ class RoutingManager:
         u = (url or "").strip()
         if not (u.startswith("https://") or u.startswith("http://")):
             raise ValueError("外部分流规则 URL 仅支持 http/https")
-        req = urllib.request.Request(u, headers={"User-Agent": "ClashGate/1.07.9"})
+        req = urllib.request.Request(u, headers={"User-Agent": "ClashGate/1.08"})
         try:
             with urllib.request.urlopen(req, timeout=20) as resp:
                 data = resp.read(2_000_000)
