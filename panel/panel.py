@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.07 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.07.1 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -42,7 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 from routing_mgr import RoutingManager, parse_yaml_document_factory  # noqa: E402
 
-VERSION = "1.07"
+VERSION = "1.07.1"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
