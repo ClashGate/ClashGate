@@ -196,7 +196,7 @@ seed_routing() {
   fi
   [[ -f $FRAG_RULE_PROVIDERS ]] || : > "$FRAG_RULE_PROVIDERS"
   [[ -f $FRAG_PROXY_GROUPS ]] || printf '%s\n' 'proxy-groups: []' > "$FRAG_PROXY_GROUPS"
-  [[ -f $FRAG_RULES ]] || printf '%s\n' 'rules:' '  - MATCH,Final' > "$FRAG_RULES"
+  [[ -f $FRAG_RULES ]] || printf '%s\n' 'rules:' '  - MATCH,🐟 漏网之鱼' > "$FRAG_RULES"
   chmod 640 "$FRAG_RULE_PROVIDERS" "$FRAG_PROXY_GROUPS" "$FRAG_RULES" 2>/dev/null || true
   chown root:mihomo "$FRAG_RULE_PROVIDERS" "$FRAG_PROXY_GROUPS" "$FRAG_RULES" "$ROUTING_JSON" 2>/dev/null || true
   chown -R root:mihomo "$ROUTING_DIR" 2>/dev/null || true

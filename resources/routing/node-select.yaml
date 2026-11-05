@@ -1,6 +1,6 @@
 # ClashGate routing group: Node Select (non-deletable)
 proxy-groups:
-  - name: Node Select
+  - name: "🚀 节点选择"
     type: select
     include-all: true
     proxies:

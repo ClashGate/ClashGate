@@ -383,8 +383,8 @@ class RoutingManager:
         providers: dict = {}
         proxy_groups: list = []
         policy_rules: list = []
-        final_name = "Final"
-        select_name = "Node Select"
+        final_name = "🐟 漏网之鱼"
+        select_name = "🚀 节点选择"
         generated_payloads: set = set()
 
         for g in meta.get("groups") or []:
@@ -730,7 +730,7 @@ class RoutingManager:
                     "name": name,
                     "type": "select",
                     "include-all": True,
-                    "proxies": ["Node Select", "DIRECT"],
+                    "proxies": [self._select_name(meta), "DIRECT"],
                 }],
                 "rules": classical,
             }
@@ -745,10 +745,16 @@ class RoutingManager:
                 "name": name,
                 "type": "select",
                 "include-all": True,
-                "proxies": ["Node Select", "DIRECT"],
+                "proxies": [self._select_name(meta), "DIRECT"],
             }]
         doc["rules"] = [r for r in doc["rules"] if not str(r).upper().startswith("MATCH,")]
         return self._insert_policy_group(meta, name, doc, kind="local")
+
+    def _select_name(self, meta: dict) -> str:
+        for g in (meta or {}).get("groups") or []:
+            if g.get("role") == ROLE_SELECT and g.get("name"):
+                return str(g["name"])
+        return "🚀 节点选择"
 
     def import_group(self, name: str, url: str = "", yaml_raw: str = "") -> dict:
         """Beginner import: wrap an external rule-provider URL as a new routing group.
@@ -781,7 +787,7 @@ class RoutingManager:
                 "name": name,
                 "type": "select",
                 "include-all": True,
-                "proxies": ["Node Select", "DIRECT"],
+                "proxies": [self._select_name(meta), "DIRECT"],
             }],
             "rules": [f"RULE-SET,{pname},{name}"],
         }
@@ -1042,10 +1048,10 @@ class RoutingManager:
                     continue
                 policy_rules.append(r)
         if not final_name and proxy_groups:
-            final_name = str(proxy_groups[-1].get("name") or "Final")
+            final_name = str(proxy_groups[-1].get("name") or "🐟 漏网之鱼")
         rules = list(BUILTIN_ALWAYS_RULES_HEAD) + policy_rules
         rules.append(BUILTIN_PRIVATE_RULE)
-        rules.append(f"MATCH,{final_name or 'Final'}")
+        rules.append(f"MATCH,{final_name or '🐟 漏网之鱼'}")
 
         rp_block = self._dump_providers_only(providers)
         pg_lines = ["proxy-groups:"]
