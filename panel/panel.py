@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.07.5 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.07.6 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -43,7 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 from routing_mgr import RoutingManager, parse_yaml_document_factory  # noqa: E402
 
-VERSION = "1.07.5"
+VERSION = "1.07.6"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -3663,13 +3663,25 @@ UPGRADE_STATUS_JSON = CS_ROOT + "/upgrade_status.json"
 UPGRADE_LOG = CS_ROOT + "/upgrade.log"
 
 
+def _upgrade_log_tail(n: int = 4) -> str:
+    try:
+        with open(UPGRADE_LOG, errors="replace") as f:
+            lines = [re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", l).strip() for l in f.read().splitlines()]
+        return " | ".join(l for l in lines if l)[-300:] if lines else ""
+    except Exception:
+        return ""
+
+
 def load_upgrade_status() -> dict:
     try:
         with open(UPGRADE_STATUS_JSON) as f:
             d = json.load(f)
-        return d if isinstance(d, dict) else {}
+        d = d if isinstance(d, dict) else {}
     except Exception:
-        return {}
+        d = {}
+    if d.get("state") == "done" and not d.get("tail"):
+        d["tail"] = _upgrade_log_tail()
+    return d
 
 
 def start_upgrade_job(cmd_bin: str) -> str:
@@ -3677,11 +3689,12 @@ def start_upgrade_job(cmd_bin: str) -> str:
     started = int(time.time())
     atomic_write(UPGRADE_STATUS_JSON, json.dumps({"state": "running", "started_at": started, "from": VERSION}) + "\n", 0o600)
     st, lg = shlex.quote(UPGRADE_STATUS_JSON), shlex.quote(UPGRADE_LOG)
+    # Status JSON carries only numbers; the log tail is read (ANSI-stripped) in Python.
+    # (Embedding raw log text broke the JSON — ANSI escapes / '%' — so the UI never saw "done".)
     script = (
         f"sleep 1; bash {shlex.quote(cmd_bin)} update > {lg} 2>&1; rc=$?; "
-        f"tail=$(grep -v '^\\s*$' {lg} | tail -n 4 | tr '\\n\"\\\\' '   ' | cut -c1-300); "
-        f"printf '{{\"state\":\"done\",\"rc\":%d,\"started_at\":{started},\"finished_at\":%d,\"tail\":\"%s\"}}\\n' "
-        f"$rc $(date +%s) \"$tail\" > {st}.tmp && mv -f {st}.tmp {st}"
+        f"printf '{{\"state\":\"done\",\"rc\":%d,\"started_at\":{started},\"finished_at\":%d}}\\n' "
+        f"$rc $(date +%s) > {st}.tmp && mv -f {st}.tmp {st}"
     )
     # Pass the channel's tarball explicitly so older local scripts (whose default
     # REPO_TARBALL wrongly counted as a pin) still download the selected branch.

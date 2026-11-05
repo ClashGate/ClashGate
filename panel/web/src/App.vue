@@ -1254,6 +1254,14 @@ async function reloadPanelAfterUpgrade(previousVersion) {
         if (stage !== 'restart') { stage = 'restart'; showToast(t('面板正在重启，请稍候……'), true) }
         continue
       }
+      // Panel came back on a different version: the upgrade landed even if the
+      // status file is missing/unreadable (older builds wrote invalid JSON).
+      if (d && d.version && previousVersion && d.version !== previousVersion && d.state !== 'running') {
+        d = { state: 'done', rc: 0, version: d.version }
+      }
+      if (d && d.state === 'running' && d.version && previousVersion && d.version !== previousVersion && sawDown) {
+        d = { state: 'done', rc: 0, version: d.version }
+      }
       if (!d || d.state !== 'done') continue
       if (Number(d.rc) === 0) {
         showToast(t('升级成功！当前版本 {v}，即将刷新页面', { v: d.version || '' }), true)
