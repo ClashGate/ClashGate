@@ -2890,7 +2890,7 @@ onUnmounted(() => {
                 <p class="text-xs text-slate-500 mt-1">{{ t('分流写在独立文件，通过主配置引入。改完点顶部「重载配置」生效。') }}</p>
               </div>
               <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-sky-50 text-sky-700 border border-sky-200/60 tabular-nums">
-                {{ routingGroups.length }}
+                {{ t('{n} 组', { n: routingGroups.length }) }}
               </span>
             </div>
             <p v-if="state.routing && state.routing.error" class="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
@@ -2898,16 +2898,26 @@ onUnmounted(() => {
             </p>
           </section>
 
-          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3">
-            <h3 class="text-sm font-bold text-slate-900">{{ t('分流组') }}</h3>
-            <p class="text-xs text-slate-500">{{ t('拖动调整顺序（与主配置一致），点顶部「重载配置」后生效。') }}</p>
-            <div v-if="routingGroups.length === 0" class="text-sm text-slate-500 py-6 text-center">{{ t('暂无分流组') }}</div>
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
+            <div class="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <h3 class="text-sm font-bold text-slate-900">{{ t('分流组') }}</h3>
+                <p class="text-xs text-slate-500 mt-1">{{ t('拖动调整顺序（与主配置一致），点顶部「重载配置」后生效。') }}</p>
+              </div>
+            </div>
+            <div
+              v-if="routingGroups.length === 0"
+              class="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-10 text-center space-y-2"
+            >
+              <div class="text-sm font-semibold text-slate-700">{{ t('暂无分流组') }}</div>
+              <p class="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">{{ t('还没有自定义分流。用下方「引入外部分流」挂规则集，或「新建分流组」粘贴本地规则。') }}</p>
+            </div>
             <div v-else class="space-y-2">
               <div
                 v-for="(g, idx) in routingGroups"
                 :key="g.id"
                 draggable="true"
-                class="rounded-xl border bg-white px-3.5 py-3 cursor-move select-none transition"
+                class="rounded-xl border bg-white px-3.5 py-3 cursor-move select-none transition hover:border-slate-300 hover:shadow-sm"
                 :class="[routingDragOver === idx ? 'border-sky-400 ring-2 ring-sky-100' : 'border-slate-200', routingDragIdx === idx ? 'opacity-50' : '']"
                 @dragstart="onRoutingDragStart(idx, $event)"
                 @dragover.prevent="routingDragOver = idx"
@@ -2995,58 +3005,67 @@ onUnmounted(() => {
             </div>
           </section>
 
-          <section
-            class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3"
+          <div
+            class="grid grid-cols-1 md:grid-cols-2 gap-4"
             v-if="!(state.routing && state.routing.error && state.custom_config_mode)"
           >
-            <h3 class="text-sm font-bold text-slate-900">{{ t('新建分流组') }}</h3>
-            <p class="text-xs text-slate-500">{{ t('粘贴 DOMAIN-SUFFIX / DOMAIN-KEYWORD / IP-CIDR 等经典规则，保存为本地规则文件并由主配置引入。') }}</p>
-            <label class="block text-xs font-medium text-slate-500">{{ t('分流组名称') }}
-              <input v-model="createRoutingForm.name" class="cg-input mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 text-sm" />
-            </label>
-            <label class="block text-xs font-medium text-slate-500">{{ t('规则（每行一条）') }}
-              <textarea
-                v-model="createRoutingForm.rules_raw"
-                rows="5"
-                class="cg-input mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono"
-                :placeholder="'- DOMAIN-SUFFIX,example.com\n- DOMAIN-KEYWORD,openai\n- IP-CIDR,1.1.1.1/32'"
-              ></textarea>
-            </label>
-            <div class="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                class="cg-btn-primary px-3.5 py-1.5 rounded-xl text-xs font-semibold"
-                :disabled="busyKey === 'routing-add'"
-                @click="createRoutingGroup"
-              >
-                {{ busyKey === 'routing-add' ? t('创建中…') : t('新建分流组') }}
-              </button>
-            </div>
-          </section>
+            <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3 h-full flex flex-col">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-violet-50 text-violet-700 text-[11px] font-bold border border-violet-200/70">URL</span>
+                  <h3 class="text-sm font-bold text-slate-900">{{ t('引入外部分流') }}</h3>
+                </div>
+                <p class="text-xs text-slate-500 mt-1.5 leading-relaxed">{{ t('只填名称和规则集 URL。会写入 rule-providers、proxy-groups，并在 rules 里加 RULE-SET（不下载远程内容）。') }}</p>
+              </div>
+              <label class="block text-xs font-medium text-slate-500">{{ t('分流组名称') }}
+                <input v-model="importRoutingForm.name" class="cg-input mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 text-sm" :placeholder="t('例如 AI')" />
+              </label>
+              <label class="block text-xs font-medium text-slate-500">{{ t('规则集 URL') }}
+                <input v-model="importRoutingForm.url" class="cg-input mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 text-sm font-mono" placeholder="https://" />
+              </label>
+              <div class="mt-auto pt-1">
+                <button
+                  type="button"
+                  class="cg-btn-primary w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-semibold"
+                  :disabled="busyKey === 'routing-import'"
+                  @click="importRoutingGroup"
+                >
+                  {{ busyKey === 'routing-import' ? t('引入中…') : t('引入外部分流') }}
+                </button>
+              </div>
+            </section>
 
-          <section
-            class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3"
-            v-if="!(state.routing && state.routing.error && state.custom_config_mode)"
-          >
-            <h3 class="text-sm font-bold text-slate-900">{{ t('引入外部分流') }}</h3>
-            <p class="text-xs text-slate-500">{{ t('只填名称和规则集 URL。会写入 rule-providers、proxy-groups，并在 rules 里加 RULE-SET（不下载远程内容）。') }}</p>
-            <label class="block text-xs font-medium text-slate-500">{{ t('分流组名称') }}
-              <input v-model="importRoutingForm.name" class="cg-input mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 text-sm" />
-            </label>
-            <label class="block text-xs font-medium text-slate-500">{{ t('规则集 URL') }}
-              <input v-model="importRoutingForm.url" class="cg-input mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 text-sm font-mono" placeholder="https://" />
-            </label>
-            <div class="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                class="cg-btn-primary px-3.5 py-1.5 rounded-xl text-xs font-semibold"
-                :disabled="busyKey === 'routing-import'"
-                @click="importRoutingGroup"
-              >
-                {{ busyKey === 'routing-import' ? t('引入中…') : t('引入外部分流') }}
-              </button>
-            </div>
-          </section>
+            <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3 h-full flex flex-col">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-200/70">本地</span>
+                  <h3 class="text-sm font-bold text-slate-900">{{ t('新建分流组') }}</h3>
+                </div>
+                <p class="text-xs text-slate-500 mt-1.5 leading-relaxed">{{ t('粘贴 DOMAIN-SUFFIX / DOMAIN-KEYWORD / IP-CIDR 等经典规则，保存为本地规则文件并由主配置引入。') }}</p>
+              </div>
+              <label class="block text-xs font-medium text-slate-500">{{ t('分流组名称') }}
+                <input v-model="createRoutingForm.name" class="cg-input mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 text-sm" :placeholder="t('例如 MyRules')" />
+              </label>
+              <label class="block text-xs font-medium text-slate-500 flex-1">{{ t('规则（每行一条）') }}
+                <textarea
+                  v-model="createRoutingForm.rules_raw"
+                  rows="5"
+                  class="cg-input mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono min-h-[7.5rem]"
+                  :placeholder="'- DOMAIN-SUFFIX,example.com\n- DOMAIN-KEYWORD,openai\n- IP-CIDR,1.1.1.1/32'"
+                ></textarea>
+              </label>
+              <div class="pt-1">
+                <button
+                  type="button"
+                  class="cg-btn-primary w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-semibold"
+                  :disabled="busyKey === 'routing-add'"
+                  @click="createRoutingGroup"
+                >
+                  {{ busyKey === 'routing-add' ? t('创建中…') : t('新建分流组') }}
+                </button>
+              </div>
+            </section>
+          </div>
         </div>
 
         <div v-else-if="activeTab === 'readable'" key="readable" class="space-y-6">
