@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.07.7 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.07.8 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -43,7 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 from routing_mgr import RoutingManager, parse_yaml_document_factory  # noqa: E402
 
-VERSION = "1.07.7"
+VERSION = "1.07.8"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -3634,7 +3634,17 @@ def fetch_channel_tip() -> dict:
         "CLASHGATE_RAW_COMMON",
         f"https://raw.githubusercontent.com/{slug}/{branch}/scripts/lib/common.sh",
     )
-    txt = _http_get_text(url, timeout=20)
+    txt = ""
+    if "CLASHGATE_RAW_COMMON" not in os.environ:
+        # raw.githubusercontent.com/<branch>/ is CDN-cached ~5 min; read at the tip commit instead.
+        try:
+            commit = fetch_channel_commit_sha(slug, branch)
+            if commit:
+                txt = _http_get_text(f"https://raw.githubusercontent.com/{slug}/{commit}/scripts/lib/common.sh", timeout=20)
+        except Exception:
+            txt = ""
+    if not txt:
+        txt = _http_get_text(url, timeout=20)
     m = re.search(r"^CS_VERSION=([0-9A-Za-z._-]+)", txt, re.M)
     if not m:
         raise RuntimeError("未能从 GitHub 解析最新版本号")
@@ -3832,7 +3842,7 @@ def _check_due_updates():
             local_src = load_update_source()
             ver_newer = parse_version_tuple(latest) > parse_version_tuple(VERSION)
             sha_newer = bool(tip.get("sha") and tip["sha"] != (local_src.get("sha") or ""))
-            has = ver_newer or (target["channel"] == "test" and sha_newer)
+            has = ver_newer  # strictly newer only; stale raw cache must never offer older/equal
             record_panel_check(latest, has, tip_sha=tip.get("sha") or "")
         except Exception as e:
             sys.stderr.write(f"clashgate version check failed: {e}\n")
@@ -3867,7 +3877,7 @@ def _apply_auto_update():
         local_src = load_update_source()
         ver_newer = parse_version_tuple(latest_cs) > parse_version_tuple(VERSION)
         sha_newer = bool(tip.get("sha") and tip["sha"] != (local_src.get("sha") or ""))
-        panel_has = ver_newer or (target["channel"] == "test" and sha_newer)
+        panel_has = ver_newer  # strictly newer only; stale raw cache must never offer older/equal
         record_panel_check(latest_cs, panel_has, tip_sha=tip.get("sha") or "")
     except Exception as e:
         sys.stderr.write(f"auto update panel check failed: {e}\n")
@@ -4964,11 +4974,9 @@ class Panel(BaseHTTPRequestHandler):
             local_src = load_update_source()
             ver_newer = parse_version_tuple(latest_cs) > parse_version_tuple(cur_cs)
             sha_newer = bool(tip.get("sha") and tip["sha"] != (local_src.get("sha") or ""))
-            # Stable: version only. Test: also treat a newer tip SHA as an update.
-            if target["channel"] == "test":
-                has_update = ver_newer or sha_newer
-            else:
-                has_update = ver_newer
+                        # Only a strictly newer CS_VERSION counts (both channels). A stale GitHub
+            # raw cache can return an older version with a different source id.
+            has_update = ver_newer
             record_panel_check(latest_cs, has_update, tip_sha=tip.get("sha") or "")
             ch_label = target.get("label") or ("测试" if target["channel"] == "test" else "正式")
             if has_update:
