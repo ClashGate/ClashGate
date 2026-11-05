@@ -1006,7 +1006,7 @@ class RoutingManager:
         u = (url or "").strip()
         if not (u.startswith("https://") or u.startswith("http://")):
             raise ValueError("外部分流规则 URL 仅支持 http/https")
-        req = urllib.request.Request(u, headers={"User-Agent": "ClashGate/1.07.1"})
+        req = urllib.request.Request(u, headers={"User-Agent": "ClashGate/1.07.2"})
         try:
             with urllib.request.urlopen(req, timeout=20) as resp:
                 data = resp.read(2_000_000)

@@ -2896,17 +2896,9 @@ onUnmounted(() => {
             {{ t('已启用自定义服务端配置，请自行修改相关配置') }}
           </div>
           <div class="space-y-4" :class="state.custom_server_enabled ? 'opacity-50 pointer-events-none select-none' : ''" :inert="state.custom_server_enabled || undefined" :aria-disabled="state.custom_server_enabled ? 'true' : undefined">
-          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3">
-            <div class="flex items-start justify-between gap-3 flex-wrap">
-              <div>
-                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('服务端分流') }}</h2>
-                <p class="text-xs text-slate-500 mt-1">{{ t('分流写在独立文件，通过主配置引入。改完点顶部「重载配置」生效。') }}</p>
-              </div>
-            </div>
             <p v-if="state.routing && state.routing.error" class="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
               {{ state.routing.error || t('自定义模式下分流解析失败') }}
             </p>
-          </section>
 
           <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
             <div class="flex items-start justify-between gap-3 flex-wrap">
