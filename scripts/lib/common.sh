@@ -4,8 +4,8 @@
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/i18n.sh"   # CLASHGATE_LANG=en|zh；默认中文
 
-CS_VERSION=1.07.8
-CS_SOURCE_SHA=20261105-channel8
+CS_VERSION=1.07.9
+CS_SOURCE_SHA=20261105-channel9
 REPO_OWNER=${REPO_OWNER:-ClashGate}
 REPO_NAME=${REPO_NAME:-ClashGate}
 REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}

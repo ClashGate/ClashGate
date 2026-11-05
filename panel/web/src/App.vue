@@ -1587,7 +1587,7 @@ function setUpdateChannel(channel) {
   if (next === 'test' && state.update_channel !== 'test') {
     openConfirmDialog({
       title: t('切换到测试通道'),
-      message: t('测试版可能不稳定，可能出现功能异常或兼容性问题。切换后将立即更新到测试通道最新版本。确定切换？'),
+      message: t('测试版可能不稳定，可能出现功能异常或兼容性问题。切换后将立即更新到测试通道最新版本，确定切换？'),
       confirmText: t('确认切换'),
       tone: 'amber',
       onConfirm: () => applyUpdateChannel(next),
@@ -1597,7 +1597,7 @@ function setUpdateChannel(channel) {
   if (next === 'stable' && state.update_channel !== 'stable') {
     openConfirmDialog({
       title: t('切换到正式通道'),
-      message: t('将切换到正式通道并立即更新到正式版最新版本。确定切换？'),
+      message: t('切换到正式通道并立即更新到正式版最新版本，确定切换？'),
       confirmText: t('确认切换'),
       tone: 'amber',
       onConfirm: () => applyUpdateChannel(next),
