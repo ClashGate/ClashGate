@@ -2141,7 +2141,7 @@ onUnmounted(() => {
             class="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-sm text-slate-800 flex flex-wrap items-center gap-x-6 gap-y-1"
           >
             <span class="font-semibold">{{ t('Mihomo 内核') }} {{ versionLabel(state.mihomo_version) || '—' }}</span>
-            <span class="font-semibold">{{ t('面板') }} {{ versionLabel(state.version) || '—' }}</span>
+            <span class="font-semibold">{{ t('面板') }} {{ versionLabel(state.version) || '—' }}<span v-if="state.update_channel === 'test'" class="ml-1 px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-bold align-middle">{{ t('测试版') }}</span></span>
           </div>
         </Transition>
 

@@ -4,13 +4,15 @@
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/i18n.sh"   # CLASHGATE_LANG=en|zh；默认中文
 
-CS_VERSION=1.07.3
-CS_SOURCE_SHA=20261105-channel3
+CS_VERSION=1.07.4
+CS_SOURCE_SHA=20261105-channel4
 REPO_OWNER=${REPO_OWNER:-ClashGate}
 REPO_NAME=${REPO_NAME:-ClashGate}
 REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
 # Update channel: stable (正式) → ClashGate/ClashGate@main ; test (测试) → ClashGate/ClashGate@test
 UPDATE_CHANNEL=${UPDATE_CHANNEL:-}
+# Only a REPO_TARBALL given by the caller counts as a pin (the default below must not).
+if [[ -n ${REPO_TARBALL:-} ]]; then REPO_TARBALL_PINNED=1; fi
 REPO_BRANCH=${REPO_BRANCH:-test}
 REPO_TARBALL=${REPO_TARBALL:-https://github.com/$REPO_SLUG/archive/refs/heads/$REPO_BRANCH.tar.gz}
 INSTALL_RAW_URL=https://raw.githubusercontent.com/$REPO_SLUG/$REPO_BRANCH/install.sh
@@ -149,8 +151,6 @@ apply_update_channel() { # map UPDATE_CHANNEL → repo + branch (does not overri
 load_env() { # persisted install settings; CLI flags given this run win
   [[ -r $ENV_FILE ]] || return 0
   local k v
-  # Preserve an explicit REPO_TARBALL pin (InstaBox / commit pin) across channel resolution.
-  if [[ -n ${REPO_TARBALL:-} ]]; then REPO_TARBALL_PINNED=1; fi
   while IFS='=' read -r k v; do
     v=${v%\"}; v=${v#\"}
     case "$k" in
@@ -165,9 +165,9 @@ load_env() { # persisted install settings; CLI flags given this run win
     REPO_BRANCH=${REPO_BRANCH:-main}
     REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
     if [[ -z ${REPO_TARBALL_PINNED:-} ]]; then
-      REPO_TARBALL=${REPO_TARBALL:-https://github.com/$REPO_SLUG/archive/refs/heads/$REPO_BRANCH.tar.gz}
+      REPO_TARBALL=https://github.com/$REPO_SLUG/archive/refs/heads/$REPO_BRANCH.tar.gz
     fi
-    INSTALL_RAW_URL=${INSTALL_RAW_URL:-https://raw.githubusercontent.com/$REPO_SLUG/$REPO_BRANCH/install.sh}
+    INSTALL_RAW_URL=https://raw.githubusercontent.com/$REPO_SLUG/$REPO_BRANCH/install.sh
     return 0
   fi
   apply_update_channel

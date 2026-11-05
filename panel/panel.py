@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.07.3 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.07.4 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -43,7 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 from routing_mgr import RoutingManager, parse_yaml_document_factory  # noqa: E402
 
-VERSION = "1.07.3"
+VERSION = "1.07.4"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -3683,6 +3683,15 @@ def start_upgrade_job(cmd_bin: str) -> str:
         f"printf '{{\"state\":\"done\",\"rc\":%d,\"started_at\":{started},\"finished_at\":%d,\"tail\":\"%s\"}}\\n' "
         f"$rc $(date +%s) \"$tail\" > {st}.tmp && mv -f {st}.tmp {st}"
     )
+    # Pass the channel's tarball explicitly so older local scripts (whose default
+    # REPO_TARBALL wrongly counted as a pin) still download the selected branch.
+    try:
+        tgt = resolve_update_target()
+        pin = (f"REPO_BRANCH={shlex.quote(tgt['branch'])} "
+               f"REPO_TARBALL={shlex.quote('https://github.com/' + tgt['slug'] + '/archive/refs/heads/' + tgt['branch'] + '.tar.gz')} ")
+        script = script.replace(f"bash {shlex.quote(cmd_bin)} update", f"{pin}bash {shlex.quote(cmd_bin)} update", 1)
+    except Exception:
+        pass
     unit = f"clashgate-upgrade-{started}"
     try:
         if shutil.which("systemd-run"):

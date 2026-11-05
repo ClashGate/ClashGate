@@ -385,6 +385,7 @@ export const EN = {
   "测试版可能不稳定，请谨慎使用。": "Test builds may be unstable. Use with care.",
   "当前为正式通道": "Current: Stable channel",
   "当前为测试通道": "Current: Test channel",
+  "测试版": "Test",
   "已开始升级，完成后面板会自动重启并刷新（约 1 分钟）……": "Upgrade started. The panel will restart and refresh automatically when done (about 1 minute)…",
   "升级正在进行中，请稍候……": "An upgrade is already in progress, please wait…",
   "面板正在重启，请稍候……": "The panel is restarting, please wait…",
