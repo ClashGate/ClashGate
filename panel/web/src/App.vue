@@ -1521,6 +1521,10 @@ function selectTab(tab) {
     showToast(t('高级功能请到设置页开启'), false)
     return
   }
+  if (tab === 'routing' && state.custom_server_enabled) {
+    showToast(t('已启用自定义服务端配置，请自行修改相关配置'), false)
+    return
+  }
   activeTab.value = tab
   const targetPath = TAB_PATHS[tab] || '/'
   try {
@@ -1538,6 +1542,7 @@ async function toggleCustomServer() {
     '/action/settings'
   )
   if (res && res.ok && !next && activeTab.value === 'advanced') selectTab('inbounds')
+  if (res && res.ok && next && activeTab.value === 'routing') selectTab('inbounds')
 }
 
 async function toggleAutoUpdate() {
@@ -1632,11 +1637,20 @@ onMounted(() => {
     activeTab.value = 'inbounds'
     showToast(t('高级功能请到设置页开启'), false)
   }
+  if (activeTab.value === 'routing' && state.custom_server_enabled) {
+    activeTab.value = 'inbounds'
+    showToast(t('已启用自定义服务端配置，请自行修改相关配置'), false)
+  }
   window.addEventListener('popstate', () => {
     const next = detectInitialTab()
     if (next === 'advanced' && !state.custom_server_enabled) {
       activeTab.value = 'inbounds'
       showToast(t('高级功能请到设置页开启'), false)
+      return
+    }
+    if (next === 'routing' && state.custom_server_enabled) {
+      activeTab.value = 'inbounds'
+      showToast(t('已启用自定义服务端配置，请自行修改相关配置'), false)
       return
     }
     activeTab.value = next
@@ -1988,8 +2002,8 @@ onUnmounted(() => {
           <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'outbounds' }" @click="selectTab('outbounds')">
             <CgIcon name="outbound" />{{ t('服务端出站') }}
           </button>
-          <button type="button" class="cg-nav" :class="[{ 'is-active': activeTab === 'routing' }, state.custom_server_enabled ? 'opacity-50' : '']" @click="selectTab('routing')">
-            <CgIcon name="routing" />{{ t('服务端分流') }}
+          <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
+            <CgIcon :name="state.custom_server_enabled ? 'lock' : 'routing'" />{{ t('服务端分流') }}
           </button>
           <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
             <CgIcon name="convert" />{{ t('节点转换') }}
@@ -2222,8 +2236,8 @@ onUnmounted(() => {
         <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'outbounds' }" @click="selectTab('outbounds')">
           <CgIcon name="outbound" :size="15" />{{ t('服务端出站') }}
         </button>
-        <button type="button" class="cg-nav" :class="[{ 'is-active': activeTab === 'routing' }, state.custom_server_enabled ? 'opacity-50' : '']" @click="selectTab('routing')">
-          <CgIcon name="routing" :size="15" />{{ t('服务端分流') }}
+        <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
+          <CgIcon :name="state.custom_server_enabled ? 'lock' : 'routing'" :size="15" />{{ t('服务端分流') }}
         </button>
         <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
           <CgIcon name="convert" :size="15" />{{ t('节点转换') }}
