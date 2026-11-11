@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.08 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.09 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -11,7 +11,6 @@ Subcommands:
 """
 import argparse
 import base64
-import calendar
 import datetime
 import gzip
 import hashlib
@@ -43,7 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 from routing_mgr import RoutingManager, parse_yaml_document_factory  # noqa: E402
 
-VERSION = "1.08"
+VERSION = "1.09"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -60,7 +59,6 @@ PANEL_SETTINGS = CS_ROOT + "/panel_settings.json"
 MASQUE_JSON = CS_ROOT + "/masque.json"
 MASQUE_NAME = "⛅️ Cloudflare-MASQUE"
 UPDATE_CHECK_JSON = CS_ROOT + "/update_check.json"
-UPDATE_SOURCE_JSON = CS_ROOT + "/update_source.json"
 UPDATE_CHECK_INTERVAL = 7 * 24 * 3600
 UPDATE_CHANNEL_MAP = {
     "stable": {"owner": "ClashGate", "name": "ClashGate", "branch": "main", "label": "正式"},
@@ -80,23 +78,11 @@ ROUTING_DIR = CS_ROOT + "/routing"
 FRAG_RULE_PROVIDERS = MIHOMO_DIR + "/routing.rule-providers.yaml"
 FRAG_PROXY_GROUPS = MIHOMO_DIR + "/routing.proxy-groups.yaml"
 FRAG_RULES = MIHOMO_DIR + "/routing.rules.yaml"
-TEMPLATE = CS_ROOT + "/resources/server.yaml.tpl"
-CLIENT_TEMPLATE = CS_ROOT + "/resources/client.yaml.tpl"
 CLIENT_DIR = CS_ROOT + "/client"
 CERTCTL = CS_ROOT + "/scripts/certctl.sh"
 CERT = "/etc/clashgate/certs/fullchain.pem"   # paths as seen by mihomo (not ROOT-prefixed)
 KEY = "/etc/clashgate/certs/privkey.pem"
-CERT_REL = "certs/fullchain.pem"
-KEY_REL = "certs/privkey.pem"
-MIHOMO_BIN = os.environ.get("MIHOMO_BIN", CS_ROOT + "/mihomo" if os.path.isfile(CS_ROOT + "/mihomo") else "/usr/local/bin/mihomo")
 MIHOMO_REPO_API = os.environ.get("MIHOMO_REPO_API", "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest")
-REPO_OWNER = os.environ.get("REPO_OWNER", "ClashGate")
-REPO_NAME = os.environ.get("REPO_NAME", "ClashGate")
-REPO_SLUG = os.environ.get("REPO_SLUG", f"{REPO_OWNER}/{REPO_NAME}")
-CLASHGATE_RAW_COMMON = os.environ.get(
-    "CLASHGATE_RAW_COMMON",
-    f"https://raw.githubusercontent.com/{REPO_SLUG}/main/scripts/lib/common.sh",
-)
 CLASHGATE_BIN = os.environ.get(
     "CLASHGATE_BIN",
     CS_ROOT + "/scripts/cmd/clashgate.sh"
@@ -156,7 +142,7 @@ DEFAULT_NODE_NAMES = {
     "vless-reality": "VlessReality",
     "shadowsocks": "Shadowsocks",
     "hysteria2": "Hysteria2",
-    "snell": "SnellV5",
+    "snell": "SnellV6",
     "anytls": "AnyTLS",
     "tuic": "TUICv5",
     "trusttunnel": "TrustTunnel",
@@ -170,7 +156,7 @@ PROTOCOL_DESCRIPTIONS = {
     "vless-reality": "免证书的新一代协议",
     "shadowsocks": "经典轻量级加密协议，默认锁定 aes-256-gcm",
     "hysteria2": "新一代 UDP 协议",
-    "snell": "轻量高效的私有协议，内置随机 TLS 伪装",
+    "snell": "轻量高效的私有协议，内置基于 PSK 的流量整形",
     "anytls": "内置随机填充与随机指纹的新一代 TLS 协议",
     "tuic": "基于 QUIC 的低延迟零握手机制 UDP 协议",
     "trusttunnel": "基于标准 HTTP/2 与 HTTP/3 的高隐蔽 TLS 隧道协议",
@@ -182,11 +168,6 @@ PROTOCOL_DESCRIPTIONS = {
 }
 ANYTLS_FP_POOL = ("chrome", "safari", "firefox", "ios")
 CERT_TYPES = ("hysteria2", "trusttunnel", "anytls", "tuic")
-SS_CIPHERS = ("aes-256-gcm", "aes-128-gcm")
-SS_CIPHER_LABELS = {
-    "aes-256-gcm": "aes-256-gcm（默认）",
-    "aes-128-gcm": "aes-128-gcm",
-}
 STR_KEYS = {
     "name", "type", "server", "uuid", "password", "psk", "public-key", "private-key",
     "short-id", "servername", "sni", "cipher", "flow", "client-fingerprint",
@@ -341,23 +322,26 @@ def run(cmd, timeout=30, env=None):
         return 127, str(e)
 
 
+def _clean_inbounds(items) -> list:
+    out = []
+    seen_names = set()
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, dict) and isinstance(item.get("client"), dict):
+            item["client"].pop("skip-cert-verify", None)
+            if item.get("name"):
+                nm = str(item["name"])
+                item["client"]["name"] = nm
+                if nm in seen_names:
+                    continue
+                seen_names.add(nm)
+            out.append(item)
+    return out
+
+
 def load_inbounds() -> list:
     try:
         with open(INBOUNDS) as f:
-            items = json.load(f)
-        out = []
-        seen_names = set()
-        for item in items:
-            if isinstance(item, dict) and isinstance(item.get("client"), dict):
-                item["client"].pop("skip-cert-verify", None)
-                if item.get("name"):
-                    nm = str(item["name"])
-                    item["client"]["name"] = nm
-                    if nm in seen_names:
-                        continue
-                    seen_names.add(nm)
-                out.append(item)
-        return out
+            return _clean_inbounds(json.load(f))
     except FileNotFoundError:
         return []
 
@@ -398,22 +382,43 @@ def is_custom_config_mode() -> bool:
         return False
 
 
-def read_nodes() -> list:
+def _parse_nodes_tsv(text: str) -> list:
     rows = []
+    for line in (text or "").splitlines():
+        p = line.split("\t")
+        if len(p) >= 7:
+            rows.append({
+                "name": p[0], "port": int(p[1]), "uuid": p[2],
+                "priv": p[3], "pub": p[4], "sid": p[5], "sni": p[6],
+                "dec": p[7] if len(p) >= 8 else "",
+                "enc": p[8] if len(p) >= 9 else "",
+            })
+    return rows
+
+
+def read_nodes() -> list:
     try:
         with open(NODES_TSV) as f:
-            for line in f:
-                p = line.rstrip("\n").split("\t")
-                if len(p) >= 7:
-                    rows.append({
-                        "name": p[0], "port": int(p[1]), "uuid": p[2],
-                        "priv": p[3], "pub": p[4], "sid": p[5], "sni": p[6],
-                        "dec": p[7] if len(p) >= 8 else "",
-                        "enc": p[8] if len(p) >= 9 else "",
-                    })
+            return _parse_nodes_tsv(f.read())
     except FileNotFoundError:
-        pass
-    return rows
+        return []
+
+
+def live_nodes_and_inbounds() -> tuple:
+    """(nodes, inbounds) as Mihomo is running them. With unsaved drafts the files on disk
+    already hold the draft, so read the pre-draft baseline snapshot instead; the
+    subscription must not hand out nodes / credentials the server is not serving yet."""
+    try:
+        if load_pending_reload()["items"] and os.path.isfile(PENDING_BASELINE_JSON):
+            with open(PENDING_BASELINE_JSON) as f:
+                files = json.load(f).get("files") or {}
+            if NODES_TSV in files and INBOUNDS in files:
+                inb_txt = files.get(INBOUNDS)
+                return (_parse_nodes_tsv(files.get(NODES_TSV) or ""),
+                        _clean_inbounds(json.loads(inb_txt) if inb_txt else []))
+    except Exception as e:
+        sys.stderr.write(f"live state from draft baseline failed, using current files: {e}\n")
+    return read_nodes(), load_inbounds()
 
 
 def get_controller_port(env: dict = None) -> int:
@@ -544,11 +549,6 @@ def panel_base_url(env: dict, cfg: dict) -> str:
     return f"https://{host}" if port == 443 else f"https://{host}:{port}"
 
 
-def server_config_url(env: dict, cfg: dict) -> str:
-    base = panel_base_url(env, cfg)
-    return f"{base}/config/server.yaml" if base else "/config/server.yaml"
-
-
 def zashboard_url(env: dict) -> str:
     """Return Zashboard HTTPS URL with fully URL-encoded API Secret appended for one-click direct login."""
     host = env.get("DOMAIN", "").removeprefix("*.") or env.get("SERVER_IP", "")
@@ -560,10 +560,6 @@ def zashboard_url(env: dict) -> str:
         return f"https://{host}:{cport}/ui/"
     qs = f"hostname={quote(host, safe='')}&port={cport}&secret={quote(secret, safe='')}&https=true"
     return f"https://{host}:{cport}/ui/#/setup?{qs}"
-
-
-def zashboard_connect_url(env: dict) -> str:
-    return zashboard_url(env)
 
 
 def write_env_var(key: str, val: str):
@@ -1163,6 +1159,32 @@ def _first_user_creds(users_val) -> tuple:
     return "user", "", "", "", 0
 
 
+SNELL_VERSION = 6
+SNELL_V6_MIN_CORE = "1.19.34"            # MetaCubeX/mihomo#3410 (Snell v6 inbound + outbound)
+SNELL_V6_PSK_LEN = (12, 255)             # transport/snell/v6.go V6MinPSKLength / V6MaxPSKLength (bytes)
+
+
+def new_snell_psk() -> str:
+    """Random PSK: base64 of 16 random bytes = 24 ASCII bytes (within Snell v6's 12..255)."""
+    return base64.b64encode(secrets.token_bytes(16)).decode()
+
+
+def snell_client_from_listener(lst: dict, name: str, server: str) -> dict:
+    """Client proxy matching a Snell listener (version / mode / obfs-opts mirrored as configured).
+
+    Mihomo inbound defaults: version 4 when omitted, udp true (listener/inbound/snell.go).
+    """
+    ver = int(lst.get("version") or 4)
+    client = {"name": name, "type": "snell", "server": server, "port": int(lst.get("port") or 0),
+              "psk": str(lst.get("psk", "")), "version": ver, "udp": lst.get("udp", True) is not False}
+    if ver == 6 and lst.get("mode"):
+        client["mode"] = str(lst["mode"])
+    obfs = lst.get("obfs-opts")
+    if ver != 6 and isinstance(obfs, dict) and obfs.get("mode"):
+        client["obfs-opts"] = dict(obfs)
+    return client
+
+
 def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> dict:
     """Convert a Mihomo server listener dict into an inbound record with a complete client proxy dict."""
     if not isinstance(lst, dict):
@@ -1314,12 +1336,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
         }
     elif ltype == "snell":
         kind = "snell"
-        ver = int(lst.get("version") or 5)
-        obfs = lst.get("obfs-opts") if isinstance(lst.get("obfs-opts"), dict) else {"mode": "tls", "host": pick_reality_sni()}
-        client = {
-            "name": label, "type": "snell", "server": ip, "port": port,
-            "psk": str(lst.get("psk", "")), "version": ver, "udp": True, "obfs-opts": obfs,
-        }
+        client = snell_client_from_listener(lst, label, ip)
     elif ltype == "tuic":
         kind = "tuic"
         cc = str(lst.get("congestion-controller") or "bbr")
@@ -1496,15 +1513,14 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
                   "obfs": "salamander", "obfs-password": obfs_pw, "udp": True}
 
     elif kind == "snell":
-        version = 5
-        obfs_mode = "tls"
-        obfs_host = resolve_sni(form)
-        psk = base64.b64encode(secrets.token_bytes(16)).decode()
-        listener = {**base, "type": "snell", "psk": psk, "version": version, "udp": True,
-                    "obfs-opts": {"mode": obfs_mode, "host": obfs_host}}
+        if not mihomo_supports_snell_v6():
+            raise ValueError(f"Snell V6 需要 Mihomo 内核 v{SNELL_V6_MIN_CORE} 或更高版本，请先点击顶部「更新内核」")
+        # Snell v6 (Mihomo v1.19.34+): PSK-derived traffic shaping replaces simple-obfs,
+        # so no obfs-opts; mode omitted = "default" on both sides.
+        psk = new_snell_psk()
+        listener = {**base, "type": "snell", "psk": psk, "version": SNELL_VERSION, "udp": True}
         client = {"name": label, "type": "snell", "server": ip, "port": port,
-                  "psk": psk, "version": version, "udp": True,
-                  "obfs-opts": {"mode": obfs_mode, "host": obfs_host}}
+                  "psk": psk, "version": SNELL_VERSION, "udp": True}
 
     elif kind == "trusttunnel":
         user = form.get("tt_user", "").strip() or "user"
@@ -1691,7 +1707,7 @@ def rotate_inbound_credentials(inb: dict) -> dict:
         lst["token"] = tok
         cli["password"] = tok
     elif kind == "snell":
-        psk = base64.b64encode(secrets.token_bytes(16)).decode()
+        psk = new_snell_psk()
         lst["psk"] = psk
         cli["psk"] = psk
     elif kind == "anytls":
@@ -1851,6 +1867,32 @@ def assemble_config() -> str:
             else:
                 out.append(line)
     return "".join(out)
+
+
+def _json_text(obj) -> str:
+    return json.dumps(obj, indent=2, ensure_ascii=False)
+
+
+def _snapshot_files(paths) -> dict:
+    """Read the current contents of paths (None = file absent) for a later _restore_files."""
+    backup = {}
+    for p in paths:
+        try:
+            with open(p) as f:
+                backup[p] = f.read()
+        except FileNotFoundError:
+            backup[p] = None
+    return backup
+
+
+def _restore_files(backup: dict):
+    """Undo writes made after _snapshot_files: rewrite or remove each file (.json -> 0600)."""
+    for p, data in backup.items():
+        if data is None:
+            if os.path.exists(p):
+                os.remove(p)
+        else:
+            atomic_write(p, data, 0o600 if p.endswith(".json") else 0o640)
 
 
 def atomic_write(path: str, data: str, mode=0o640):
@@ -2201,7 +2243,7 @@ def cert_failure_message(out: str, mode: str) -> str:
     return f"重新生成证书失败：{tail}"
 
 
-def validate_config(path=CONF):
+def validate_config(path=CONF, bin_path: str = ""):
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, "ui"), exist_ok=True)
         cert_src = CS_ROOT + "/certs"
@@ -2239,7 +2281,7 @@ def validate_config(path=CONF):
                 with open(test_path, "w") as fp:
                     fp.write(txt.replace("/etc/clashgate/certs/", CS_ROOT + "/certs/"))
         env = dict(os.environ, SAFE_PATHS=safe)
-        rc, out = run([resolve_mihomo_bin(), "-t", "-d", d, "-f", test_path], env=env, timeout=90)
+        rc, out = run([bin_path or resolve_mihomo_bin(), "-t", "-d", d, "-f", test_path], env=env, timeout=90)
         if rc == 0 and os.path.isdir(CS_ROOT):
             for entry in os.listdir(d):
                 if entry in ("ui", "certs", "test_config.yaml"):
@@ -2304,7 +2346,7 @@ def sync_client_files():
         env = read_env()
         proxies = [reality_client(n, env) for n in read_nodes()] + [i["client"] for i in load_inbounds()]
         os.makedirs(CLIENT_DIR, mode=0o700, exist_ok=True)
-        atomic_write(CLIENT_DIR + "/mihomo-client.yaml", render_subscription(env), 0o600)
+        atomic_write(CLIENT_DIR + "/mihomo-client.yaml", render_subscription(env, live=False), 0o600)
         p_body = "".join("  - " + json.dumps(p, ensure_ascii=False) + "\n" for p in proxies) if proxies else "  []\n"
         atomic_write(CLIENT_DIR + "/proxies.yaml", "proxies:\n" + p_body, 0o600)
     except Exception as e:
@@ -2952,195 +2994,32 @@ def save_nodes(new_nodes: list):
     # 0.96: draft only. Live CONF / client sync / reload happen solely in do_action(reload|restart).
 
 
-def apply_inbounds(new: list):
-    """Write inbounds + fragment + config, validate, restart; roll back on failure."""
-    cur_nodes = read_nodes()
-    old_specs = collect_ufw_specs(cur_nodes, load_inbounds())
-    cleaned = _dedup_inbounds(new)
-    files = (INBOUNDS, FRAG_EXTRA, CUSTOM_CONF, CONF) if is_custom_config_mode() else (INBOUNDS, FRAG_EXTRA, CONF)
-    backup = {}
-    for p in files:
-        try:
-            with open(p) as f:
-                backup[p] = f.read()
-        except FileNotFoundError:
-            backup[p] = None
-    try:
-        atomic_write(INBOUNDS, json.dumps(cleaned, indent=2, ensure_ascii=False), 0o600)
-        atomic_write(FRAG_EXTRA, render_extra(cleaned))
-        _sync_custom_conf_listeners(cur_nodes, cleaned)
-        atomic_write(CONF, assemble_config())
-        rc, out = validate_config()
-        if rc != 0:
-            raise RuntimeError("配置校验失败（mihomo -t）：" + out[-800:])
-        rc, out = run([SYSTEMCTL, "restart", "mihomo"])
-        if rc != 0:
-            raise RuntimeError("重启失败：" + out[-800:])
-    except Exception:
-        for p, data in backup.items():
-            if data is None:
-                if os.path.exists(p):
-                    os.remove(p)
-            else:
-                atomic_write(p, data, 0o600 if p == INBOUNDS else 0o640)
-        run([SYSTEMCTL, "restart", "mihomo"])
-        raise
-    sync_client_files()
-    sync_ufw(old_specs, collect_ufw_specs(cur_nodes, cleaned))
-    wait_mihomo_ports()
-
-
-def apply_nodes(new_nodes: list):
-    """Update install-time VLESS Reality nodes (nodes.tsv + listeners.reality.yaml + config.yaml), validate, restart."""
-    cur_inbs = load_inbounds()
-    old_specs = collect_ufw_specs(read_nodes(), cur_inbs)
-    files = (NODES_TSV, FRAG_REALITY, CUSTOM_CONF, CONF) if is_custom_config_mode() else (NODES_TSV, FRAG_REALITY, CONF)
-    backup = {}
-    for p in files:
-        try:
-            with open(p) as f:
-                backup[p] = f.read()
-        except FileNotFoundError:
-            backup[p] = None
-    try:
-        atomic_write(NODES_TSV, render_nodes_tsv(new_nodes), 0o640)
-        atomic_write(FRAG_REALITY, render_reality(new_nodes), 0o640)
-        _sync_custom_conf_listeners(new_nodes, cur_inbs)
-        atomic_write(CONF, assemble_config(), 0o640)
-        rc, out = validate_config()
-        if rc != 0:
-            raise RuntimeError("配置校验失败（mihomo -t）：" + out[-800:])
-        rc, out = run([SYSTEMCTL, "restart", "mihomo"])
-        if rc != 0:
-            raise RuntimeError("重启失败：" + out[-800:])
-    except Exception:
-        for p, data in backup.items():
-            if data is None:
-                if os.path.exists(p):
-                    os.remove(p)
-            else:
-                atomic_write(p, data, 0o640)
-        run([SYSTEMCTL, "restart", "mihomo"])
-        raise
-    sync_client_files()
-    sync_ufw(old_specs, collect_ufw_specs(new_nodes, cur_inbs))
-    wait_mihomo_ports()
-
-
 def save_server_proxies(new_proxies: list):
     """Persist server outbound proxies to disk ONLY (proxies.json + proxies.extra.yaml) without writing live CONF or reloading Mihomo."""
     _ensure_pending_baseline()
     files = (PROXIES_JSON, FRAG_PROXIES, CUSTOM_CONF) if is_custom_config_mode() else (PROXIES_JSON, FRAG_PROXIES)
-    backup = {}
-    for p in files:
-        try:
-            with open(p) as f:
-                backup[p] = f.read()
-        except FileNotFoundError:
-            backup[p] = None
+    backup = _snapshot_files(files)
     try:
         atomic_write(PROXIES_JSON, json.dumps(new_proxies, indent=2, ensure_ascii=False), 0o600)
         atomic_write(FRAG_PROXIES, dump_yaml_proxies(new_proxies), 0o640)
         _sync_custom_conf_proxies(new_proxies)
     except Exception:
-        for p, data in backup.items():
-            if data is None:
-                if os.path.exists(p):
-                    os.remove(p)
-            else:
-                atomic_write(p, data, 0o600 if p == PROXIES_JSON else 0o640)
+        _restore_files(backup)
         raise
-
-
-def apply_server_proxies(new_proxies: list):
-    """Write server outbound proxies (proxies.json + proxies.extra.yaml + config.yaml), validate, restart."""
-    files = (PROXIES_JSON, FRAG_PROXIES, CUSTOM_CONF, CONF) if is_custom_config_mode() else (PROXIES_JSON, FRAG_PROXIES, CONF)
-    backup = {}
-    for p in files:
-        try:
-            with open(p) as f:
-                backup[p] = f.read()
-        except FileNotFoundError:
-            backup[p] = None
-    try:
-        atomic_write(PROXIES_JSON, json.dumps(new_proxies, indent=2, ensure_ascii=False), 0o600)
-        atomic_write(FRAG_PROXIES, dump_yaml_proxies(new_proxies), 0o640)
-        _sync_custom_conf_proxies(new_proxies)
-        atomic_write(CONF, assemble_config(), 0o640)
-        rc, out = validate_config()
-        if rc != 0:
-            raise RuntimeError("配置校验失败（mihomo -t）：" + out[-800:])
-        rc, out = run([SYSTEMCTL, "restart", "mihomo"])
-        if rc != 0:
-            raise RuntimeError("重启失败：" + out[-800:])
-    except Exception:
-        for p, data in backup.items():
-            if data is None:
-                if os.path.exists(p):
-                    os.remove(p)
-            else:
-                atomic_write(p, data, 0o600 if p == PROXIES_JSON else 0o640)
-        run([SYSTEMCTL, "restart", "mihomo"])
-        raise
-    wait_mihomo_ports()
 
 
 def save_proxy_providers(new_providers: dict):
     """Persist server proxy-providers to disk ONLY (providers.json + providers.extra.yaml) without writing live CONF or reloading Mihomo."""
     _ensure_pending_baseline()
     files = (PROVIDERS_JSON, FRAG_PROVIDERS, CUSTOM_CONF) if is_custom_config_mode() else (PROVIDERS_JSON, FRAG_PROVIDERS)
-    backup = {}
-    for p in files:
-        try:
-            with open(p) as f:
-                backup[p] = f.read()
-        except FileNotFoundError:
-            backup[p] = None
+    backup = _snapshot_files(files)
     try:
         atomic_write(PROVIDERS_JSON, json.dumps(new_providers, indent=2, ensure_ascii=False), 0o600)
         atomic_write(FRAG_PROVIDERS, dump_yaml_providers(new_providers), 0o640)
         _sync_custom_conf_providers(new_providers)
     except Exception:
-        for p, data in backup.items():
-            if data is None:
-                if os.path.exists(p):
-                    os.remove(p)
-            else:
-                atomic_write(p, data, 0o600 if p == PROVIDERS_JSON else 0o640)
+        _restore_files(backup)
         raise
-
-
-def apply_proxy_providers(new_providers: dict):
-    """Write server proxy-providers (providers.json + providers.extra.yaml + config.yaml), validate, restart."""
-    files = (PROVIDERS_JSON, FRAG_PROVIDERS, CUSTOM_CONF, CONF) if is_custom_config_mode() else (PROVIDERS_JSON, FRAG_PROVIDERS, CONF)
-    backup = {}
-    for p in files:
-        try:
-            with open(p) as f:
-                backup[p] = f.read()
-        except FileNotFoundError:
-            backup[p] = None
-    try:
-        atomic_write(PROVIDERS_JSON, json.dumps(new_providers, indent=2, ensure_ascii=False), 0o600)
-        atomic_write(FRAG_PROVIDERS, dump_yaml_providers(new_providers), 0o640)
-        _sync_custom_conf_providers(new_providers)
-        atomic_write(CONF, assemble_config(), 0o640)
-        rc, out = validate_config()
-        if rc != 0:
-            raise RuntimeError("配置校验失败（mihomo -t）：" + out[-800:])
-        rc, out = run([SYSTEMCTL, "restart", "mihomo"])
-        if rc != 0:
-            raise RuntimeError("重启失败：" + out[-800:])
-    except Exception:
-        for p, data in backup.items():
-            if data is None:
-                if os.path.exists(p):
-                    os.remove(p)
-            else:
-                atomic_write(p, data, 0o600 if p == PROVIDERS_JSON else 0o640)
-        run([SYSTEMCTL, "restart", "mihomo"])
-        raise
-    wait_mihomo_ports()
 
 
 def apply_custom_config(raw_yaml: str):
@@ -3152,13 +3031,7 @@ def apply_custom_config(raw_yaml: str):
     was_custom = is_custom_config_mode()
     old_specs = collect_ufw_specs(read_nodes(), load_inbounds())
     files = (CUSTOM_CONF, CONF, NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON)
-    backup = {}
-    for p in files:
-        try:
-            with open(p) as f:
-                backup[p] = f.read()
-        except FileNotFoundError:
-            backup[p] = None
+    backup = _snapshot_files(files)
     try:
         if not was_custom:
             for p in (NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON):
@@ -3180,12 +3053,7 @@ def apply_custom_config(raw_yaml: str):
         if rc != 0:
             raise RuntimeError("重启失败：" + out[-800:])
     except Exception:
-        for p, data in backup.items():
-            if data is None:
-                if os.path.exists(p):
-                    os.remove(p)
-            else:
-                atomic_write(p, data, 0o600 if p.endswith(".json") else 0o640)
+        _restore_files(backup)
         run([SYSTEMCTL, "restart", "mihomo"])
         raise
     sync_client_files()
@@ -3199,13 +3067,7 @@ def reset_to_template_config():
     old_specs = collect_ufw_specs(read_nodes(), load_inbounds())
     files = (CUSTOM_CONF, CONF, NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON,
              FRAG_REALITY, FRAG_EXTRA, FRAG_PROXIES, FRAG_PROVIDERS, FRAG_CONTROLLER)
-    backup = {}
-    for p in files:
-        try:
-            with open(p) as f:
-                backup[p] = f.read()
-        except FileNotFoundError:
-            backup[p] = None
+    backup = _snapshot_files(files)
     try:
         reserved = {80, 443, int(env.get("PANEL_PORT", "0") or 0), get_controller_port(env)}
         port = 28443
@@ -3251,12 +3113,7 @@ def reset_to_template_config():
             if os.path.exists(bak_p):
                 os.remove(bak_p)
     except Exception:
-        for p, data in backup.items():
-            if data is None:
-                if os.path.exists(p):
-                    os.remove(p)
-            else:
-                atomic_write(p, data, 0o600 if p.endswith(".json") else 0o640)
+        _restore_files(backup)
         run([SYSTEMCTL, "restart", "mihomo"])
         raise
     sync_client_files()
@@ -3285,9 +3142,12 @@ def sanitize_doh_url_line(line: str) -> str:
     return re.sub(r'(https?://[^\s"\'#]+/dns-query)#[^\s"\']*', r'\1', line)
 
 
-def render_subscription(env: dict) -> str:
-    """Full mihomo client config: install Reality nodes + panel/custom inbounds, via client.yaml.tpl."""
-    raw_proxies = [reality_client(n, env) for n in read_nodes()] + [i["client"] for i in load_inbounds()]
+def render_subscription(env: dict, live: bool = True) -> str:
+    """Full mihomo client config: install Reality nodes + panel/custom inbounds, via client.yaml.tpl.
+
+    live=True (subscription link) uses the running state, not unsaved drafts."""
+    nodes, inbs = live_nodes_and_inbounds() if live else (read_nodes(), load_inbounds())
+    raw_proxies = [reality_client(n, env) for n in nodes] + [i["client"] for i in inbs]
     proxies = [{k: v for k, v in p.items() if k != "skip-cert-verify"} for p in raw_proxies]
     p_lines = "\n".join("  - " + json.dumps(p, ensure_ascii=False) for p in proxies) if proxies else "  []"
     n_lines = "\n".join("      - " + json.dumps(p["name"], ensure_ascii=False) for p in proxies) if proxies else '      - "DIRECT"'
@@ -3465,6 +3325,125 @@ def get_local_mihomo_version() -> str:
     return ""
 
 
+def mihomo_supports_snell_v6(bin_path: str = "") -> bool:
+    """Snell v6 needs Mihomo >= SNELL_V6_MIN_CORE; unreadable version counts as unsupported."""
+    if bin_path:
+        try:
+            _, out = run([bin_path, "-v"], timeout=5)
+        except Exception:
+            out = ""
+        m = re.search(r"\bv?(\d+\.\d+(?:\.\d+)*)\b", (out.splitlines() or [""])[0])
+        ver = m.group(1) if m else ""
+    else:
+        ver = get_local_mihomo_version().lstrip("vV")
+    return bool(ver) and parse_version_tuple(ver) >= parse_version_tuple(SNELL_V6_MIN_CORE)
+
+
+_SNELL_V5_DEFAULT_NAME = re.compile(r"SnellV5(-\d+)?")
+
+
+def _snell_needs_v6(inb: dict) -> bool:
+    lst = inb.get("listener") if isinstance(inb, dict) else None
+    if inb.get("kind") != "snell" or not isinstance(lst, dict) or str(lst.get("type")) != "snell":
+        return False
+    try:
+        return int(lst.get("version") or 4) != SNELL_VERSION
+    except (TypeError, ValueError):
+        return False
+
+
+def _name_used_in_routing(name: str) -> bool:
+    """True if a routing rule may reference this inbound name (e.g. IN-NAME); then keep it."""
+    paths = [FRAG_RULES, ROUTING_JSON]
+    try:
+        paths += [os.path.join(ROUTING_DIR, f) for f in os.listdir(ROUTING_DIR)]
+    except OSError:
+        pass
+    pat = re.compile(r"(?<![A-Za-z0-9._-])" + re.escape(name) + r"(?![A-Za-z0-9._-])")
+    for p in paths:
+        try:
+            with open(p, errors="replace") as f:
+                if pat.search(f.read()):
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def migrate_snell_to_v6() -> int:
+    """Upgrade panel-managed Snell (v4/v5) inbounds to Snell v6 and apply it live.
+
+    v6 servers do not accept v5 clients, so the listener and the subscription client
+    change together. Skipped (retried later) when: custom server config is active
+    (user-owned YAML), the core is older than v1.19.34, or unsaved drafts exist
+    (applying now would also push the user's drafts). Returns the number migrated.
+    """
+    if is_custom_config_mode():
+        return 0
+    inbs = load_inbounds()
+    targets = [i for i in inbs if _snell_needs_v6(i)]
+    if not targets:
+        return 0
+    if not mihomo_supports_snell_v6():
+        sys.stderr.write(f"snell v6 migration deferred: Mihomo core older than v{SNELL_V6_MIN_CORE}\n")
+        return 0
+    st = load_pending_reload()
+    if st.get("items") or st.get("sub_token") or st.get("mihomo_secret"):
+        sys.stderr.write("snell v6 migration deferred: unsaved drafts pending reload\n")
+        return 0
+    env = read_env()
+    names = {i.get("name") for i in inbs} | {n["name"] for n in read_nodes()}
+    for inb in targets:
+        lst = dict(inb["listener"])
+        lst["version"] = SNELL_VERSION
+        lst.pop("obfs-opts", None)       # v6 rejects http/tls simple-obfs
+        lst.pop("mode", None)            # default traffic-shaping mode
+        psk = str(lst.get("psk") or "")
+        if not SNELL_V6_PSK_LEN[0] <= len(psk.encode()) <= SNELL_V6_PSK_LEN[1]:
+            lst["psk"] = new_snell_psk()
+        old = str(inb.get("name") or "")
+        if _SNELL_V5_DEFAULT_NAME.fullmatch(old) and not _name_used_in_routing(old):
+            new = old.replace("SnellV5", "SnellV6", 1)
+            if new not in names:
+                names.discard(old)
+                names.add(new)
+                inb["name"] = lst["name"] = new
+        inb["listener"] = lst
+        server = str((inb.get("client") or {}).get("server") or env.get("SERVER_IP", ""))
+        inb["client"] = snell_client_from_listener(lst, inb["name"], server)
+    backup = _snapshot_files((INBOUNDS, FRAG_EXTRA, CONF))
+    try:
+        cleaned = _dedup_inbounds(inbs)
+        atomic_write(INBOUNDS, _json_text(cleaned), 0o600)
+        atomic_write(FRAG_EXTRA, render_extra(cleaned), 0o640)
+        atomic_write(CONF, assemble_config(), 0o640)
+        rc, out = validate_config()
+        if rc != 0:
+            raise RuntimeError("mihomo -t: " + out[-400:])
+        rc, out = run([SYSTEMCTL, "restart", "mihomo"])
+        if rc != 0:
+            raise RuntimeError("restart: " + out[-400:])
+    except Exception as e:
+        _restore_files(backup)
+        run([SYSTEMCTL, "restart", "mihomo"])
+        sys.stderr.write(f"snell v6 migration failed, rolled back: {e}\n")
+        return 0
+    sync_client_files()
+    wait_mihomo_ports()
+    sys.stderr.write(f"snell v6 migration: upgraded {len(targets)} inbound(s)\n")
+    return len(targets)
+
+
+def run_snell_migration():
+    """Locked wrapper; never raises (called from startup, reload, discard and core update)."""
+    try:
+        with LOCK:
+            return migrate_snell_to_v6()
+    except Exception as e:
+        sys.stderr.write(f"snell v6 migration error: {e}\n")
+        return 0
+
+
 def get_mihomo_version_num(st: dict = None) -> str:
     """Return local Mihomo version without leading 'v' (e.g. '1.19.33'), or '' if unreadable."""
     try:
@@ -3581,35 +3560,6 @@ def apply_update_channel_env(channel: str):
     return resolve_update_target()
 
 
-def _resolve_repo_slug(env: dict = None) -> str:
-    return resolve_update_target(env)["slug"]
-
-
-def load_update_source() -> dict:
-    out = {"channel": "", "repo": "", "branch": "", "sha": "", "version": "", "updated_at": 0}
-    try:
-        with open(UPDATE_SOURCE_JSON) as f:
-            raw = json.load(f)
-        if isinstance(raw, dict):
-            out.update({
-                "channel": str(raw.get("channel") or ""),
-                "repo": str(raw.get("repo") or ""),
-                "branch": str(raw.get("branch") or ""),
-                "sha": str(raw.get("sha") or ""),
-                "version": str(raw.get("version") or ""),
-                "updated_at": int(raw.get("updated_at") or 0),
-            })
-    except Exception:
-        pass
-    return out
-
-
-def save_update_source(data: dict):
-    cur = load_update_source()
-    cur.update({k: data[k] for k in data})
-    atomic_write(UPDATE_SOURCE_JSON, json.dumps(cur, ensure_ascii=False, indent=2) + "\n", 0o600)
-
-
 def fetch_channel_commit_sha(slug: str, branch: str) -> str:
     url = f"https://api.github.com/repos/{slug}/commits/{branch}"
     txt = _http_get_text(url, timeout=20, headers={"Accept": "application/vnd.github+json"})
@@ -3618,11 +3568,6 @@ def fetch_channel_commit_sha(slug: str, branch: str) -> str:
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise RuntimeError("未能从 GitHub 解析通道提交")
     return sha
-
-
-def fetch_latest_clashgate_version() -> str:
-    tip = fetch_channel_tip()
-    return tip["version"]
 
 
 def fetch_channel_tip() -> dict:
@@ -3778,16 +3723,25 @@ def save_update_check(data: dict):
     atomic_write(UPDATE_CHECK_JSON, json.dumps(data, ensure_ascii=False, indent=2) + "\n", 0o600)
 
 
-def public_update_check() -> dict:
+def public_update_check(core_current: str = "") -> dict:
+    """Cached check results for the UI. has_update is re-checked against what is
+    installed now, so a result recorded before an upgrade (CLI or panel) never
+    keeps showing an update that is already applied."""
     data = load_update_check()
+    installed = {"core": (core_current or "").lstrip("vV"), "panel": VERSION}
     out = {}
     for key in ("core", "panel"):
         slot = data[key]
+        latest = str(slot.get("latest") or "").lstrip("vV")
+        current = installed[key] or str(slot.get("current") or "").lstrip("vV")
+        has = bool(slot.get("has_update"))
+        if has and latest and current:
+            has = parse_version_tuple(latest) > parse_version_tuple(current)
         out[key] = {
             "checked_at": int(slot.get("checked_at") or 0),
-            "current": str(slot.get("current") or ""),
-            "latest": str(slot.get("latest") or "").lstrip("vV"),
-            "has_update": bool(slot.get("has_update")),
+            "current": current,
+            "latest": latest,
+            "has_update": has,
         }
     return out
 
@@ -3823,27 +3777,35 @@ def record_panel_check(latest: str, has_update: bool, tip_sha: str = ""):
     save_update_check(data)
 
 
+def check_core_update() -> bool:
+    """Compare the local core with the latest stable Mihomo release; record and return has_update."""
+    current = get_local_mihomo_version().lstrip("vV")
+    latest = str(fetch_latest_mihomo_release().get("tag_name") or "").lstrip("vV")
+    has = bool(current and latest and parse_version_tuple(latest) > parse_version_tuple(current))
+    record_core_check(current, latest, has)
+    return has
+
+
+def check_panel_update() -> dict:
+    """Read the channel tip's CS_VERSION; only a strictly newer version counts (a stale
+    raw cache must never offer an older/equal build). Records and returns the tip + has_update."""
+    tip = fetch_channel_tip()
+    latest = tip["version"].lstrip("vV")
+    has = parse_version_tuple(latest) > parse_version_tuple(VERSION)
+    record_panel_check(latest, has, tip_sha=tip.get("sha") or "")
+    return {**tip, "version": latest, "has_update": has}
+
+
 def _check_due_updates():
     data = load_update_check()
     if _update_due(data["core"]):
-        current = get_local_mihomo_version().lstrip("vV")
         try:
-            rel = fetch_latest_mihomo_release()
-            latest = str(rel.get("tag_name") or "").lstrip("vV")
-            has = bool(current and latest and parse_version_tuple(latest) > parse_version_tuple(current))
-            record_core_check(current, latest, has)
+            check_core_update()
         except Exception as e:
             sys.stderr.write(f"mihomo version check failed: {e}\n")
     if _update_due(data["panel"]):
         try:
-            tip = fetch_channel_tip()
-            latest = tip["version"].lstrip("vV")
-            target = resolve_update_target()
-            local_src = load_update_source()
-            ver_newer = parse_version_tuple(latest) > parse_version_tuple(VERSION)
-            sha_newer = bool(tip.get("sha") and tip["sha"] != (local_src.get("sha") or ""))
-            has = ver_newer  # strictly newer only; stale raw cache must never offer older/equal
-            record_panel_check(latest, has, tip_sha=tip.get("sha") or "")
+            check_panel_update()
         except Exception as e:
             sys.stderr.write(f"clashgate version check failed: {e}\n")
 
@@ -3859,26 +3821,13 @@ def _apply_auto_update():
         last = 0
     if time.time() - last < UPDATE_CHECK_INTERVAL:
         return
-    core_has = False
-    panel_has = False
     try:
-        current = get_local_mihomo_version().lstrip("vV")
-        rel = fetch_latest_mihomo_release()
-        latest = str(rel.get("tag_name") or "").lstrip("vV")
-        core_has = bool(current and latest and parse_version_tuple(latest) > parse_version_tuple(current))
-        record_core_check(current, latest, core_has)
+        core_has = check_core_update()
     except Exception as e:
         sys.stderr.write(f"auto update core check failed: {e}\n")
         core_has = bool(load_update_check()["core"].get("has_update"))
     try:
-        tip = fetch_channel_tip()
-        latest_cs = tip["version"].lstrip("vV")
-        target = resolve_update_target()
-        local_src = load_update_source()
-        ver_newer = parse_version_tuple(latest_cs) > parse_version_tuple(VERSION)
-        sha_newer = bool(tip.get("sha") and tip["sha"] != (local_src.get("sha") or ""))
-        panel_has = ver_newer  # strictly newer only; stale raw cache must never offer older/equal
-        record_panel_check(latest_cs, panel_has, tip_sha=tip.get("sha") or "")
+        panel_has = check_panel_update()["has_update"]
     except Exception as e:
         sys.stderr.write(f"auto update panel check failed: {e}\n")
         panel_has = bool(load_update_check()["panel"].get("has_update"))
@@ -3949,6 +3898,7 @@ def update_mihomo_core_direct() -> tuple:
     os.makedirs(os.path.dirname(bin_path) or CS_ROOT, mode=0o775, exist_ok=True)
     tmp_gz = bin_path + ".download.gz"
     tmp_bin = bin_path + ".new"
+    old_bin = bin_path + ".old"
     try:
         req = urllib.request.Request(download_url, headers={"User-Agent": f"clashgate/{VERSION}"})
         try:
@@ -3968,6 +3918,13 @@ def update_mihomo_core_direct() -> tuple:
         rc, v_out = run([tmp_bin, "-v"], timeout=10)
         if rc != 0:
             raise RuntimeError(f"下载的 Mihomo 内核无法运行：{v_out}")
+        # Validate the live config with the NEW binary before swapping it in, so a
+        # failed check leaves the working core untouched.
+        rc, out = validate_config(bin_path=tmp_bin)
+        if rc != 0:
+            raise RuntimeError("配置校验失败（mihomo -t），已保留原内核：" + out[-300:])
+        if os.path.isfile(bin_path):
+            shutil.copy2(bin_path, old_bin)
         os.replace(tmp_bin, bin_path)
         if bin_path != "/usr/local/bin/mihomo" and not ROOT:
             try:
@@ -3985,13 +3942,19 @@ def update_mihomo_core_direct() -> tuple:
                 except OSError:
                     pass
 
-    rc, out = validate_config()
-    if rc != 0:
-        raise RuntimeError("配置校验失败（mihomo -t）：" + out[-300:])
     rc, out = run([SYSTEMCTL, "restart", "mihomo"])
     if rc != 0:
-        raise RuntimeError("重启 Mihomo 失败：" + out[-300:])
+        if os.path.isfile(old_bin):
+            os.replace(old_bin, bin_path)
+            run([SYSTEMCTL, "restart", "mihomo"])
+        raise RuntimeError("重启 Mihomo 失败，已恢复原内核：" + out[-300:])
+    if os.path.exists(old_bin):
+        os.remove(old_bin)
     wait_mihomo_ports()
+    try:
+        migrate_snell_to_v6()   # caller holds LOCK; picks up Snell inbounds deferred for an old core
+    except Exception as e:
+        sys.stderr.write(f"snell v6 migration error: {e}\n")
     changed = True
     if local_ver:
         msg = f"Mihomo 内核已从 {local_ver} 更新至 {latest_tag} 并重启生效。"
@@ -4045,7 +4008,7 @@ KIND_ZH = {
     "vless-reality": "VLESS Reality",
     "shadowsocks": "Shadowsocks",
     "hysteria2": "Hysteria2",
-    "snell": "Snell V5",
+    "snell": "Snell V6",
     "anytls": "AnyTLS",
     "tuic": "TUIC v5",
     "trusttunnel": "TrustTunnel",
@@ -4339,7 +4302,7 @@ class Panel(BaseHTTPRequestHandler):
             **(lambda t: {"update_channel": t["channel"], "update_channel_label": t["label"]})(resolve_update_target()),
             "custom_config_raw": cur_cfg,
             "masque": load_masque_state(),
-            "update_check": public_update_check(),
+            "update_check": public_update_check(mver),
             "pending_reload_count": len(localized_pending_items),
             "pending_reload_items": localized_pending_items,
             "status": {
@@ -4702,6 +4665,7 @@ class Panel(BaseHTTPRequestHandler):
                 discard_pending_reload()
             except Exception as e:
                 return self.respond_mutation(s, f"丢弃草稿失败：{e}", False)
+        run_snell_migration()
         return self.respond_mutation(s, "已丢弃待重载草稿", True)
 
     def do_settings(self, s, form):
@@ -4731,7 +4695,6 @@ class Panel(BaseHTTPRequestHandler):
             else:
                 save_panel_settings(updates)
         if "update_channel" in updates and len(updates) == 1:
-            branch = UPDATE_CHANNEL_MAP[updates["update_channel"]]["branch"]
             if updates["update_channel"] == "test":
                 msg = "已切换到测试通道，请点「检查更新」。"
             else:
@@ -4840,7 +4803,6 @@ class Panel(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.respond_mutation(s, f"分流配置组装失败：{e}", False)
             atomic_write(CONF, assemble_config(), 0o640)
-            sync_client_files()
             rc, out = validate_config()
             if rc != 0:
                 if conf_backup is not None:
@@ -4866,7 +4828,10 @@ class Panel(BaseHTTPRequestHandler):
                 run([SYSTEMCTL, "restart", "mihomo"])
             if rc == 0:
                 clear_pending_reload()
+                sync_client_files()
                 wait_mihomo_ports()
+        if rc == 0:
+            run_snell_migration()
         _, active = run([SYSTEMCTL, "is-active", "mihomo"])
         state = STATE_ZH.get(active.strip(), (active.strip(), ""))[0]
         if rc == 0:
@@ -4967,17 +4932,11 @@ class Panel(BaseHTTPRequestHandler):
 
     def do_check_update(self, s):
         try:
-            tip = fetch_channel_tip()
+            tip = check_panel_update()
             latest_cs = tip["version"]
             cur_cs = VERSION
             target = resolve_update_target()
-            local_src = load_update_source()
-            ver_newer = parse_version_tuple(latest_cs) > parse_version_tuple(cur_cs)
-            sha_newer = bool(tip.get("sha") and tip["sha"] != (local_src.get("sha") or ""))
-                        # Only a strictly newer CS_VERSION counts (both channels). A stale GitHub
-            # raw cache can return an older version with a different source id.
-            has_update = ver_newer
-            record_panel_check(latest_cs, has_update, tip_sha=tip.get("sha") or "")
+            has_update = tip["has_update"]
             ch_label = target.get("label") or ("测试" if target["channel"] == "test" else "正式")
             if has_update:
                 msg = f"发现新版本 v{latest_cs}（当前 v{cur_cs}，通道：{ch_label}"
@@ -5037,7 +4996,6 @@ class Panel(BaseHTTPRequestHandler):
         elif raw_kind == "soduku":
             raw_kind = "sudoku"
         raw_name = (form.get("name") or "").strip()
-        raw_port = (form.get("port") or "").strip()
         with LOCK:
             now = time.time()
             for k in [k for k, v in _RECENT_ADD_REQS.items() if now - v[0] > 60]:
@@ -5635,6 +5593,7 @@ def serve(cfg_path):
     Panel.sessions = _load_sessions_file()
     start_traffic_poller(30)
     start_weekly_update_check()
+    threading.Thread(target=run_snell_migration, name="snell-v6-migration", daemon=True).start()
     addr = (cfg.get("listen", "0.0.0.0"), int(cfg.get("port", 8443)))
     if cfg.get("tls_cert"):
         cert_p = ROOT + cfg["tls_cert"]

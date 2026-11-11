@@ -485,10 +485,10 @@ const PROTOCOLS = [
   },
   {
     value: 'snell',
-    label: 'Snell V5',
-    defaultName: 'SnellV5',
-    desc: '轻量高效的私有协议，内置随机 TLS 伪装',
-    lockedNote: '已锁定安全默认：混淆模式固定为 tls。伪装 Host 可自填，留空从内置域名池随机抽取',
+    label: 'Snell V6',
+    defaultName: 'SnellV6',
+    desc: '轻量高效的私有协议，内置基于 PSK 的流量整形',
+    lockedNote: '已锁定安全默认：PSK 自动随机生成，流量整形使用 v6 默认模式',
   },
   {
     value: 'anytls',
@@ -566,7 +566,7 @@ const inboundForm = reactive({
 const currentProtocol = computed(() => PROTOCOL_MAP[inboundForm.kind] || PROTOCOLS[0])
 const currentDefaultName = computed(() => DEFAULT_NAMES[inboundForm.kind] || 'VlessReality')
 const sniEditable = computed(() =>
-  inboundForm.kind === 'vless-reality' || inboundForm.kind === 'snell' || inboundForm.kind === 'shadowquic'
+  inboundForm.kind === 'vless-reality' || inboundForm.kind === 'shadowquic'
 )
 
 watch(
@@ -691,6 +691,7 @@ async function updateCoreDirect() {
     }
     const startData = await startRes.json().catch(() => null)
     if (startData && startData.running === false) {
+      busyKey.value = ''
       if (startData.state) applyServerState(startData.state)
       showToast(startData.msg || (startData.ok ? t('内核更新成功') : t('更新内核失败')), !!startData.ok)
       return
