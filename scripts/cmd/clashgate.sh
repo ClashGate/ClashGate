@@ -288,7 +288,9 @@ update_self() {
   if validate_conf; then rm -f "$CONF.bak"; else mv -f "$CONF.bak" "$CONF"; warn "新模板生成的配置未通过校验，已保留原配置"; fi
   ( render_client ) >/dev/null 2>&1 || true   # subshell: keep the step counter of `update` intact
   record_update_source || true
-  info "ClashGate 已更新到 GitHub ${REPO_BRANCH:-main} 最新版（通道：${UPDATE_CHANNEL:-default}）"
+  local ch_label=正式
+  [[ ${UPDATE_CHANNEL:-} == test || ( -z ${UPDATE_CHANNEL:-} && ${REPO_BRANCH:-main} == test ) ]] && ch_label=测试
+  info "ClashGate 已更新到 GitHub ${REPO_BRANCH:-main} 最新版（通道：${ch_label}）"
 }
 
 do_cert() { # 立即申请 / 续期 / 校验证书

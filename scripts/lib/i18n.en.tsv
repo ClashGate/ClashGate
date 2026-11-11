@@ -87,6 +87,9 @@ Mihomo：%s	Mihomo: %s
 更新 ClashGate 脚本与面板	Updating ClashGate scripts and panel
 新模板生成的配置未通过校验，已保留原配置	The config from the new template failed validation; the original config was kept
 ClashGate 已更新到 GitHub main 最新版	ClashGate updated to the latest GitHub main
+ClashGate 已更新到 GitHub %s 最新版（通道：%s）	ClashGate updated to the latest GitHub %s (channel: %s)
+测试	test
+正式	stable
 正在校验手动证书（%s/certs/）……\n	Validating the manual certificate (%s/certs/)...\n
 手动证书正常：%s，到期 %s（剩余 %s 天）\n	Manual certificate OK: %s, expires %s (%s days left)\n
 正在申请 / 续期证书（%s，%s，%s）……\n	Requesting / renewing the certificate (%s, %s, %s)...\n
