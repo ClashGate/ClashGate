@@ -3530,6 +3530,10 @@ def resolve_update_channel(env: dict = None, settings: dict = None) -> str:
     name = (os.environ.get("REPO_NAME") or env.get("REPO_NAME") or "").strip()
     if name.endswith("Beat"):
         return "test"
+    # Installed from the test branch without an explicit channel: the CLI already updates from
+    # REPO_BRANCH=test, so the panel must report (and check) the same channel.
+    if (env.get("REPO_BRANCH") or "").strip() == "test":
+        return "test"
     return "stable"
 
 
