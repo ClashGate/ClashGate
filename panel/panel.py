@@ -4940,7 +4940,7 @@ class Panel(BaseHTTPRequestHandler):
             ch_label = target.get("label") or ("测试" if target["channel"] == "test" else "正式")
             if has_update:
                 msg = f"发现新版本 v{latest_cs}（当前 v{cur_cs}，通道：{ch_label}"
-                if tip.get("sha"):
+                if re.fullmatch(r"[0-9a-f]{7,40}", tip.get("sha") or ""):
                     msg += f"，{tip['sha'][:7]}"
                 msg += "）"
             else:
