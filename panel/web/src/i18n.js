@@ -264,15 +264,14 @@ export const EN = {
  "重置密码": "Reset password",
  "免证书的新一代协议": "Next-generation certificate-free protocol",
  "已锁定安全默认：默认启用 VLESS Encryption (vless-x25519)。SNI 可自填，留空从内置域名池随机抽取": "Secure defaults locked: VLESS Encryption (vless-x25519) is on. SNI is optional; leave it blank to pick a random domain from the built-in pool",
- "已锁定安全默认：混淆模式固定为 tls。伪装 Host 可自填，留空从内置域名池随机抽取": "Secure defaults locked: obfuscation mode is fixed to tls. Camouflage host is optional; leave it blank to pick a random domain from the built-in pool",
+ "已锁定安全默认：PSK 自动随机生成，流量整形使用 v6 默认模式": "Secure defaults locked: PSK generated randomly; traffic shaping uses the v6 default mode",
  "已锁定安全默认：伪装地址 (JLS) 可自填，留空从内置域名池随机抽取，拥塞控制默认 bbr": "Secure defaults locked: camouflage address (JLS) is optional; leave it blank to pick a random domain from the built-in pool. Congestion control defaults to bbr",
  "留空从内置域名池随机抽取": "Leave blank to pick a random domain from the built-in pool",
  "新一代 UDP 协议": "Next-generation UDP protocol",
  "已锁定安全默认：混淆密码 (Salamander) 默认随机生成，不可手动关闭": "Secure defaults locked: obfuscation password (Salamander) generated randomly and cannot be disabled",
  "经典轻量级加密协议，默认锁定 aes-256-gcm": "Classic lightweight encrypted protocol, locked to aes-256-gcm by default",
  "已锁定安全默认：加密算法固定为 aes-256-gcm，密码自动随机生成": "Secure defaults locked: cipher fixed to aes-256-gcm; password generated randomly",
- "轻量高效的私有协议，内置随机 TLS 伪装": "Lightweight, efficient private protocol with built-in random TLS camouflage",
- "已锁定安全默认：混淆模式固定为 tls，伪装 Host 从内置池随机抽取": "Secure defaults locked: obfs fixed to tls; camouflage Host randomly picked from the built-in pool",
+ "轻量高效的私有协议，内置基于 PSK 的流量整形": "Lightweight, efficient private protocol with built-in PSK-based traffic shaping",
  "内置随机填充与随机指纹的新一代 TLS 协议": "Next-generation TLS protocol with built-in random padding and fingerprints",
  "已锁定安全默认：客户端 TLS 指纹与长度填充策略均自动随机生成": "Secure defaults locked: client TLS fingerprint and length padding are generated randomly",
  "免证书的新一代 QUIC 协议，内置随机 JLS 伪装": "Next-generation certificate-free QUIC protocol with built-in random JLS camouflage",
@@ -432,7 +431,19 @@ export const EN = {
  "+ 添加服务端出站「{name}」": "+ Add server outbound “{name}”",
  "- 删除服务端出站「{name}」": "- Delete server outbound “{name}”",
  "+ 导入订阅源「{name}」": "+ Import provider “{name}”",
- "- 删除订阅源「{name}」": "- Delete provider “{name}”"
+ "- 删除订阅源「{name}」": "- Delete provider “{name}”",
+ "规则格式无效：{line}（示例：- DOMAIN-SUFFIX,example.com）": "Invalid rule: {line} (example: - DOMAIN-SUFFIX,example.com)",
+ "外部规则集 URL 无效": "Invalid external rule-set URL",
+ "规则集名称只能用英文字母、数字、- _ .": "Rule set names may only use English letters, digits, - _ .",
+ "规则集不存在": "Rule set not found",
+ "外部规则集 URL 必须以 http(s):// 开头": "The external rule-set URL must start with http(s)://",
+ "该分流组不可删除": "This routing group cannot be deleted",
+ "MATCH 由系统自动生成，请勿粘贴": "MATCH is generated automatically; do not paste it",
+ "待重载": "Pending reload",
+ "请至少粘贴一条分流规则（如 - DOMAIN-SUFFIX,example.com）": "Paste at least one routing rule (e.g. - DOMAIN-SUFFIX,example.com)",
+ "分流组名称已存在：{name}": "Routing group name already exists: {name}",
+ "请填写规则集名称（英文）": "Enter a rule set name (English)",
+ "不支持的规则类型「{type}」。请使用 DOMAIN-SUFFIX / DOMAIN-KEYWORD / IP-CIDR 等经典规则": "Unsupported rule type “{type}”. Use classical rules such as DOMAIN-SUFFIX / DOMAIN-KEYWORD / IP-CIDR"
 }
 
 export const LANGS = ['zh', 'en', 'ru', 'fa']

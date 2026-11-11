@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.06" src="https://img.shields.io/badge/version-v1.06-14614d" />
+  <img alt="Version: v1.09" src="https://img.shields.io/badge/version-v1.09-14614d" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -19,8 +19,9 @@ Simple and safe. The last mile of the Mihomo ecosystem.
 
 - **One-command proxy server**: deploy a Mihomo server on a common Linux VPS with a single command, ready to use.
 - **Client subscription included**: get a config you can import straight into Mihomo / Clash clients—no hand-assembled YAML.
-- **Many protocols**: add VLESS Reality, Shadowsocks, Hysteria2, Snell, AnyTLS, TUIC, TrustTunnel, ShadowQUIC, Mieru, or Sudoku in one click.
+- **Many protocols**: add VLESS Reality, Shadowsocks, Hysteria2, Snell v6, AnyTLS, TUIC, TrustTunnel, ShadowQUIC, Mieru, or Sudoku in one click.
 - **Server-side routing**: when you need custom outbound routing, replace the built-in template with your own Mihomo server config.
+- **Multi-language**: switch the admin panel between 中文, English, Русский and فارسی; the installer and command line speak Chinese and English.
 
 ## Install
 

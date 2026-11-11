@@ -1,4 +1,4 @@
-"""ClashGate 1.08 server-side routing (服务端分流).
+"""ClashGate 1.09 server-side routing (服务端分流).
 
 Groups live as separate YAML files under /etc/clashgate/routing/, indexed by
 routing.json. Assemble merges them into rule-providers / proxy-groups / rules
@@ -15,8 +15,6 @@ import os
 import re
 import secrets
 import shutil
-import urllib.error
-import urllib.request
 
 
 BUILTIN_ALWAYS_RULES_HEAD = [
@@ -208,32 +206,6 @@ class RoutingManager:
     def save_meta(self, meta: dict):
         self.atomic_write(self.routing_json, json.dumps(meta, indent=2, ensure_ascii=False) + "\n", 0o600)
 
-    def tracked_files(self) -> list:
-        """Paths that participate in pending-reload baseline/discard."""
-        out = [self.routing_json, self.frag_rule_providers, self.frag_proxy_groups, self.frag_rules]
-        try:
-            for name in os.listdir(self.routing_dir):
-                if name.endswith((".yaml", ".yml")):
-                    out.append(self.group_path(name))
-        except FileNotFoundError:
-            pass
-        return out
-
-    def is_tracked_path(self, path: str) -> bool:
-        if path in (
-            self.routing_json,
-            self.frag_rule_providers,
-            self.frag_proxy_groups,
-            self.frag_rules,
-        ):
-            return True
-        try:
-            return os.path.commonpath([path, self.routing_dir]) == self.routing_dir and path.endswith(
-                (".yaml", ".yml")
-            )
-        except ValueError:
-            return False
-
     # ----- YAML group helpers -------------------------------------------------
 
     def read_group_raw(self, filename: str) -> str:
@@ -384,7 +356,6 @@ class RoutingManager:
         proxy_groups: list = []
         policy_rules: list = []
         final_name = "🐟 漏网之鱼"
-        select_name = "🚀 节点选择"
         generated_payloads: set = set()
 
         for g in meta.get("groups") or []:
@@ -405,8 +376,6 @@ class RoutingManager:
             role = g.get("role") or ROLE_POLICY
             if role == ROLE_FINAL:
                 final_name = gname
-            elif role == ROLE_SELECT:
-                select_name = gname
 
             own_classical: list = []
             passthrough: list = []
@@ -1001,21 +970,6 @@ class RoutingManager:
         self.write_group_raw(g["file"], self.dump_group_doc(doc))
         self.regenerate_frags(meta)
         return expected
-
-    def fetch_url(self, url: str) -> str:
-        u = (url or "").strip()
-        if not (u.startswith("https://") or u.startswith("http://")):
-            raise ValueError("外部分流规则 URL 仅支持 http/https")
-        req = urllib.request.Request(u, headers={"User-Agent": "ClashGate/1.08"})
-        try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                data = resp.read(2_000_000)
-        except urllib.error.URLError as e:
-            raise ValueError(f"下载外部分流规则失败：{e}") from e
-        text = data.decode("utf-8", "replace")
-        # Validate parseable
-        self.parse_group_doc(text)
-        return text
 
     # ----- custom mode write-back ---------------------------------------------
 

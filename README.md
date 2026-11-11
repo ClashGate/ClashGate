@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.06" src="https://img.shields.io/badge/version-v1.06-14614d" />
+  <img alt="Version: v1.09" src="https://img.shields.io/badge/version-v1.09-14614d" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -19,8 +19,9 @@
 
 - **一键部署代理服务端**：一条命令即可在常见 Linux VPS 上完成 Mihomo 服务端部署，开箱即用。
 - **自带客户端订阅**：自动提供可直接导入 Mihomo / Clash 系客户端的配置，无需手动拼接。
-- **支持多种协议**：VLESS Reality、Shadowsocks、Hysteria2、Snell、AnyTLS、TUIC、TrustTunnel、ShadowQUIC、Mieru、Sudoku 一键添加。
+- **支持多种协议**：VLESS Reality、Shadowsocks、Hysteria2、Snell v6、AnyTLS、TUIC、TrustTunnel、ShadowQUIC、Mieru、Sudoku 一键添加。
 - **服务端支持分流**：需要自定义出站分流，可替换为自己的 Mihomo 服务端配置。
+- **多语言界面**：管理面板可切换中文、English、Русский、فارسی，安装与命令行支持中文和 English。
 
 ## 一键安装
 
