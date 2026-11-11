@@ -128,6 +128,13 @@ html[lang="fa"] body,
 html[lang="fa"] .cg-app h2 {
   font-family: Tahoma, "Noto Naskh Arabic", "Noto Sans Arabic", "Segoe UI", sans-serif;
 }
+/* Monospace fonts only carry isolated Arabic glyphs (letters would not join): keep Latin mono,
+   but let Persian text inside code / mono fields fall through to an Arabic-capable font. */
+html[lang="fa"] code,
+html[lang="fa"] .font-mono,
+html[lang="fa"] textarea.font-mono {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Tahoma, "Noto Naskh Arabic", "Noto Sans Arabic", "Segoe UI", sans-serif;
+}
 
 .cg-app h2 {
   font-family: "Newsreader", "Iowan Old Style", Palatino, "Songti SC", "Noto Serif CJK SC", serif;
@@ -199,7 +206,7 @@ html[lang="fa"] .cg-app h2 {
   padding: 22px 14px 16px;
   background: #f7f9fc;
   color: #1a2330;
-  border-right: 1px solid #e3e8f0;
+  border-inline-end: 1px solid #e3e8f0;
   flex-direction: column;
 }
 
@@ -302,7 +309,7 @@ html[lang="fa"] .cg-app h2 {
   align-items: center;
   gap: 8px;
   width: 100%;
-  text-align: left;
+  text-align: start;
   border-radius: 10px;
   padding: 9px 10px;
   font-size: 13.5px;
@@ -391,6 +398,26 @@ html[lang="fa"] .cg-app h2 {
   transform: translateX(18px);
 }
 
+[dir="rtl"] .cg-switch span {
+  left: auto;
+  right: 3px;
+}
+
+[dir="rtl"] .cg-switch.is-on span {
+  transform: translateX(-18px);
+}
+
+.cg-switch:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* Long names / URLs wrap at any point instead of overflowing, without splitting normal words first. */
+.cg-wrap {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
 .cg-feature {
   background-image:
     linear-gradient(135deg, rgba(29, 111, 224, 0.08), transparent 46%),
@@ -421,7 +448,7 @@ html[lang="fa"] .cg-app h2 {
   background: transparent;
   border: 0;
   border-bottom: 1px solid #e6ebf2;
-  text-align: left;
+  text-align: start;
 }
 
 .cg-rail-cell:last-child {
@@ -466,7 +493,7 @@ html[lang="fa"] .cg-app h2 {
 }
 
 .cg-rail-num {
-  margin-left: auto;
+  margin-inline-start: auto;
   flex: 0 0 auto;
   font-size: 16px;
   line-height: 1;
@@ -478,6 +505,10 @@ html[lang="fa"] .cg-app h2 {
 
 #stat-card-status {
   box-shadow: inset 3px 0 0 #1d6fe0;
+}
+
+[dir="rtl"] #stat-card-status {
+  box-shadow: inset -3px 0 0 #1d6fe0;
 }
 
 #stat-card-status:hover,
@@ -495,7 +526,8 @@ html[lang="fa"] .cg-app h2 {
 }
 
 .cg-rail .cg-stat-mode {
-  margin: 0 0 0 auto;
+  margin: 0;
+  margin-inline-start: auto;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -591,11 +623,11 @@ html[lang="fa"] .cg-app h2 {
 
   .cg-rail-cell {
     border-bottom: 0;
-    border-right: 1px solid #e6ebf2;
+    border-inline-end: 1px solid #e6ebf2;
   }
 
   .cg-rail-cell:last-child {
-    border-right: 0;
+    border-inline-end: 0;
   }
 
   .cg-home {
@@ -622,6 +654,8 @@ html[lang="fa"] .cg-app h2 {
   .cg-actions {
     flex: 1 1 100%;
     justify-content: flex-start;
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
 }
 
