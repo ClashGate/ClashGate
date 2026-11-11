@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.09 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.10 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -42,7 +42,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 from routing_mgr import RoutingManager, parse_yaml_document_factory  # noqa: E402
 
-VERSION = "1.09"
+# Versions compare as integer tuples (parse_version_tuple): 1.10 > 1.09. Never publish "1.1"/"1.2" (they
+# would sort below 1.09 on every installed panel); the next releases are 1.11, 1.12, ...
+VERSION = "1.10"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -251,6 +253,24 @@ def _beginner_routing_state(st: dict) -> dict:
         for g in (st.get("groups") or [])
         if (g.get("role") or "policy") not in ("select", "final")
     ]
+    return st
+
+
+def _localize_fields(obj, keys, lang: str):
+    """Translate Chinese status/error strings in a state dict for en/ru/fa clients."""
+    if not isinstance(obj, dict) or lang not in ("en", "ru", "fa"):
+        return obj
+    out = dict(obj)
+    for k in keys:
+        if isinstance(out.get(k), str) and out[k]:
+            out[k] = _tr_msg(out[k], lang)
+    return out
+
+
+def _localize_routing_state(st: dict, lang: str) -> dict:
+    st = _localize_fields(st, ("error",), lang)
+    if isinstance(st, dict) and lang in ("en", "ru", "fa"):
+        st["groups"] = [_localize_fields(g, ("error",), lang) for g in (st.get("groups") or [])]
     return st
 
 
@@ -814,9 +834,9 @@ def parse_mihomo_proxies(raw: str) -> list:
     """Parse single-line JSON/flow or multi-line YAML mihomo node configs; supports easytier/tailscale/etc."""
     s = (raw or "").strip()
     if not s:
-        raise ValueError("请输入 mihomo 节点配置（单行 JSON 或多行 YAML）")
+        raise ValueError("请输入 Mihomo 节点配置（单行 JSON 或多行 YAML）")
     if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", s):
-        raise ValueError("不支持分享链接（如 vless://、ss://），请粘贴 mihomo 配置格式（JSON 或 YAML；若是订阅链接请在上方「导入外部订阅」中添加）")
+        raise ValueError("不支持分享链接（如 vless://、ss://），请粘贴 Mihomo 配置格式（JSON 或 YAML；订阅链接请在「外部订阅源」中导入）")
     parsed = None
     if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
         try:
@@ -861,7 +881,7 @@ def parse_mihomo_proxies(raw: str) -> list:
     elif isinstance(parsed, list):
         items = parsed
     else:
-        raise ValueError("仅支持 mihomo 节点配置格式（单行 JSON 或多行 YAML）")
+        raise ValueError("仅支持 Mihomo 节点配置格式（单行 JSON 或多行 YAML）")
     if not items:
         raise ValueError("未找到任何节点配置")
     out = []
@@ -978,6 +998,8 @@ def build_proxy_provider(url: str, name: str = "", existing: dict = None) -> tup
             raise ValueError("订阅源名称仅限 1-48 位字母、数字及 . _ -")
         prov_name = raw_name
         path = f"./{prov_name}.yaml"
+    if existing and prov_name in existing:
+        raise ValueError(f"订阅源「{prov_name}」已存在，请换一个名称或先删除原订阅源")
     entry = {
         "type": "http",
         "url": u,
@@ -3026,7 +3048,7 @@ def apply_custom_config(raw_yaml: str):
     """Validate and apply user-supplied full server config, syncing listeners, outbounds, and client subscription."""
     s = (raw_yaml or "").strip()
     if not s:
-        raise ValueError("请输入完整的 mihomo 服务端配置内容")
+        raise ValueError("请输入完整的 Mihomo 服务端配置内容")
     s = sanitize_doh_url_line(s) + "\n"
     was_custom = is_custom_config_mode()
     old_specs = collect_ufw_specs(read_nodes(), load_inbounds())
@@ -4301,7 +4323,7 @@ class Panel(BaseHTTPRequestHandler):
             "auto_update": bool(load_panel_settings().get("auto_update")),
             **(lambda t: {"update_channel": t["channel"], "update_channel_label": t["label"]})(resolve_update_target()),
             "custom_config_raw": cur_cfg,
-            "masque": load_masque_state(),
+            "masque": _localize_fields(load_masque_state(), ("error",), req_lang),
             "update_check": public_update_check(mver),
             "pending_reload_count": len(localized_pending_items),
             "pending_reload_items": localized_pending_items,
@@ -4333,11 +4355,11 @@ class Panel(BaseHTTPRequestHandler):
             "all_proxies_yaml": all_proxies_yaml,
             "proxies": proxy_items,
             "providers": provider_items,
-            "routing": _beginner_routing_state(
+            "routing": _localize_routing_state(_beginner_routing_state(
                 get_routing().public_state(cur_cfg, custom_mode=True)
                 if custom_active
                 else get_routing().public_state()
-            ),
+            ), req_lang),
         }
 
     def respond_mutation(self, s, msg: str, ok: bool = True):
@@ -5167,7 +5189,7 @@ class Panel(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.respond_mutation(s, f"添加服务端 proxies 节点失败：{e}", False)
         names = "、".join(p["name"] for p in added)
-        return self.respond_mutation(s, f"已向服务端 proxies: 添加 {len(added)} 个节点（{names}），已保存，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, f"已添加 {len(added)} 个服务端出站（{names}），已保存，请点顶部「重载配置」生效", True)
 
     def do_delete_proxy(self, s, name):
         with LOCK:
@@ -5206,7 +5228,7 @@ class Panel(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.respond_mutation(s, f"导入订阅链接失败：{e}", False)
         return self.respond_mutation(
-            s, f"已导入订阅源「{prov_name}」（路径 {entry['path']}）到服务端 proxy-providers:，已保存，请点顶部「重载配置」生效", True)
+            s, f"已导入订阅源「{prov_name}」（路径 {entry['path']}），已保存，请点顶部「重载配置」生效", True)
 
     def do_delete_provider(self, s, name):
         with LOCK:
@@ -5428,7 +5450,7 @@ class Panel(BaseHTTPRequestHandler):
                 clear_pending_reload()
             except Exception as e:
                 return self.respond_mutation(s, f"更新自定义服务端配置失败：{e}", False)
-        return self.respond_mutation(s, "自定义 mihomo 服务端配置已通过校验并应用生效。", True)
+        return self.respond_mutation(s, "自定义 Mihomo 服务端配置已通过校验并应用生效。", True)
 
     def do_reset_template_config(self, s):
         if not load_panel_settings().get("custom_server_enabled"):
@@ -5525,7 +5547,7 @@ class Panel(BaseHTTPRequestHandler):
             f"<input id=nm name=name value=VlessReality placeholder='默认 VlessReality'>"
             f"<input id=port name=port placeholder='留空随机端口'>"
             f"<button type=submit>添加入站节点</button></form></section>"
-            f"<section><h2>自定义 mihomo 服务端配置</h2>"
+            f"<section><h2>自定义 Mihomo 服务端配置</h2>"
             f"<form method=post action=/config/reset-template>{hid}<button type=submit>恢复默认服务端模板</button></form></section>"
             f"{cert_sec}</main>"
         )
