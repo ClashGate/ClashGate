@@ -136,6 +136,8 @@ TABLE = [
     ("已关闭自定义服务端，已切换回默认服务端模板并重载生效。", "Custom server turned off; switched back to the default server template and reloaded."),
     ("已自动配置 {} 处证书路径，自定义 Mihomo 服务端配置已通过校验并应用生效。", "Auto-configured {} certificate path(s); the custom Mihomo server config passed validation and is now in effect."),
     ("已开启自定义服务端。上次的自定义配置已载入编辑框，点「更新 Mihomo 服务端配置」即可恢复。", "Custom server enabled. Your last custom config is loaded in the editor; click “Update Mihomo server config” to restore it."),
+    ("证书文件不存在或无法读取：{}", "Certificate file not found or not readable: {}"),
+    ("已关闭自定义服务端。原有节点无法用默认模板生成，已重置为默认服务端模板并生成新的 VlessReality 节点，请在客户端更新订阅。", "Custom server turned off. The previous nodes could not be built with the default template, so the server was reset to the default template with a new VlessReality node. Update the subscription in your client."),
     ("更新自定义服务端配置失败：{}", "Failed to update the custom server config: {}"),
     ("自定义 Mihomo 服务端配置已通过校验并应用生效。", "The custom Mihomo server config passed validation and is now in effect."),
     ("恢复默认配置失败：{}", "Failed to restore the default config: {}"),

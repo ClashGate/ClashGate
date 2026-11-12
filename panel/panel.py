@@ -1034,6 +1034,52 @@ def _is_cert_path_value(val: str) -> bool:
     return v.startswith(("/", "./", "../", "~")) or bool(_CERT_FILE_EXT.search(v))
 
 
+def _iter_server_cert_lines(lines: list):
+    """Yield (index, match, kind) for certificate / private-key file-path lines under the top-level
+    `listeners:` / `tls:` sections (reality-config keys, inline PEM and WireGuard keys skipped).
+    match groups: 1 = prefix up to the value, 3 = value, 4 = trailing comment."""
+    top = ""
+    in_reality = False
+    reality_indent = 0
+    for i, line in enumerate(lines):
+        stripped = line.lstrip(" ")
+        indent = len(line) - len(stripped)
+        if not stripped or stripped.startswith("#"):
+            continue
+        if indent == 0 and not stripped.startswith("-"):  # `- item` at column 0 stays in its section
+            m_top = re.match(r"^([A-Za-z0-9_-]+)\s*:", stripped)
+            top = m_top.group(1) if m_top else ""
+        if in_reality and indent <= reality_indent:
+            in_reality = False
+        if re.match(r"^(?:-\s+)?reality-config\s*:", stripped):
+            in_reality = True
+            reality_indent = indent
+            continue
+        if top not in _CERT_SECTIONS or in_reality:
+            continue
+        m = re.match(r"^((?:-\s+)?(certificate|private-key)\s*:\s*)([^#\n]+?)(\s*(?:#.*)?)$", stripped)
+        if m and _is_cert_path_value(m.group(3)):
+            yield i, m, m.group(2)
+
+
+def server_cert_paths(raw_yaml: str) -> list:
+    """Certificate / private-key file paths the server TLS config references (as written)."""
+    lines = (raw_yaml or "").splitlines()
+    return [m.group(3).strip().strip("'\"") for _, m, _ in _iter_server_cert_lines(lines)]
+
+
+def missing_cert_files(raw_yaml: str) -> list:
+    """Referenced cert/key paths that are not readable files. Relative paths resolve against the
+    Mihomo home directory (-d), as the core resolves them."""
+    missing = []
+    for p in server_cert_paths(raw_yaml):
+        # Absolute paths are as the core sees them; ROOT only prefixes them in local test trees.
+        full = (ROOT + p) if os.path.isabs(p) else os.path.normpath(os.path.join(MIHOMO_DIR, p))
+        if not (os.path.isfile(full) and os.access(full, os.R_OK)) and p not in missing:
+            missing.append(p)
+    return missing
+
+
 def rewrite_cert_paths_in_yaml(raw_yaml: str, env: dict = None) -> tuple:
     """Point TLS certificate/private-key file paths under `listeners:` and `tls:` at this
     server's own certs (CERT / KEY); also rename a reserved `default` proxy-provider.
@@ -1043,51 +1089,30 @@ def rewrite_cert_paths_in_yaml(raw_yaml: str, env: dict = None) -> tuple:
     Never touches reality-config private keys, inline PEM, or outbound proxies.
     Keep in sync with fixCertPaths() in panel/web/src/App.vue."""
     lines = raw_yaml.splitlines()
-    out = []
-    top = ""
-    in_reality = False
-    reality_indent = 0
+    changed = 0
+    for i, m, kind in list(_iter_server_cert_lines(lines)):
+        target = CERT if kind == "certificate" else KEY
+        if m.group(3).strip().strip("'\"") != target:
+            changed += 1
+            indent = len(lines[i]) - len(lines[i].lstrip(" "))
+            lines[i] = (" " * indent) + f"{m.group(1)}{target}{m.group(4)}"
+    # Rename reserved provider key `default:` under `proxy-providers:` so mihomo -t passes
     in_providers = False
     providers_indent = 0
-    changed = 0
-
-    for line in lines:
+    for i, line in enumerate(lines):
         stripped = line.lstrip(" ")
         indent = len(line) - len(stripped)
-        if stripped and not stripped.startswith("#"):
-            if indent == 0:
-                m_top = re.match(r"^([A-Za-z0-9_-]+)\s*:", stripped)
-                top = m_top.group(1) if m_top else ""
-            if in_reality and indent <= reality_indent:
-                in_reality = False
-            if in_providers and indent <= providers_indent:
-                in_providers = False
-            if re.match(r"^(?:-\s+)?reality-config\s*:", stripped):
-                in_reality = True
-                reality_indent = indent
-                out.append(line)
-                continue
-            if re.match(r"^proxy-providers\s*:", stripped):
-                in_providers = True
-                providers_indent = indent
-                out.append(line)
-                continue
-            # Rename reserved provider key `default:` under `proxy-providers:` so mihomo -t passes
-            if in_providers and indent == providers_indent + 2 and re.match(r"^default\s*:\s*(#.*)?$", stripped):
-                line = (" " * indent) + re.sub(r"^default(\s*:)", r"default-sub\1", stripped, count=1)
-                out.append(line)
-                continue
-            if top in _CERT_SECTIONS and not in_reality:
-                m = re.match(r"^((?:-\s+)?(certificate|private-key)\s*:\s*)([^#\n]+?)(\s*(?:#.*)?)$", stripped)
-                if m and _is_cert_path_value(m.group(3)):
-                    target = CERT if m.group(2) == "certificate" else KEY
-                    if m.group(3).strip().strip("'\"") != target:
-                        changed += 1
-                        line = (" " * indent) + f"{m.group(1)}{target}{m.group(4)}"
-                    out.append(line)
-                    continue
-        out.append(line)
-    res = "\n".join(out) + ("\n" if raw_yaml.endswith("\n") else "")
+        if not stripped or stripped.startswith("#"):
+            continue
+        if in_providers and indent <= providers_indent:
+            in_providers = False
+        if re.match(r"^proxy-providers\s*:", stripped):
+            in_providers = True
+            providers_indent = indent
+            continue
+        if in_providers and indent == providers_indent + 2 and re.match(r"^default\s*:\s*(#.*)?$", stripped):
+            lines[i] = (" " * indent) + re.sub(r"^default(\s*:)", r"default-sub\1", stripped, count=1)
+    res = "\n".join(lines) + ("\n" if raw_yaml.endswith("\n") else "")
     return res, changed
 
 
@@ -3063,6 +3088,10 @@ def apply_custom_config(raw_yaml: str):
     if not s:
         raise ValueError("请输入完整的 Mihomo 服务端配置内容")
     s = sanitize_doh_url_line(s) + "\n"
+    # mihomo -t does not open TLS files, so a wrong path would "pass" and fail only at runtime.
+    missing = missing_cert_files(s)
+    if missing:
+        raise ValueError("证书文件不存在或无法读取：" + ", ".join(missing))
     was_custom = is_custom_config_mode()
     old_specs = collect_ufw_specs(read_nodes(), load_inbounds())
     files = (CUSTOM_CONF, CONF, NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON)
@@ -3120,12 +3149,31 @@ def new_default_reality_node(env: dict) -> dict:
     }
 
 
-def disable_custom_config():
-    """Leave custom mode: keep the user's file as CUSTOM_SAVED, restore the panel's nodes from
-    before custom mode (*.tplbak), regenerate the default template config from them, validate
-    and restart Mihomo. On any failure everything is rolled back (still in custom mode)."""
+def _write_template_state(nodes: list, inbs: list, proxies: list, providers: dict, env: dict):
+    """Write the panel state + template fragments and assemble CONF from them (no restart)."""
+    atomic_write(NODES_TSV, render_nodes_tsv(nodes), 0o640)
+    atomic_write(INBOUNDS, json.dumps(inbs, indent=2, ensure_ascii=False), 0o600)
+    atomic_write(PROXIES_JSON, json.dumps(proxies, indent=2, ensure_ascii=False), 0o600)
+    atomic_write(PROVIDERS_JSON, json.dumps(providers, indent=2, ensure_ascii=False), 0o600)
+    atomic_write(FRAG_REALITY, render_reality(nodes), 0o640)
+    atomic_write(FRAG_EXTRA, render_extra(inbs), 0o640)
+    atomic_write(FRAG_PROXIES, dump_yaml_proxies(proxies), 0o640)
+    atomic_write(FRAG_PROVIDERS, dump_yaml_providers(providers), 0o640)
+    atomic_write(FRAG_CONTROLLER, render_controller_fragment(env), 0o640)
+    get_routing().ensure_seeded()
+    atomic_write(CONF, assemble_config(), 0o640)
+
+
+def disable_custom_config() -> str:
+    """Leave custom mode: keep the user's file as CUSTOM_SAVED, then rebuild the default template
+    config, validate it and restart Mihomo. Node sources, first that passes `mihomo -t` wins:
+      "restored" - the panel's nodes from before custom mode (*.tplbak);
+      "kept"     - no (usable) backup, e.g. custom mode entered by an older version: the
+                   nodes the panel tracked while in custom mode;
+      "reset"    - neither validates: a fresh default VlessReality node, no outbounds.
+    Returns which one was used. On any other failure everything is rolled back."""
     if not is_custom_config_mode():
-        return
+        return ""
     env = read_env()
     old_specs = collect_ufw_specs(read_nodes(), load_inbounds())
     state_files = (NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON)
@@ -3133,32 +3181,41 @@ def disable_custom_config():
         FRAG_REALITY, FRAG_EXTRA, FRAG_PROXIES, FRAG_PROVIDERS, FRAG_CONTROLLER)
     backup = _snapshot_files(files)
     try:
+        candidates = []
+        if any(os.path.exists(p + ".tplbak") for p in state_files):
+            def bak(p, empty):
+                try:
+                    with open(p + ".tplbak") as f:
+                        raw = f.read()
+                except FileNotFoundError:
+                    return empty
+                return raw
+            nodes_bak = _parse_nodes_tsv(bak(NODES_TSV, ""))
+            try:
+                inbs_bak = _clean_inbounds(json.loads(bak(INBOUNDS, "[]") or "[]"))
+                prox_bak = json.loads(bak(PROXIES_JSON, "[]") or "[]")
+                prov_bak = json.loads(bak(PROVIDERS_JSON, "{}") or "{}")
+                candidates.append(("restored", nodes_bak, inbs_bak, prox_bak, prov_bak))
+            except (ValueError, TypeError):
+                pass
+        candidates.append(("kept", read_nodes(), load_inbounds(), load_server_proxies(), load_proxy_providers()))
+        candidates.append(("reset", [new_default_reality_node(env)], [], [], {}))
+
         atomic_write(CUSTOM_SAVED, backup[CUSTOM_CONF], 0o640)
         os.remove(CUSTOM_CONF)
-        if any(os.path.exists(p + ".tplbak") for p in state_files):
-            empty = {NODES_TSV: "", INBOUNDS: "[]\n", PROXIES_JSON: "[]\n", PROVIDERS_JSON: "{}\n"}
-            for p in state_files:
-                bak_p = p + ".tplbak"
-                data = empty[p]
-                if os.path.exists(bak_p):
-                    with open(bak_p) as f:
-                        data = f.read()
-                atomic_write(p, data, 0o600 if p.endswith(".json") else 0o640)
-        # else: no pre-custom snapshot; keep the nodes the panel tracked in custom mode.
-        nodes, inbs = read_nodes(), load_inbounds()
-        if not nodes and not inbs:
-            nodes = [new_default_reality_node(env)]
-        atomic_write(NODES_TSV, render_nodes_tsv(nodes), 0o640)
-        atomic_write(FRAG_REALITY, render_reality(nodes), 0o640)
-        atomic_write(FRAG_EXTRA, render_extra(inbs), 0o640)
-        atomic_write(FRAG_PROXIES, dump_yaml_proxies(load_server_proxies()), 0o640)
-        atomic_write(FRAG_PROVIDERS, dump_yaml_providers(load_proxy_providers()), 0o640)
-        atomic_write(FRAG_CONTROLLER, render_controller_fragment(env), 0o640)
-        get_routing().ensure_seeded()
-        atomic_write(CONF, assemble_config(), 0o640)
-        rc, out = validate_config()
-        if rc != 0:
-            raise RuntimeError("配置校验失败（mihomo -t）：" + out[-800:])
+        used, last_err = "", ""
+        for name, nodes, inbs, proxies, providers in candidates:
+            if not nodes and not inbs:
+                nodes = [new_default_reality_node(env)]
+            _write_template_state(nodes, inbs, proxies, providers, env)
+            rc, out = validate_config()
+            if rc == 0:
+                used = name
+                break
+            last_err = out[-800:]
+            sys.stderr.write(f"disable_custom_config: {name} state failed mihomo -t, trying next\n")
+        if not used:
+            raise RuntimeError("配置校验失败（mihomo -t）：" + last_err)
         rc, out = run([SYSTEMCTL, "restart", "mihomo"])
         if rc != 0:
             raise RuntimeError("重启失败：" + out[-800:])
@@ -3173,6 +3230,7 @@ def disable_custom_config():
     sync_client_files()
     sync_ufw(old_specs, collect_ufw_specs(read_nodes(), load_inbounds()))
     wait_mihomo_ports()
+    return used
 
 
 def reset_to_template_config():
@@ -4789,13 +4847,15 @@ class Panel(BaseHTTPRequestHandler):
         with LOCK:
             if updates.get("custom_server_enabled") is False and is_custom_config_mode():
                 try:
-                    disable_custom_config()
+                    used = disable_custom_config()
                     clear_pending_reload()
                 except Exception as e:
                     return self.respond_mutation(s, f"切换回默认服务端模板失败：{e}", False)
                 save_panel_settings({"custom_server_enabled": False})
                 updates.pop("custom_server_enabled")
                 if not updates:
+                    if used == "reset":
+                        return self.respond_mutation(s, "已关闭自定义服务端。原有节点无法用默认模板生成，已重置为默认服务端模板并生成新的 VlessReality 节点，请在客户端更新订阅。", True)
                     return self.respond_mutation(s, "已关闭自定义服务端，已切换回默认服务端模板并重载生效。", True)
             if "update_channel" in updates:
                 apply_update_channel_env(updates["update_channel"])

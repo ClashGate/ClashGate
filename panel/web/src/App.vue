@@ -1258,7 +1258,8 @@ function fixCertPaths(raw) {
     const stripped = line.replace(/^ +/, '')
     const indent = line.length - stripped.length
     if (!stripped || stripped.charAt(0) === '#') continue
-    if (indent === 0) {
+    if (indent === 0 && stripped.charAt(0) !== '-') {
+      // `- item` at column 0 stays in its section
       const mt = stripped.match(/^([A-Za-z0-9_-]+)\s*:/)
       top = mt ? mt[1] : ''
     }
