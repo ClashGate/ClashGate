@@ -603,6 +603,8 @@ const inboundForm = reactive({
 
 const currentProtocol = computed(() => PROTOCOL_MAP[inboundForm.kind] || PROTOCOLS[0])
 const currentDefaultName = computed(() => DEFAULT_NAMES[inboundForm.kind] || 'VlessReality')
+// Protocols that show one extra option field (SNI or a select) in the add-node form.
+const PROTOCOL_HAS_OPTION = new Set(['vless-reality', 'shadowquic', 'tuic', 'trusttunnel', 'mieru', 'http', 'socks'])
 const sniEditable = computed(() =>
   inboundForm.kind === 'vless-reality' || inboundForm.kind === 'shadowquic'
 )
@@ -2513,10 +2515,18 @@ onUnmounted(() => {
                       {{ p.label }}
                     </option>
                   </select>
-                  <p id="protocol-desc" class="mt-2 text-xs font-medium text-emerald-700 flex items-center gap-1.5">
-                    <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
-                    <span>{{ currentProtocol.label }}：{{ t(currentProtocol.desc) }}</span>
-                  </p>
+                  <!-- Stable height: every protocol's text is laid out invisibly in the same cell, so the card
+                       keeps the size of the longest one in any language and width. -->
+                  <div class="cg-stack mt-2">
+                    <p v-for="p in PROTOCOLS" :key="'desc-' + p.value" class="cg-stack-ghost text-xs font-medium flex items-center gap-1.5" aria-hidden="true">
+                      <span class="inline-block w-1.5 h-1.5 shrink-0"></span>
+                      <span>{{ p.label }}：{{ t(p.desc) }}</span>
+                    </p>
+                    <p id="protocol-desc" class="text-xs font-medium text-emerald-700 flex items-center gap-1.5">
+                      <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                      <span>{{ currentProtocol.label }}：{{ t(currentProtocol.desc) }}</span>
+                    </p>
+                  </div>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2543,94 +2553,106 @@ onUnmounted(() => {
                   </div>
                 </div>
 
-                <div v-if="sniEditable">
-                  <label for="sni" class="block text-xs font-semibold text-slate-700 mb-1.5">SNI</label>
-                  <input
-                    id="sni"
-                    v-model="inboundForm.sni"
-                    name="sni"
-                    autocomplete="off"
-                    spellcheck="false"
-                    :placeholder="t('留空从内置域名池随机抽取')"
-                    class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
-                  />
-                </div>
-
-                <!-- Non-locked protocol options (TUIC / TrustTunnel / Mieru / HTTP / SOCKS5) -->
-                <template v-if="inboundForm.kind === 'tuic'">
-                  <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('拥塞控制') }}</label>
-                    <select
-                      v-model="inboundForm.tuic_cc"
-                      name="tuic_cc"
-                      class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
-                    >
-                      <option value="bbr">{{ t('bbr (默认)') }}</option>
-                      <option value="cubic">cubic</option>
-                      <option value="new_reno">new_reno</option>
-                    </select>
+                <!-- Protocol options + locked note, stacked over invisible copies for every protocol (stable height). -->
+                <div class="cg-stack">
+                  <div v-for="p in PROTOCOLS" :key="'opt-' + p.value" class="cg-stack-ghost space-y-4" aria-hidden="true">
+                    <div v-if="PROTOCOL_HAS_OPTION.has(p.value)">
+                      <div class="block text-xs font-semibold mb-1.5">&nbsp;</div>
+                      <div class="h-10 border border-transparent"></div>
+                    </div>
+                    <div class="rounded-xl border px-3.5 py-2.5 text-xs leading-relaxed">{{ t(p.lockedNote) }}</div>
                   </div>
-                </template>
+                  <div class="space-y-4">
+                    <div v-if="sniEditable">
+                      <label for="sni" class="block text-xs font-semibold text-slate-700 mb-1.5">SNI</label>
+                      <input
+                        id="sni"
+                        v-model="inboundForm.sni"
+                        name="sni"
+                        autocomplete="off"
+                        spellcheck="false"
+                        :placeholder="t('留空从内置域名池随机抽取')"
+                        class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                      />
+                    </div>
 
-                <template v-else-if="inboundForm.kind === 'trusttunnel'">
-                  <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('拥塞控制') }}</label>
-                    <select
-                      v-model="inboundForm.tt_cc"
-                      name="tt_cc"
-                      class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
-                    >
-                      <option value="bbr">{{ t('bbr (默认)') }}</option>
-                      <option value="cubic">cubic</option>
-                    </select>
+                    <!-- Non-locked protocol options (TUIC / TrustTunnel / Mieru / HTTP / SOCKS5) -->
+                    <template v-if="inboundForm.kind === 'tuic'">
+                      <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('拥塞控制') }}</label>
+                        <select
+                          v-model="inboundForm.tuic_cc"
+                          name="tuic_cc"
+                          class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                        >
+                          <option value="bbr">{{ t('bbr (默认)') }}</option>
+                          <option value="cubic">cubic</option>
+                          <option value="new_reno">new_reno</option>
+                        </select>
+                      </div>
+                    </template>
+
+                    <template v-else-if="inboundForm.kind === 'trusttunnel'">
+                      <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('拥塞控制') }}</label>
+                        <select
+                          v-model="inboundForm.tt_cc"
+                          name="tt_cc"
+                          class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                        >
+                          <option value="bbr">{{ t('bbr (默认)') }}</option>
+                          <option value="cubic">cubic</option>
+                        </select>
+                      </div>
+                    </template>
+
+                    <template v-else-if="inboundForm.kind === 'mieru'">
+                      <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('传输协议') }}</label>
+                        <select
+                          v-model="inboundForm.mieru_transport"
+                          name="mieru_transport"
+                          class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                        >
+                          <option value="TCP">{{ t('TCP (默认)') }}</option>
+                          <option value="UDP">UDP</option>
+                        </select>
+                      </div>
+                    </template>
+
+                    <template v-else-if="inboundForm.kind === 'http'">
+                      <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('启用 TLS') }}</label>
+                        <select
+                          v-model="inboundForm.http_tls"
+                          name="http_tls"
+                          class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                        >
+                          <option value="0">{{ t('不启用 (默认)') }}</option>
+                          <option value="1">{{ t('启用') }}</option>
+                        </select>
+                      </div>
+                    </template>
+
+                    <template v-else-if="inboundForm.kind === 'socks'">
+                      <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('启用 TLS') }}</label>
+                        <select
+                          v-model="inboundForm.socks_tls"
+                          name="socks_tls"
+                          class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                        >
+                          <option value="0">{{ t('不启用 (默认)') }}</option>
+                          <option value="1">{{ t('启用') }}</option>
+                        </select>
+                      </div>
+                    </template>
+
+                    <!-- Locked security defaults notice -->
+                    <div class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
+                      {{ t(currentProtocol.lockedNote) }}
+                    </div>
                   </div>
-                </template>
-
-                <template v-else-if="inboundForm.kind === 'mieru'">
-                  <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('传输协议') }}</label>
-                    <select
-                      v-model="inboundForm.mieru_transport"
-                      name="mieru_transport"
-                      class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
-                    >
-                      <option value="TCP">{{ t('TCP (默认)') }}</option>
-                      <option value="UDP">UDP</option>
-                    </select>
-                  </div>
-                </template>
-
-                <template v-else-if="inboundForm.kind === 'http'">
-                  <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('启用 TLS') }}</label>
-                    <select
-                      v-model="inboundForm.http_tls"
-                      name="http_tls"
-                      class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
-                    >
-                      <option value="0">{{ t('不启用 (默认)') }}</option>
-                      <option value="1">{{ t('启用') }}</option>
-                    </select>
-                  </div>
-                </template>
-
-                <template v-else-if="inboundForm.kind === 'socks'">
-                  <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('启用 TLS') }}</label>
-                    <select
-                      v-model="inboundForm.socks_tls"
-                      name="socks_tls"
-                      class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
-                    >
-                      <option value="0">{{ t('不启用 (默认)') }}</option>
-                      <option value="1">{{ t('启用') }}</option>
-                    </select>
-                  </div>
-                </template>
-
-                <!-- Locked security defaults notice -->
-                <div class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
-                  {{ t(currentProtocol.lockedNote) }}
                 </div>
 
                 <button

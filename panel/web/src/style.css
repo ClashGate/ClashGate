@@ -903,3 +903,17 @@ textarea.cg-input:focus {
     transform: none !important;
   }
 }
+
+/* Add-node form: the active protocol's text sits on top of invisible copies of every protocol's text,
+   so switching protocols never changes the card height (and nothing around it moves). */
+.cg-stack {
+  display: grid;
+}
+.cg-stack > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+.cg-stack-ghost {
+  visibility: hidden;
+  pointer-events: none;
+}
