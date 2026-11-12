@@ -216,7 +216,8 @@ assemble_config() {
   seed_routing
   awk -v c="$FRAG_CONTROLLER" -v pv="$FRAG_PROVIDERS" -v p="$FRAG_PROXIES" \
       -v rp="$FRAG_RULE_PROVIDERS" -v pg="$FRAG_PROXY_GROUPS" -v ru="$FRAG_RULES" \
-      -v r="$FRAG_REALITY" -v e="$FRAG_EXTRA" '
+      -v r="$FRAG_REALITY" -v e="$FRAG_EXTRA" \
+      -v cp="$FRAG_CLUSTER_PROXIES" -v cl="$FRAG_CLUSTER_LISTENERS" '
     /^@@CONTROLLER@@$/ { while ((getline l < c) > 0) print l; next }
     /^@@PROXY_PROVIDERS@@$/ {
       has = 0
@@ -234,6 +235,11 @@ assemble_config() {
         if (!has) { print "proxies:"; has = 1 }
         print l
       }
+      while ((getline l < cp) > 0) {
+        if (l ~ /^[[:space:]]*$/) continue
+        if (!has) { print "proxies:"; has = 1 }
+        print l
+      }
       if (!has) print "proxies: []"
       next
     }
@@ -244,6 +250,7 @@ assemble_config() {
       buf = ""
       while ((getline l < r) > 0) buf = buf l "\n"
       while ((getline l < e) > 0) buf = buf l "\n"
+      while ((getline l < cl) > 0) buf = buf l "\n"
       if (buf ~ /[^[:space:]]/) { print "listeners:"; printf "%s", buf }
       else print "listeners: []"
       next

@@ -32,6 +32,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid as uuidlib
 import zlib
@@ -82,6 +83,11 @@ ROUTING_DIR = CS_ROOT + "/routing"
 FRAG_RULE_PROVIDERS = MIHOMO_DIR + "/routing.rule-providers.yaml"
 FRAG_PROXY_GROUPS = MIHOMO_DIR + "/routing.proxy-groups.yaml"
 FRAG_RULES = MIHOMO_DIR + "/routing.rules.yaml"
+# 1.14 cluster: links to other ClashGate panels. Kept out of the draft / reload flow and out of the
+# node list and client subscription; rendered into their own fragments and applied live.
+CLUSTER_JSON = CS_ROOT + "/cluster.json"
+FRAG_CLUSTER_LISTENERS = MIHOMO_DIR + "/listeners.cluster.yaml"
+FRAG_CLUSTER_PROXIES = MIHOMO_DIR + "/proxies.cluster.yaml"
 CLIENT_DIR = CS_ROOT + "/client"
 CERTCTL = CS_ROOT + "/scripts/certctl.sh"
 CERT = "/etc/clashgate/certs/fullchain.pem"   # paths as seen by mihomo (not ROOT-prefixed)
@@ -527,6 +533,7 @@ def used_ports(env) -> set:
     ports = {80, 443, int(env.get("PANEL_PORT", "0") or 0), get_controller_port(env)}
     ports |= {n["port"] for n in read_nodes()}
     ports |= {i["port"] for i in load_inbounds()}
+    ports |= {int(p["port"]) for p in load_cluster()["peers"] if p.get("port")}
     return ports
 
 
@@ -1492,8 +1499,11 @@ def parse_custom_config_state(raw_yaml: str, env: dict = None) -> tuple:
 
     raw_listeners = extract_top_level_yaml_section(raw_yaml, "listeners")
     new_inbounds = []
+    cluster_names = cluster_proxy_names()
     if isinstance(raw_listeners, list):
         for item in raw_listeners:
+            if isinstance(item, dict) and str(item.get("name") or "").startswith(CLUSTER_LISTENER_PREFIX):
+                continue   # cluster link: managed by cluster.json, never a user node
             if isinstance(item, dict):
                 try:
                     new_inbounds.append(listener_to_inbound(item, env, existing_by_name))
@@ -1505,6 +1515,8 @@ def parse_custom_config_state(raw_yaml: str, env: dict = None) -> tuple:
     if isinstance(raw_proxies, list):
         for p in raw_proxies:
             if isinstance(p, dict) and p.get("name") and p.get("type"):
+                if str(p["name"]) in cluster_names:
+                    continue   # cluster member outbound: managed by cluster.json
                 node = dict(p)
                 if "udp" not in node or node["udp"] is None:
                     node["udp"] = True
@@ -1902,11 +1914,12 @@ def assemble_config() -> str:
             proxies_frag = f.read()
     except FileNotFoundError:
         pass
+    proxies_frag += "\n" + _read_frag(FRAG_CLUSTER_PROXIES)
     proxies_lines = [l for l in proxies_frag.splitlines() if l.strip()]
     proxies_block = ("proxies:\n" + "\n".join(proxies_lines) + "\n") if proxies_lines else "proxies: []\n"
 
     block = ""
-    for frag in (FRAG_REALITY, FRAG_EXTRA):
+    for frag in (FRAG_REALITY, FRAG_EXTRA, FRAG_CLUSTER_LISTENERS):
         try:
             with open(frag) as f:
                 block += f.read()
@@ -2049,8 +2062,48 @@ def forget_session(tok: str):
         _save_sessions_file(Panel.sessions)
 
 
+# ---------------------------------------------------------------- local node name (本机名称)
+# Other panels in a cluster use this as the Mihomo proxy name of the link to this server, so it must
+# be short, unique-looking and safe inside rules ("RULE-SET,x,NAME"), YAML and the routing UI.
+# Mirrored in App.vue (CG_NODE_NAME ... end node-name); tests compare both.
+NODE_NAME_MAX = 20
+_NODE_NAME_BAD = re.compile(r"[\x00-\x1f\x7f\u0085\u2028\u2029,\"'\\`{}\[\]#|<>]")
+RESERVED_PROXY_NAMES = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"}
+
+
+def validate_node_name(raw) -> str:
+    """Return the cleaned 本机名称 or raise ValueError with a beginner-readable reason."""
+    name = str(raw or "").strip()
+    if not name:
+        raise ValueError("本机名称不能为空")
+    if len(name) > NODE_NAME_MAX:
+        raise ValueError(f"本机名称最多 {NODE_NAME_MAX} 个字符")
+    if _NODE_NAME_BAD.search(name):
+        raise ValueError("本机名称不能包含逗号、引号、反斜杠、方括号、花括号以及 # | < > 等符号")
+    if name.upper() in RESERVED_PROXY_NAMES:
+        raise ValueError(f"「{name}」是内核保留名称，请换一个")
+    return name
+
+
+def default_node_name() -> str:
+    """Suggested 本机名称 until the user sets one: the short host name, else ClashGate."""
+    try:
+        host = socket.gethostname().split(".")[0]
+    except OSError:
+        host = ""
+    host = re.sub(r"[^A-Za-z0-9_-]+", "", host)[:NODE_NAME_MAX]
+    try:
+        return validate_node_name(host)
+    except ValueError:
+        return "ClashGate"
+
+
+def local_node_name() -> str:
+    return load_panel_settings().get("node_name") or default_node_name()
+
+
 def load_panel_settings() -> dict:
-    out = {"custom_server_enabled": False, "auto_update": False, "update_channel": ""}
+    out = {"custom_server_enabled": False, "auto_update": False, "update_channel": "", "node_name": ""}
     try:
         with open(PANEL_SETTINGS) as f:
             raw = json.load(f)
@@ -2060,6 +2113,10 @@ def load_panel_settings() -> dict:
             ch = str(raw.get("update_channel") or "").strip().lower()
             if ch in ("stable", "test"):
                 out["update_channel"] = ch
+            try:
+                out["node_name"] = validate_node_name(raw.get("node_name") or "")
+            except ValueError:
+                pass
     except Exception:
         pass
     return out
@@ -2074,6 +2131,8 @@ def save_panel_settings(updates: dict):
         ch = str(updates.get("update_channel") or "").strip().lower()
         if ch in ("stable", "test"):
             cur["update_channel"] = ch
+    if "node_name" in updates:
+        cur["node_name"] = validate_node_name(updates["node_name"])
     atomic_write(
         PANEL_SETTINGS,
         json.dumps(cur, indent=2) + "\n",
@@ -2403,6 +2462,8 @@ def sync_ufw(old_specs: set, new_specs: set):
     env = read_env()
     cport = get_controller_port(env)
     protected = {"80/tcp", f"{env.get('PANEL_PORT') or 0}/tcp", f"{cport}/tcp"}
+    # Ports of current cluster links (cluster.json is saved before this runs) are never closed here.
+    protected |= cluster_ufw_specs()
     rc, out = run([UFW_BIN, "status"])
     if rc == 0 and "Status: active" in out:
         for spec in sorted(new_specs - old_specs):
@@ -2474,7 +2535,9 @@ def _sync_custom_conf_listeners(nodes: list, inbounds: list):
     try:
         with open(CUSTOM_CONF) as f:
             raw = f.read()
-        l_body = render_reality(nodes) + dump_yaml_proxies([i["listener"] for i in inbounds])
+        st = load_cluster()
+        l_body = (render_reality(nodes) + dump_yaml_proxies([i["listener"] for i in inbounds])
+                  + dump_yaml_proxies([cluster_listener_from_peer(p) for p in st["peers"]]))
         new_block = ("listeners:\n" + l_body) if l_body.strip() else "listeners: []\n"
         updated = replace_top_level_yaml_section(raw, "listeners", new_block)
         atomic_write(CUSTOM_CONF, updated, 0o640)
@@ -2488,7 +2551,8 @@ def _sync_custom_conf_proxies(proxies: list):
     try:
         with open(CUSTOM_CONF) as f:
             raw = f.read()
-        p_body = dump_yaml_proxies(proxies)
+        st = load_cluster()
+        p_body = dump_yaml_proxies(list(proxies) + [cluster_proxy_from_member(m) for m in st["members"]])
         new_block = ("proxies:\n" + p_body) if p_body.strip() else "proxies: []\n"
         updated = replace_top_level_yaml_section(raw, "proxies", new_block)
         atomic_write(CUSTOM_CONF, updated, 0o640)
@@ -3103,6 +3167,318 @@ def save_proxy_providers(new_providers: dict):
     except Exception:
         _restore_files(backup)
         raise
+
+
+# ---------------------------------------------------------------- cluster (集群, 1.14)
+# A panel can add other ClashGate panels. The remote panel then creates a dedicated VLESS inbound
+# with post-quantum VLESS Encryption (mlkem768x25519plus, ML-KEM-768 key) and hands back the client
+# side; this panel writes it into its own server config as an outbound named after the remote's
+# 本机名称. Both sides live in cluster.json and their own fragments, never in inbounds.json /
+# proxies.json, so they stay out of the node list, the outbound list and the client subscription.
+# Changes are applied to the running core right away (the remote has nobody to click "reload").
+#
+#   members: panels this server added   -> outbound proxies (proxies.cluster.yaml)
+#   peers:   panels that added us       -> inbound listeners (listeners.cluster.yaml)
+CLUSTER_PROTOCOL = 1
+CLUSTER_MIN_VERSION = "1.14"
+CLUSTER_LISTENER_PREFIX = "cg-cluster-"
+CLUSTER_FLOW = "xtls-rprx-vision"
+_CLUSTER_OP_LOCK = threading.Lock()   # one outgoing add/remove/refresh at a time (never held with LOCK while waiting on a remote)
+
+
+def load_cluster() -> dict:
+    out = {"instance": "", "members": [], "peers": []}
+    try:
+        with open(CLUSTER_JSON) as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            out["instance"] = str(raw.get("instance") or "")
+            out["members"] = [m for m in (raw.get("members") or []) if isinstance(m, dict) and m.get("id")]
+            out["peers"] = [p for p in (raw.get("peers") or []) if isinstance(p, dict) and p.get("id")]
+    except FileNotFoundError:
+        pass
+    except (ValueError, OSError) as e:
+        sys.stderr.write(f"cluster.json unreadable: {e}\n")
+    return out
+
+
+def cluster_instance_id() -> str:
+    """Random id of this panel, so a panel can recognise itself and re-joins replace the old link."""
+    st = load_cluster()
+    if not re.fullmatch(r"[0-9a-f]{32}", st["instance"]):
+        st["instance"] = secrets.token_hex(16)
+        save_cluster(st)
+    return st["instance"]
+
+
+def cluster_proxy_from_member(m: dict) -> dict:
+    """Outbound for a member (Mihomo docs: config/proxies/vless, `encryption`)."""
+    node = m.get("node") or {}
+    return {
+        "name": str(m.get("name") or ""),
+        "type": "vless",
+        "server": str(node.get("server") or ""),
+        "port": int(node.get("port") or 0),
+        "uuid": str(node.get("uuid") or ""),
+        "flow": CLUSTER_FLOW,
+        "packet-encoding": "xudp",
+        "encryption": str(node.get("encryption") or ""),
+        "network": "tcp",
+        "udp": True,
+    }
+
+
+def cluster_listener_from_peer(p: dict) -> dict:
+    """Dedicated inbound for a peer (Mihomo docs: config/inbound/listeners/vless, `decryption`)."""
+    return {
+        "name": CLUSTER_LISTENER_PREFIX + str(p["id"]),
+        "type": "vless",
+        "port": int(p["port"]),
+        "listen": "0.0.0.0",
+        "users": [{"username": "cluster", "uuid": str(p["uuid"]), "flow": CLUSTER_FLOW}],
+        "decryption": str(p["decryption"]),
+    }
+
+
+def render_cluster_proxies(st: dict) -> str:
+    return "".join("  - " + json.dumps(cluster_proxy_from_member(m), ensure_ascii=False) + "\n"
+                   for m in st.get("members") or [])
+
+
+def render_cluster_listeners(st: dict) -> str:
+    return "".join("  - " + json.dumps(cluster_listener_from_peer(p), ensure_ascii=False) + "\n"
+                   for p in st.get("peers") or [])
+
+
+def save_cluster(st: dict):
+    """cluster.json (0600: holds member tokens) plus both fragments; does not touch the running core."""
+    data = {"instance": st.get("instance") or "", "members": st.get("members") or [],
+            "peers": st.get("peers") or []}
+    atomic_write(CLUSTER_JSON, json.dumps(data, indent=2, ensure_ascii=False) + "\n", 0o600)
+    atomic_write(FRAG_CLUSTER_PROXIES, render_cluster_proxies(data), 0o640)
+    atomic_write(FRAG_CLUSTER_LISTENERS, render_cluster_listeners(data), 0o640)
+
+
+def _read_frag(path: str, files: dict = None) -> str:
+    if files is not None and path in files:
+        return files[path] or ""
+    try:
+        with open(path) as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
+
+def cluster_proxy_names() -> set:
+    return {str(m.get("name") or "") for m in load_cluster()["members"]}
+
+
+def cluster_ufw_specs(st: dict = None) -> set:
+    st = st or load_cluster()
+    return {f"{int(p['port'])}/tcp" for p in st["peers"] if p.get("port")}
+
+
+def vless_mlkem768_pair() -> tuple:
+    """(server decryption, client encryption) from `mihomo generate vless-mlkem768` (its Lazy-Config:
+    mlkem768x25519plus.native.600s.<ML-KEM-768 seed> / mlkem768x25519plus.native.0rtt.<client key>)."""
+    rc, out = run([resolve_mihomo_bin(), "generate", "vless-mlkem768"])
+    dec = re.search(r'\[Server\]\s*decryption:\s*"([^"]+)"', out)
+    enc = re.search(r'\[Client\]\s*encryption:\s*"([^"]+)"', out)
+    if rc != 0 or not dec or not enc or not dec.group(1).startswith("mlkem768x25519plus."):
+        raise RuntimeError("当前内核不支持 VLESS 后量子加密（vless-mlkem768），请先点顶部「更新内核」")
+    return dec.group(1), enc.group(1)
+
+
+def used_proxy_names() -> set:
+    """Names a new outbound must not take: server outbounds, cluster members, proxy groups, built-ins."""
+    names = {str(p.get("name") or "") for p in load_server_proxies()} | cluster_proxy_names()
+    names |= RESERVED_PROXY_NAMES
+    try:
+        _, pg_block, _ = get_routing().read_frags()
+        for m in re.finditer(r"^\s*-\s*name:\s*(.+?)\s*$", pg_block, re.M):
+            v = m.group(1)
+            try:
+                v = json.loads(v) if v.startswith('"') else v.strip("'")
+            except ValueError:
+                pass
+            names.add(str(v))
+    except Exception as e:
+        sys.stderr.write(f"routing names unavailable: {e}\n")
+    return {n for n in names if n}
+
+
+def _live_conf_with_cluster() -> str:
+    """The running config with only the cluster entries changed.
+
+    No unsaved drafts: the fragments are the live state, so just assemble. With drafts: take the live
+    config.yaml and rebuild only its listeners / proxies sections from the pre-draft baseline plus the
+    current cluster fragments, so the user's unpublished edits stay unpublished."""
+    pend = load_pending_reload()
+    has_pending = bool(pend["items"] or pend["sub_token"] or pend["mihomo_secret"])
+    if not has_pending or not os.path.isfile(PENDING_BASELINE_JSON) or not os.path.isfile(CONF):
+        return assemble_config()
+    with open(PENDING_BASELINE_JSON) as f:
+        files = json.load(f).get("files") or {}
+    with open(CONF) as f:
+        live = f.read()
+    lst = "".join(_read_frag(p, files) for p in (FRAG_REALITY, FRAG_EXTRA)) + _read_frag(FRAG_CLUSTER_LISTENERS)
+    prox = "\n".join(l for l in (_read_frag(FRAG_PROXIES, files) + "\n" + _read_frag(FRAG_CLUSTER_PROXIES)).splitlines()
+                     if l.strip())
+    live = replace_top_level_yaml_section(live, "listeners", ("listeners:\n" + lst) if lst.strip() else "listeners: []\n")
+    live = replace_top_level_yaml_section(live, "proxies", ("proxies:\n" + prox + "\n") if prox.strip() else "proxies: []\n")
+    return live
+
+
+def apply_cluster_live(old_specs: set):
+    """Write the cluster change into config.yaml, validate, reload the core, update the firewall.
+    Caller holds LOCK and has already saved cluster.json; raises (config restored) on failure."""
+    if is_custom_config_mode():
+        raise ValueError("已启用自定义服务端配置，集群暂不可用")
+    try:
+        with open(CONF) as f:
+            backup = f.read()
+    except FileNotFoundError:
+        backup = None
+    new_conf = _live_conf_with_cluster()
+    atomic_write(CONF, new_conf, 0o640)
+    rc, out = validate_config()
+    if rc != 0:
+        if backup is not None:
+            atomic_write(CONF, backup, 0o640)
+        raise RuntimeError("配置校验失败（mihomo -t）：" + out[-300:])
+    st = load_cluster()
+    rc, out = run([SYSTEMCTL, "reload", "mihomo"])
+    if rc == 0:
+        want = {int(p["port"]) for p in st["peers"]}
+        if want:
+            deadline = time.monotonic() + 2.0
+            while True:
+                now_st = mihomo_status()
+                if want.issubset(set(now_st["listening"])) or time.monotonic() >= deadline:
+                    break
+                time.sleep(0.15)
+            if now_st["listening"] and not want.issubset(set(now_st["listening"])):
+                rc, out = run([SYSTEMCTL, "restart", "mihomo"])
+    if rc != 0:
+        if backup is not None:
+            atomic_write(CONF, backup, 0o640)
+        run([SYSTEMCTL, "restart", "mihomo"])
+        raise RuntimeError("重载 Mihomo 失败：" + out[-300:])
+    # Keep "discard drafts" working: the baseline must describe the config that is live now.
+    if os.path.isfile(PENDING_BASELINE_JSON):
+        try:
+            with open(PENDING_BASELINE_JSON) as f:
+                snap = json.load(f)
+            snap["conf_sha256"] = _conf_digest()
+            atomic_write(PENDING_BASELINE_JSON, json.dumps(snap, ensure_ascii=False) + "\n", 0o600)
+        except Exception as e:
+            sys.stderr.write(f"pending baseline digest update failed: {e}\n")
+    sync_ufw(old_specs, cluster_ufw_specs(st))
+
+
+# -- outgoing requests to other panels (always HTTPS with normal certificate verification)
+class ClusterError(Exception):
+    """Error shown to the user as-is (Chinese source text, translated by i18n_en)."""
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def normalize_panel_url(raw: str) -> str:
+    """'host:port' / 'https://host:port/whatever' -> 'https://host:port'. Plain HTTP is refused."""
+    s = (raw or "").strip()
+    if not s:
+        raise ClusterError("请填写对方面板地址")
+    if re.match(r"^http://", s, re.I):
+        raise ClusterError("面板地址必须以 https:// 开头")
+    if not re.match(r"^[a-z][a-z0-9+.-]*://", s, re.I):
+        s = "https://" + s
+    u = urlparse(s)
+    if u.scheme.lower() != "https" or not u.hostname or u.username or u.password:
+        raise ClusterError("面板地址格式不对，例如 https://example.com:8443")
+    try:
+        port = u.port
+    except ValueError:
+        raise ClusterError("面板地址格式不对，例如 https://example.com:8443")
+    host = u.hostname.lower()
+    if not (_SNI_HOST.fullmatch(host) or re.fullmatch(r"[0-9.]+", host) or ":" in host):
+        raise ClusterError("面板地址格式不对，例如 https://example.com:8443")
+    hp = f"[{host}]" if ":" in host else host
+    return f"https://{hp}" + (f":{port}" if port and port != 443 else "")
+
+
+def _cluster_ssl_context() -> ssl.SSLContext:
+    # CLASHGATE_CLUSTER_CAFILE: extra trusted CA for local tests only; verification is never disabled.
+    cafile = os.environ.get("CLASHGATE_CLUSTER_CAFILE") or None
+    return ssl.create_default_context(cafile=cafile)
+
+
+def cluster_http(base: str, path: str, data: dict = None, timeout: int = 15) -> tuple:
+    """(status, json_or_None, server_header). Network / TLS problems raise ClusterError."""
+    body = urllib.parse.urlencode(data).encode() if data is not None else None
+    req = urllib.request.Request(base + path, data=body, method="POST" if data is not None else "GET",
+                                 headers={"Accept": "application/json",
+                                          "User-Agent": f"ClashGate/{VERSION} cluster",
+                                          **({"Content-Type": "application/x-www-form-urlencoded"} if body else {})})
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=_cluster_ssl_context()), _NoRedirect)
+    try:
+        resp = opener.open(req, timeout=timeout)
+        status, server, raw = resp.status, resp.headers.get("Server", ""), resp.read(1 << 20)
+    except urllib.error.HTTPError as e:
+        status, server = e.code, e.headers.get("Server", "") if e.headers else ""
+        try:
+            raw = e.read(1 << 20)
+        except Exception:
+            raw = b""
+    except urllib.error.URLError as e:
+        r = e.reason
+        if isinstance(r, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(r):
+            raise ClusterError("对方面板的 HTTPS 证书验证失败，请用对方证书上的域名访问（{}）".format(
+                getattr(r, "verify_message", "") or str(r)[:120]))
+        if isinstance(r, ssl.SSLError):
+            raise ClusterError("和对方面板建立 HTTPS 连接失败（{}）".format(str(r)[:120]))
+        if isinstance(r, (socket.timeout, TimeoutError)):
+            raise ClusterError("连接对方面板超时，请检查地址、端口和对方防火墙")
+        if isinstance(r, socket.gaierror):
+            raise ClusterError("无法解析对方面板的域名，请检查地址")
+        raise ClusterError("连接不上对方面板，请检查地址、端口和对方防火墙（{}）".format(str(r)[:120]))
+    except (socket.timeout, TimeoutError):
+        raise ClusterError("连接对方面板超时，请检查地址、端口和对方防火墙")
+    except (ssl.SSLError, OSError) as e:
+        raise ClusterError("连接不上对方面板，请检查地址、端口和对方防火墙（{}）".format(str(e)[:120]))
+    try:
+        obj = json.loads(raw.decode("utf-8"))
+        if not isinstance(obj, dict):
+            obj = None
+    except (ValueError, UnicodeDecodeError):
+        obj = None
+    return status, obj, server
+
+
+def cluster_hello(base: str) -> dict:
+    status, obj, server = cluster_http(base, "/api/cluster/hello")
+    if status == 200 and obj and obj.get("clashgate") and int(obj.get("cluster") or 0) >= CLUSTER_PROTOCOL:
+        return obj
+    m = re.match(r"clashgate/([0-9.]+)", server or "", re.I)
+    if m:
+        raise ClusterError(f"对方 ClashGate 版本是 {m.group(1)}，太旧了，请先把对方面板升级到 {CLUSTER_MIN_VERSION} 或更高")
+    raise ClusterError("这个地址不是 ClashGate 面板，请检查地址和端口")
+
+
+def _remote_error(status: int, obj, fallback: str) -> ClusterError:
+    code = (obj or {}).get("code") or ""
+    if code == "bad_password":
+        return ClusterError("对方面板密码错误")
+    if code == "rate_limited" or status == 429:
+        return ClusterError("对方面板尝试次数过多，请 10 分钟后再试")
+    if code == "custom_mode":
+        return ClusterError("对方启用了自定义服务端配置，不能自动加入集群")
+    if code == "bad_token":
+        return ClusterError("对方面板已不认这条集群连接（可能已在对方那边删除），请删除后重新添加")
+    msg = str((obj or {}).get("msg") or "")[:300]
+    return ClusterError(f"{fallback}：{msg}" if msg else f"{fallback}（HTTP {status}）")
 
 
 def apply_custom_config(raw_yaml: str):
@@ -4263,6 +4639,23 @@ def parse_cert(info: str) -> dict:
     return out
 
 
+def public_cluster_state(locked: bool) -> dict:
+    """Cluster data for the browser. Never includes tokens, UUIDs or keys."""
+    st = load_cluster()
+    settings = load_panel_settings()
+    return {
+        "node_name": settings.get("node_name") or default_node_name(),
+        "node_name_set": bool(settings.get("node_name")),
+        "node_name_max": NODE_NAME_MAX,
+        "locked": bool(locked),
+        "members": [{"id": m["id"], "name": m.get("name", ""), "url": m.get("url", ""),
+                     "port": (m.get("node") or {}).get("port"), "version": m.get("version", ""),
+                     "created": m.get("created", 0)} for m in st["members"]],
+        "peers": [{"id": p["id"], "name": p.get("name", ""), "port": p.get("port"),
+                   "created": p.get("created", 0), "seen": p.get("seen", 0)} for p in st["peers"]],
+    }
+
+
 class Panel(BaseHTTPRequestHandler):
     server_version = "clashgate/" + VERSION
     cfg: dict = {}
@@ -4521,6 +4914,7 @@ class Panel(BaseHTTPRequestHandler):
             "all_proxies_yaml": all_proxies_yaml,
             "proxies": proxy_items,
             "providers": provider_items,
+            "cluster": public_cluster_state(custom_active or bool(load_panel_settings().get("custom_server_enabled"))),
             "routing": _localize_routing_state(_beginner_routing_state(
                 get_routing().public_state(cur_cfg, custom_mode=True)
                 if custom_active
@@ -4614,6 +5008,8 @@ class Panel(BaseHTTPRequestHandler):
             return self.send(200, self.login_page())
         if path.startswith("/sub/"):
             return self.do_sub(path)
+        if path == "/api/cluster/hello":
+            return self.do_cluster_hello()
         tok, s = self.session()
         if not s:
             return self.redirect("/login")
@@ -4631,6 +5027,8 @@ class Panel(BaseHTTPRequestHandler):
             return self.send(200, self.dashboard(s, initial_tab="certs"))
         if path == "/settings":
             return self.send(200, self.dashboard(s, initial_tab="settings"))
+        if path == "/cluster":
+            return self.send(200, self.dashboard(s, initial_tab="cluster"))
         if path == "/api/state":
             return self.send(200, json.dumps(self.build_client_state(s), ensure_ascii=False), "application/json; charset=utf-8")
         if path == "/api/upgrade-status":
@@ -4695,6 +5093,12 @@ class Panel(BaseHTTPRequestHandler):
             return self.send(413, str(e), "text/plain; charset=utf-8")
         if path == "/login":
             return self.do_login(form)
+        if path == "/api/cluster/join":
+            return self.do_cluster_join(form)
+        if path == "/api/cluster/leave":
+            return self.do_cluster_leave(form)
+        if path == "/api/cluster/status":
+            return self.do_cluster_status(form)
         tok, s = self.session()
         if not s:
             if self.is_ajax():
@@ -4733,6 +5137,14 @@ class Panel(BaseHTTPRequestHandler):
             return self.do_reset_sub(s)
         if path == "/inbounds/add":
             return self.do_add(s, form)
+        if path == "/cluster/add":
+            return self.do_cluster_add(s, form)
+        if path == "/cluster/remove":
+            return self.do_cluster_remove(s, form)
+        if path == "/cluster/refresh":
+            return self.do_cluster_refresh(s, form)
+        if path == "/cluster/peer-remove":
+            return self.do_cluster_peer_remove(s, form)
         if path == "/proxies/add":
             return self.do_add_proxies(s, form)
         if path == "/proxies/delete":
@@ -4865,6 +5277,318 @@ class Panel(BaseHTTPRequestHandler):
             self.fails[ip] = recent
         self.send(401, self.login_page("用户名或密码错误。"))
 
+    # -- cluster (集群): API called by other panels (no session; password or per-link token)
+    def _cjson(self, code: int, obj: dict):
+        return self.send(code, json.dumps(obj, ensure_ascii=False), "application/json; charset=utf-8")
+
+    def _cluster_rate_limited(self) -> bool:
+        ip, now = self.login_bucket(), time.time()
+        with _SESSION_LOCK:
+            recent = [t for t in self.fails.get(ip, []) if now - t < LOGIN_WINDOW]
+            total = sum(len([t for t in v if now - t < LOGIN_WINDOW]) for v in self.fails.values())
+        return len(recent) >= LOGIN_MAX_FAILS_PER_IP or total >= LOGIN_MAX_FAILS_TOTAL
+
+    def _cluster_note_fail(self):
+        ip, now = self.login_bucket(), time.time()
+        with _SESSION_LOCK:
+            self.fails[ip] = [t for t in self.fails.get(ip, []) if now - t < LOGIN_WINDOW] + [now]
+
+    def do_cluster_hello(self):
+        return self._cjson(200, {"clashgate": True, "cluster": CLUSTER_PROTOCOL, "version": VERSION,
+                                 "name": local_node_name(), "instance": cluster_instance_id()})
+
+    def _cluster_peer_auth(self, form):
+        """(peer, None) for a valid member_id + token, else (None, error response sent)."""
+        if self._cluster_rate_limited():
+            return None, self._cjson(429, {"ok": False, "code": "rate_limited", "msg": "尝试次数过多，请 10 分钟后再试。"})
+        pid, token = str(form.get("member_id") or ""), str(form.get("token") or "")
+        peer = next((p for p in load_cluster()["peers"] if p.get("id") == pid), None)
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        if not peer or not token or not hmac.compare_digest(digest, str(peer.get("token_hash") or "")):
+            self._cluster_note_fail()
+            return None, self._cjson(403, {"ok": False, "code": "bad_token", "msg": "集群连接凭据无效"})
+        return peer, None
+
+    def do_cluster_join(self, form):
+        if self._cluster_rate_limited():
+            return self._cjson(429, {"ok": False, "code": "rate_limited", "msg": "尝试次数过多，请 10 分钟后再试。"})
+        if self.cfg_path and os.path.isfile(self.cfg_path):
+            try:
+                with open(self.cfg_path) as f:
+                    d = json.load(f)
+                if isinstance(d, dict) and d.get("password_hash"):
+                    self.cfg["password_hash"] = d["password_hash"]
+            except Exception:
+                pass
+        if not verify_password(str(form.get("password") or ""), self.cfg.get("password_hash", "")):
+            self._cluster_note_fail()
+            return self._cjson(401, {"ok": False, "code": "bad_password", "msg": "面板密码错误"})
+        with _SESSION_LOCK:
+            self.fails.pop(self.login_bucket(), None)
+        if is_custom_config_mode() or load_panel_settings().get("custom_server_enabled"):
+            return self._cjson(409, {"ok": False, "code": "custom_mode", "msg": "已启用自定义服务端配置，集群暂不可用"})
+        peer_inst = str(form.get("instance") or "")
+        if not re.fullmatch(r"[0-9a-f]{32}", peer_inst):
+            peer_inst = ""
+        if peer_inst and peer_inst == cluster_instance_id():
+            return self._cjson(400, {"ok": False, "code": "self", "msg": "不能添加本机"})
+        try:
+            peer_name = validate_node_name(form.get("name"))
+        except ValueError:
+            peer_name = "ClashGate"
+        token = secrets.token_urlsafe(32)
+        with LOCK:
+            backup = _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS))
+            try:
+                st = load_cluster()
+                st["instance"] = cluster_instance_id()
+                old_specs = cluster_ufw_specs(st)
+                dec, enc = vless_mlkem768_pair()
+                port = pick_port(read_env())
+                # The same panel joining again (it lost or removed its side) replaces its old link.
+                st["peers"] = [p for p in st["peers"] if not (peer_inst and p.get("instance") == peer_inst)]
+                peer = {"id": secrets.token_hex(6), "name": peer_name, "instance": peer_inst, "port": port,
+                        "uuid": str(uuidlib.uuid4()), "decryption": dec,
+                        "token_hash": hashlib.sha256(token.encode()).hexdigest(),
+                        "created": int(time.time()), "seen": int(time.time())}
+                st["peers"].append(peer)
+                save_cluster(st)
+                apply_cluster_live(old_specs)
+            except Exception as e:
+                _restore_files(backup)
+                sys.stderr.write(f"cluster join failed: {e}\n")
+                return self._cjson(500, {"ok": False, "code": "apply_failed", "msg": str(e)[:300]})
+        sys.stderr.write(f"cluster: panel '{peer_name}' joined, inbound port {port}\n")
+        return self._cjson(200, {"ok": True, "version": VERSION, "name": local_node_name(),
+                                 "member_id": peer["id"], "token": token,
+                                 "node": {"port": port, "uuid": peer["uuid"], "flow": CLUSTER_FLOW,
+                                          "encryption": enc}})
+
+    def do_cluster_leave(self, form):
+        pid = str(form.get("member_id") or "")
+        if not any(p.get("id") == pid for p in load_cluster()["peers"]) and not self._cluster_rate_limited():
+            return self._cjson(200, {"ok": True, "gone": True})
+        peer, err = self._cluster_peer_auth(form)
+        if not peer:
+            return err
+        try:
+            self._remove_peer(peer["id"])
+        except Exception as e:
+            return self._cjson(500, {"ok": False, "code": "apply_failed", "msg": str(e)[:300]})
+        return self._cjson(200, {"ok": True})
+
+    def do_cluster_status(self, form):
+        peer, err = self._cluster_peer_auth(form)
+        if not peer:
+            return err
+        try:
+            name = validate_node_name(form.get("name"))
+        except ValueError:
+            name = ""
+        with LOCK:
+            st = load_cluster()
+            for p in st["peers"]:
+                if p.get("id") == peer["id"]:
+                    p["seen"] = int(time.time())
+                    if name:
+                        p["name"] = name
+            save_cluster(st)
+        return self._cjson(200, {"ok": True, "version": VERSION, "name": local_node_name()})
+
+    def _remove_peer(self, pid: str) -> dict:
+        with LOCK:
+            st = load_cluster()
+            gone = [p for p in st["peers"] if p.get("id") == pid]
+            if not gone:
+                return {}
+            backup = _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS))
+            old_specs = cluster_ufw_specs(st)
+            st["peers"] = [p for p in st["peers"] if p.get("id") != pid]
+            save_cluster(st)
+            if is_custom_config_mode():
+                # Locked mode: the listener leaves the custom file now and the core on the next reload.
+                _sync_custom_conf_listeners(read_nodes(), load_inbounds())
+                return gone[0]
+            try:
+                apply_cluster_live(old_specs)
+            except Exception:
+                _restore_files(backup)
+                raise
+            return gone[0]
+
+    # -- cluster: this panel's own page (session + CSRF)
+    def _cluster_locked(self) -> bool:
+        return is_custom_config_mode() or bool(load_panel_settings().get("custom_server_enabled"))
+
+    def do_cluster_add(self, s, form):
+        if self._cluster_locked():
+            return self.respond_mutation(s, "已启用自定义服务端配置，集群暂不可用", False)
+        if not _CLUSTER_OP_LOCK.acquire(blocking=False):
+            return self.respond_mutation(s, "另一个集群操作正在进行，请稍候再试", False)
+        try:
+            base = normalize_panel_url(form.get("url", ""))
+            pw = str(form.get("password") or "")
+            if not pw:
+                raise ClusterError("请填写对方面板密码")
+            hello = cluster_hello(base)
+            my_inst = cluster_instance_id()
+            r_inst = str(hello.get("instance") or "")
+            if r_inst and r_inst == my_inst:
+                raise ClusterError("不能添加本机")
+            for m in load_cluster()["members"]:
+                if m.get("url") == base or (r_inst and m.get("instance") == r_inst):
+                    raise ClusterError(f"这个面板已经添加过了（「{m.get('name')}」）")
+            try:
+                rname = validate_node_name(hello.get("name"))
+            except ValueError:
+                raise ClusterError("对方面板的本机名称无效，请先在对方面板的设置里重新填写")
+            if rname in used_proxy_names():
+                raise ClusterError(f"对方的本机名称「{rname}」和本机已有的出站或分流组重名，请先在对方面板的设置里改个名字")
+            status, obj, _ = cluster_http(base, "/api/cluster/join",
+                                          {"password": pw, "name": local_node_name(), "instance": my_inst,
+                                           "version": VERSION}, timeout=90)
+            if status != 200 or not obj or not obj.get("ok"):
+                raise _remote_error(status, obj, "对方面板没能创建集群节点")
+            node = obj.get("node") if isinstance(obj.get("node"), dict) else {}
+            try:
+                port = int(node.get("port"))
+                assert 1 <= port <= 65535
+                uid = str(uuidlib.UUID(str(node.get("uuid"))))
+                enc = str(node.get("encryption") or "")
+                assert re.fullmatch(r"mlkem768x25519plus\.[A-Za-z0-9._=-]+", enc)
+                assert re.fullmatch(r"[0-9a-f]{12}", str(obj.get("member_id") or ""))
+                assert obj.get("token")
+            except (AssertionError, TypeError, ValueError):
+                raise ClusterError("对方面板返回的节点参数无效")
+            try:
+                rname = validate_node_name(obj.get("name") or rname)
+            except ValueError:
+                pass
+            member = {"id": secrets.token_hex(6), "name": rname, "url": base, "instance": r_inst,
+                      "member_id": str(obj["member_id"]), "token": str(obj["token"]),
+                      "version": str(obj.get("version") or hello.get("version") or ""),
+                      "node": {"server": urlparse(base).hostname, "port": port, "uuid": uid, "encryption": enc},
+                      "created": int(time.time())}
+            failed = None
+            with LOCK:
+                backup = _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS))
+                try:
+                    if rname in used_proxy_names():
+                        raise ClusterError(f"对方的本机名称「{rname}」和本机已有的出站或分流组重名，请先在对方面板的设置里改个名字")
+                    st = load_cluster()
+                    old_specs = cluster_ufw_specs(st)
+                    st["members"].append(member)
+                    save_cluster(st)
+                    apply_cluster_live(old_specs)
+                except Exception as e:
+                    _restore_files(backup)
+                    failed = e
+            if failed is not None:
+                try:   # do not leave an orphan inbound on the remote
+                    cluster_http(base, "/api/cluster/leave", {"member_id": member["member_id"], "token": member["token"]}, timeout=60)
+                except ClusterError:
+                    pass
+                if isinstance(failed, ClusterError):
+                    raise failed
+                raise ClusterError(f"添加失败：{failed}")
+            sys.stderr.write(f"cluster: added member '{rname}' ({base})\n")
+            return self.respond_mutation(s, f"已添加集群成员「{rname}」，它已作为出站写入服务端配置并立即生效", True)
+        except (ClusterError, ValueError) as e:
+            return self.respond_mutation(s, str(e), False)
+        finally:
+            _CLUSTER_OP_LOCK.release()
+
+    def do_cluster_remove(self, s, form):
+        if self._cluster_locked():
+            return self.respond_mutation(s, "已启用自定义服务端配置，集群暂不可用", False)
+        if not _CLUSTER_OP_LOCK.acquire(blocking=False):
+            return self.respond_mutation(s, "另一个集群操作正在进行，请稍候再试", False)
+        try:
+            mid = str(form.get("id") or "")
+            with LOCK:
+                st = load_cluster()
+                m = next((x for x in st["members"] if x.get("id") == mid), None)
+                if not m:
+                    return self.respond_mutation(s, "已移除", True)
+                backup = _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS))
+                old_specs = cluster_ufw_specs(st)
+                st["members"] = [x for x in st["members"] if x.get("id") != mid]
+                save_cluster(st)
+                try:
+                    apply_cluster_live(old_specs)
+                except Exception as e:
+                    _restore_files(backup)
+                    return self.respond_mutation(s, f"移除失败：{e}", False)
+            name = m.get("name") or ""
+            try:
+                status, obj, _ = cluster_http(m["url"], "/api/cluster/leave",
+                                              {"member_id": m.get("member_id", ""), "token": m.get("token", "")}, timeout=60)
+                if status != 200 or not obj or not obj.get("ok"):
+                    raise _remote_error(status, obj, "对方面板拒绝了删除请求")
+            except ClusterError as e:
+                return self.respond_mutation(
+                    s, f"已移除集群成员「{name}」，但没能让对方面板删除专用入站，可以到对方面板的「集群」页手动删除。原因：{e}", True)
+            return self.respond_mutation(s, f"已移除集群成员「{name}」，对方面板上的专用入站也已删除", True)
+        finally:
+            _CLUSTER_OP_LOCK.release()
+
+    def do_cluster_refresh(self, s, form):
+        if self._cluster_locked():
+            return self.respond_mutation(s, "已启用自定义服务端配置，集群暂不可用", False)
+        if not _CLUSTER_OP_LOCK.acquire(blocking=False):
+            return self.respond_mutation(s, "另一个集群操作正在进行，请稍候再试", False)
+        try:
+            mid = str(form.get("id") or "")
+            m = next((x for x in load_cluster()["members"] if x.get("id") == mid), None)
+            if not m:
+                return self.respond_mutation(s, "集群成员不存在", False)
+            status, obj, _ = cluster_http(m["url"], "/api/cluster/status",
+                                          {"member_id": m.get("member_id", ""), "token": m.get("token", ""),
+                                           "name": local_node_name()})
+            if status != 200 or not obj or not obj.get("ok"):
+                raise _remote_error(status, obj, "对方面板没有响应集群请求")
+            try:
+                new_name = validate_node_name(obj.get("name"))
+            except ValueError:
+                new_name = m.get("name") or ""
+            ver = str(obj.get("version") or "")
+            renamed = new_name != m.get("name")
+            with LOCK:
+                st = load_cluster()
+                if renamed and new_name in (used_proxy_names() - {m.get("name")}):
+                    raise ClusterError(f"对方的本机名称「{new_name}」和本机已有的出站或分流组重名，请先在对方面板的设置里改个名字")
+                backup = _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS))
+                for x in st["members"]:
+                    if x.get("id") == mid:
+                        x["version"] = ver
+                        x["seen"] = int(time.time())
+                        x["name"] = new_name
+                save_cluster(st)
+                if renamed:
+                    try:
+                        apply_cluster_live(cluster_ufw_specs(st))
+                    except Exception as e:
+                        _restore_files(backup)
+                        return self.respond_mutation(s, f"更新名称失败：{e}", False)
+            if renamed:
+                return self.respond_mutation(s, f"对方在线，已更新为对方的新名称「{new_name}」", True)
+            return self.respond_mutation(s, f"「{new_name}」在线，对方面板版本 {ver}", True)
+        except ClusterError as e:
+            return self.respond_mutation(s, str(e), False)
+        finally:
+            _CLUSTER_OP_LOCK.release()
+
+    def do_cluster_peer_remove(self, s, form):
+        if self._cluster_locked():
+            return self.respond_mutation(s, "已启用自定义服务端配置，集群暂不可用", False)
+        try:
+            gone = self._remove_peer(str(form.get("id") or ""))
+        except Exception as e:
+            return self.respond_mutation(s, f"删除失败：{e}", False)
+        if not gone:
+            return self.respond_mutation(s, "已删除", True)
+        return self.respond_mutation(s, f"已删除「{gone.get('name')}」接入本机的专用入站，对方面板上对应的出站将无法再连接", True)
+
     def do_discard_pending(self, s):
         with LOCK:
             try:
@@ -4875,6 +5599,14 @@ class Panel(BaseHTTPRequestHandler):
         return self.respond_mutation(s, "已丢弃待重载草稿", True)
 
     def do_settings(self, s, form):
+        if "node_name" in form:
+            try:
+                name = validate_node_name(form.get("node_name"))
+                with LOCK:
+                    save_panel_settings({"node_name": name})
+            except ValueError as e:
+                return self.respond_mutation(s, str(e), False)
+            return self.respond_mutation(s, f"本机名称已保存为「{name}」", True)
         updates = {}
         channel_raw = (form.get("update_channel") or "").strip()
         for key in ("custom_server_enabled", "auto_update"):
@@ -5367,6 +6099,10 @@ class Panel(BaseHTTPRequestHandler):
         with LOCK:
             try:
                 added = parse_mihomo_proxies(raw)
+                taken = cluster_proxy_names()
+                for p in added:
+                    if p["name"] in taken:
+                        raise ValueError(f"名称「{p['name']}」已被集群成员使用，请换一个名字")
                 cur = load_server_proxies()
                 by_name = {p["name"]: i for i, p in enumerate(cur)}
                 merged = list(cur)
@@ -5685,7 +6421,7 @@ class Panel(BaseHTTPRequestHandler):
         q = parse_qs(urlparse(self.path).query)
         msg, ok = q.get("msg", [""])[0], q.get("ok", ["1"])[0] == "1"
         tab_q = q.get("tab", [""])[0]
-        if tab_q in ("inbounds", "outbounds", "readable", "advanced", "certs", "settings"):
+        if tab_q in ("inbounds", "outbounds", "readable", "advanced", "certs", "settings", "cluster"):
             initial_tab = tab_q
         env = read_env()
         st = mihomo_status()
