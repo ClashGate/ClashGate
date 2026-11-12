@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ClashGate test suite: shell lint, panel unit tests (mihomo -t), i18n parity, frontend build.
+# ClashGate test suite: shell lint, panel unit tests (mihomo -t), cluster e2e, i18n parity, frontend build.
 #   tests/run.sh            # everything
 #   tests/run.sh --no-build # skip the frontend build check
 # MIHOMO_BIN overrides the core binary; otherwise the pinned version is downloaded to tests/.cache.
@@ -40,6 +40,14 @@ export MIHOMO_BIN
 
 step "panel tests"
 python3 -m unittest discover -s tests -v
+
+step "cluster end-to-end (two local panels over HTTPS)"
+if command -v openssl >/dev/null && command -v ss >/dev/null && command -v curl >/dev/null; then
+  python3 tests/cluster_e2e.py
+else
+  echo "openssl/ss/curl missing; skipped" >&2
+  [[ -z ${CI:-} ]] || exit 1
+fi
 
 step "i18n parity"
 python3 tests/check_i18n.py
