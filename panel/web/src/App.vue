@@ -1280,15 +1280,16 @@ function fixCertPaths(raw) {
   return { text: lines.join('\n'), changed }
 }
 
-async function saveCustomConfig(text, autoFix) {
-  customConfigText.value = text
+// autoFix: the server rewrites the paths (and reports how many); `shown` is what the
+// editor keeps if the save fails (a failed save returns the old server state).
+async function saveCustomConfig(text, autoFix, shown = text) {
+  customConfigText.value = shown
   const res = await postAction(
     '/config/custom',
     { custom_config_raw: text, auto_fix_certs: autoFix ? '1' : '0' },
     'save-custom'
   )
-  // A failed save returns the old server state; keep what the user submitted in the editor.
-  if (!res || !res.ok) customConfigText.value = text
+  if (!res || !res.ok) customConfigText.value = shown
 }
 
 async function submitCustomConfig() {
@@ -1305,7 +1306,7 @@ async function submitCustomConfig() {
       confirmText: t('自动配置并保存'),
       cancelText: t('保持我的配置'),
       tone: 'emerald',
-      onConfirm: () => saveCustomConfig(fixed.text, true),
+      onConfirm: () => saveCustomConfig(raw, true, fixed.text),
       onCancel: () => saveCustomConfig(raw, false),
     })
     return
