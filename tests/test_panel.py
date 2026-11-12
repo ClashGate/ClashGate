@@ -246,14 +246,14 @@ class ClusterTest(unittest.TestCase):
                 os.remove(f)
 
     def _state(self):
-        dec, enc = P.vless_mlkem768_pair()
-        member = {"id": "m1", "name": "东京-1", "url": "https://tokyo.example.com:8443", "token": "t" * 43,
-                  "version": "1.14", "created": 1, "instance": "a" * 32,
-                  "node": {"server": "203.0.113.9", "port": 31000, "uuid": "11111111-2222-4333-8444-555555555555",
-                           "encryption": enc}}
-        peer = {"id": "abc123", "name": "香港", "instance": "b" * 32, "token_hash": "0" * 64, "port": 31001,
-                "uuid": "66666666-7777-4888-9999-000000000000", "decryption": dec, "created": 1, "seen": 1}
-        return {"instance": "c" * 32, "members": [member], "peers": [peer]}, dec, enc
+        dec_in, enc_peer = P.vless_mlkem768_pair()     # our inbound for the other panel
+        _, enc_out = P.vless_mlkem768_pair()           # the other panel's inbound, seen from here
+        link = {"id": "abc123", "instance": "a" * 32, "name": "东京-1", "url": "https://tokyo.example.com:8443",
+                "key": "k" * 43, "version": "1.14", "created": 1, "seen": 1, "ok": True, "error": "", "missing": [],
+                "in": {"port": 31001, "uuid": "66666666-7777-4888-9999-000000000000", "decryption": dec_in},
+                "out": {"server": "tokyo.example.com", "port": 31000, "uuid": "11111111-2222-4333-8444-555555555555",
+                        "encryption": enc_out}}
+        return {"instance": "c" * 32, "links": [link], "pending": [], "removed": {}}, dec_in, enc_out
 
     def test_node_name_validation(self):
         for name in NODE_NAMES_OK:
@@ -297,31 +297,37 @@ class ClusterTest(unittest.TestCase):
             f.write(conf)
         rc, out = P.validate_config()
         self.assertEqual(rc, 0, out)
+        # one link = one outbound to the other panel + one dedicated inbound for it
         self.assertIn('"name": "东京-1"', conf)
+        self.assertIn('"server": "tokyo.example.com"', conf)
         self.assertIn('"encryption": "' + enc + '"', conf)
         self.assertIn('"name": "cg-cluster-abc123"', conf)
         self.assertIn('"decryption": "' + dec + '"', conf)
-        self.assertIn('"flow": "xtls-rprx-vision"', conf)
+        self.assertEqual(conf.count('"flow": "xtls-rprx-vision"'), 2)
         self.assertNotIn("skip-cert-verify", conf)
-        # routing groups use include-all, so the member is selectable without listing it anywhere
+        # routing groups use include-all, so the link is selectable without listing it anywhere
         self.assertIn("include-all: true", read(P.FRAG_PROXY_GROUPS) if os.path.exists(P.FRAG_PROXY_GROUPS) else conf)
         self.assertIn(31001, P.used_ports(P.read_env()))
-        self.assertIn("31001/tcp", P.cluster_ufw_specs())
+        self.assertEqual(P.cluster_ufw_specs(), {"31001/tcp"})
         self.assertIn("东京-1", P.used_proxy_names())
 
     def test_cluster_hidden_from_subscription_and_ui(self):
         st, dec, enc = self._state()
         P.save_cluster(st)
+        link = st["links"][0]
         sub = P.render_subscription(P.read_env(), live=False)
-        for secret in ("东京-1", "香港", "cg-cluster", enc, dec, st["members"][0]["node"]["uuid"], st["peers"][0]["uuid"]):
+        for secret in ("东京-1", "cg-cluster", enc, dec, link["out"]["uuid"], link["in"]["uuid"], link["key"]):
             self.assertNotIn(secret, sub)
         self.assertNotIn("东京-1", [p.get("name") for p in P.load_server_proxies()])
-        pub = json.dumps(P.public_cluster_state(False), ensure_ascii=False)
-        self.assertIn("东京-1", pub)
-        self.assertIn("香港", pub)
-        for secret in (enc, dec, st["members"][0]["token"], st["peers"][0]["token_hash"],
-                       st["members"][0]["node"]["uuid"], st["peers"][0]["uuid"]):
-            self.assertNotIn(secret, pub)
+        pub = P.public_cluster_state(False)
+        self.assertEqual([m["name"] for m in pub["members"]], ["东京-1"])
+        self.assertEqual(pub["self_url"], "https://ex.sslip.io:25183")
+        raw = json.dumps(pub, ensure_ascii=False)
+        for secret in (enc, dec, link["key"], link["out"]["uuid"], link["in"]["uuid"]):
+            self.assertNotIn(secret, raw)
+        view = json.dumps(P.cluster_members_view(P.load_cluster()))
+        self.assertNotIn(link["key"], view)
+        self.assertIn("tokyo.example.com", view)
 
     def test_custom_mode_keeps_cluster_out_of_parsed_state(self):
         st, _, _ = self._state()
@@ -330,6 +336,19 @@ class ClusterTest(unittest.TestCase):
         self.assertFalse([i for i in inbs if i["name"].startswith(P.CLUSTER_LISTENER_PREFIX)])
         self.assertNotIn("东京-1", [p.get("name") for p in proxies])
         self.assertIn("shadowsocks-t", [i["name"] for i in inbs])
+
+    def test_old_cluster_file_is_ignored(self):
+        with open(P.CLUSTER_JSON, "w") as f:
+            json.dump({"instance": "d" * 32, "members": [{"id": "x"}], "peers": [{"id": "y"}]}, f)
+        st = P.load_cluster()
+        self.assertEqual((st["instance"], st["links"]), ("d" * 32, []))
+
+    def test_report_text(self):
+        rep = {"linked": ["B", "C"], "meshed": 2, "failed": ["D ↔ E"], "dropped": [], "offline": ["F"]}
+        txt = P.cluster_report_text(rep)
+        self.assertIn("「B、C」", txt)
+        import i18n_en
+        self.assertNotRegex(i18n_en.tr(txt, "en"), r"[\u4e00-\u9fff]")
 
     def test_panel_url_normalization(self):
         self.assertEqual(P.normalize_panel_url("panel.example.com:8443/"), "https://panel.example.com:8443")
