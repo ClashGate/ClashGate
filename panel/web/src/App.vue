@@ -3389,7 +3389,7 @@ onUnmounted(() => {
                   </span>
                 </div>
                 <p class="text-xs text-slate-500">
-                  {{ t('您可以直接粘贴或编辑整份自备的 Mihomo 服务端配置文件（') }}<code class="font-mono">config.yaml</code>{{ t('），校验通过后立即生效。普通用户无需修改此页。') }}
+                  {{ t('您可以直接粘贴或编辑整份自备的 Mihomo 服务端配置文件（') }}<code dir="ltr" class="font-mono">config.yaml</code>{{ t('），校验通过后立即生效。普通用户无需修改此页。') }}
                 </p>
               </div>
 
@@ -3408,12 +3408,12 @@ onUnmounted(() => {
             <div class="rounded-2xl bg-amber-50/90 border border-amber-200/90 p-4 text-xs text-amber-950 leading-relaxed space-y-1.5">
               <div class="font-bold text-amber-900">{{ t('⚠️ 醒目提醒：Mihomo 证书目录与相对路径说明') }}</div>
               <div>
-                {{ t('1. 本系统已将 Mihomo 运行目录（') }}<code class="font-mono font-semibold">-d</code>{{ t('）、配置文件与证书统一收纳在') }}
-                <code class="font-mono font-semibold">/etc/clashgate</code>{{ t('，证书实际位于') }}
-                <code class="font-mono font-semibold">/etc/clashgate/certs/fullchain.pem</code> {{ t('与') }}
-                <code class="font-mono font-semibold">/etc/clashgate/certs/privkey.pem</code>{{ t('（相对路径即') }}
-                <code class="font-mono font-semibold">certs/fullchain.pem</code> {{ t('与') }}
-                <code class="font-mono font-semibold">certs/privkey.pem</code>）。
+                {{ t('1. 本系统已将 Mihomo 运行目录（') }}<code dir="ltr" class="font-mono font-semibold">-d</code>{{ t('）、配置文件与证书统一收纳在') }}
+                <code dir="ltr" class="font-mono font-semibold">/etc/clashgate</code>{{ t('，证书实际位于') }}
+                <code dir="ltr" class="font-mono font-semibold">/etc/clashgate/certs/fullchain.pem</code> {{ t('与') }}
+                <code dir="ltr" class="font-mono font-semibold">/etc/clashgate/certs/privkey.pem</code>{{ t('（相对路径即') }}
+                <code dir="ltr" class="font-mono font-semibold">certs/fullchain.pem</code> {{ t('与') }}
+                <code dir="ltr" class="font-mono font-semibold">certs/privkey.pem</code>）。
               </div>
               <div>{{ t('2. 点击「更新 Mihomo 服务端配置」时会自动检查证书路径；如有其他证书路径或相对路径，会先询问是否改为本项目证书。') }}</div>
             </div>
