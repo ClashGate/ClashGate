@@ -2142,7 +2142,7 @@ onUnmounted(() => {
         <div class="cg-brand">
           <img src="/assets/logo.png" alt="" class="cg-logo" />
           <div class="min-w-0">
-            <div class="cg-wordmark text-[18px] leading-none text-[#3d2b22]">ClashGate</div>
+            <div class="cg-wordmark text-[18px] leading-none text-[#1a2330]">ClashGate</div>
             <div class="cg-brand-sub">{{ t('简单安全的 Mihomo 服务端') }}</div>
           </div>
         </div>
@@ -2478,7 +2478,7 @@ onUnmounted(() => {
                   @keydown.enter.prevent="subUrlRevealed = !subUrlRevealed"
                   @keydown.space.prevent="subUrlRevealed = !subUrlRevealed"
                   @blur="subUrlRevealed = false"
-                  class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f6faf8] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer"
+                  class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f5f8fd] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer"
                   :class="subUrlRevealed ? 'text-slate-700 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
                 >
                   {{ !state.sub_url ? '/etc/clashgate/client/mihomo-client.yaml' : subUrlRevealed ? state.sub_url : '••••••••••••••••••••••••••••••••' }}
@@ -2629,7 +2629,7 @@ onUnmounted(() => {
                 </template>
 
                 <!-- Locked security defaults notice -->
-                <div class="rounded-xl bg-[#f4fbf7] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
+                <div class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
                   {{ t(currentProtocol.lockedNote) }}
                 </div>
 
@@ -2668,7 +2668,7 @@ onUnmounted(() => {
 
               <div
                 v-if="state.inbounds.length === 0"
-                class="py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-sm text-slate-400"
+                class="cg-empty py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-sm text-slate-500"
               >
                 {{ t('暂无入站节点，请在上方添加节点') }}
               </div>
@@ -2801,7 +2801,7 @@ onUnmounted(() => {
                 @keydown.enter.prevent="zbUrlRevealed = !zbUrlRevealed"
                 @keydown.space.prevent="zbUrlRevealed = !zbUrlRevealed"
                 @blur="zbUrlRevealed = false"
-                class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f6faf8] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer"
+                class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f5f8fd] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer"
                 :class="zbUrlRevealed ? 'text-slate-700 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
               >
                 {{ !state.zb_url ? '—' : zbUrlRevealed ? state.zb_url : '••••••••••••••••••••••••••••••••' }}
@@ -2860,7 +2860,7 @@ onUnmounted(() => {
 
             <div
               v-if="state.proxies.length === 0"
-              class="py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-400"
+              class="cg-empty py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-500"
             >
               {{ t('暂无手工服务端出站，在下方粘贴单行 JSON 或多行 YAML 即可添加') }}
             </div>
@@ -2911,7 +2911,7 @@ onUnmounted(() => {
                 name="proxies_raw"
                 rows="5"
                 :placeholder="t('粘贴单行 JSON / Flow 或多行 YAML 格式的 Mihomo 节点配置（含 easytier、tailscale 等）…')"
-                class="cg-input w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-900 focus:bg-white"
+                class="cg-input w-full p-3.5 rounded-xl border border-slate-200 bg-[#f7f9fc] font-mono text-xs text-slate-900 focus:bg-white"
               ></textarea>
               <div class="flex items-center gap-2.5 flex-wrap">
                 <button
@@ -3010,7 +3010,7 @@ onUnmounted(() => {
 
             <div
               v-if="state.providers.length === 0"
-              class="py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-400"
+              class="cg-empty py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-500"
             >
               {{ t('暂无外部订阅源，在下方粘贴 HTTP/HTTPS 订阅链接即可导入') }}
             </div>
@@ -3106,7 +3106,7 @@ onUnmounted(() => {
             </div>
             <div
               v-if="routingGroups.length === 0"
-              class="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-10 text-center space-y-2"
+              class="cg-empty rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-10 text-center space-y-2"
             >
               <div class="text-sm font-semibold text-slate-700">{{ t('暂无分流组') }}</div>
               <p class="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">{{ t('还没有自定义分流。用下方「引入外部分流」挂规则集，或「新建分流组」粘贴本地规则。') }}</p>
@@ -3342,7 +3342,7 @@ onUnmounted(() => {
                   v-model="converterInput"
                   rows="14"
                   :placeholder="converterPlaceholder"
-                  class="cg-input w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-900 leading-relaxed focus:bg-white"
+                  class="cg-input w-full p-3.5 rounded-xl border border-slate-200 bg-[#f7f9fc] font-mono text-xs text-slate-900 leading-relaxed focus:bg-white"
                 ></textarea>
               </div>
 
@@ -3364,7 +3364,7 @@ onUnmounted(() => {
                   readonly
                   rows="14"
                   :placeholder="t('点击「转换为易读配置」后在此显示多行 YAML 结果…')"
-                  class="w-full p-3.5 rounded-xl border border-slate-200 bg-[#f8faf9] font-mono text-xs text-slate-800 leading-relaxed focus:outline-none"
+                  class="w-full p-3.5 rounded-xl border border-slate-200 bg-[#f7f9fc] font-mono text-xs text-slate-800 leading-relaxed focus:outline-none"
                 ></textarea>
               </div>
             </div>
@@ -3433,7 +3433,7 @@ onUnmounted(() => {
                 name="custom_config_raw"
                 rows="16"
                 :placeholder="t('在此粘贴完整的 Mihomo 服务端 YAML 配置…')"
-                class="cg-input w-full p-4 rounded-2xl border border-slate-200 bg-[#f8faf9] text-slate-800 font-mono text-xs leading-relaxed focus:bg-white"
+                class="cg-input w-full p-4 rounded-2xl border border-slate-200 bg-[#f7f9fc] text-slate-800 font-mono text-xs leading-relaxed focus:bg-white"
               ></textarea>
               <div class="flex items-center gap-2.5 flex-wrap">
                 <button
@@ -3514,35 +3514,35 @@ onUnmounted(() => {
             <div
               v-else-if="certModeValue === 'manual'"
               id="cert-manual-notice"
-              class="rounded-xl bg-[#f4fbf7] border border-emerald-200/80 px-4 py-3 text-xs text-emerald-900 leading-relaxed"
+              class="rounded-xl bg-[#f1f6fe] border border-emerald-200/80 px-4 py-3 text-xs text-emerald-900 leading-relaxed"
             >
               {{ t('当前为手动证书模式。手动证书请直接替换 /etc/clashgate/certs/ 下的 fullchain.pem 与 privkey.pem 文件。') }}
             </div>
 
             <!-- 证书信息字段网格 -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
-              <div class="rounded-xl bg-[#f8fbf9] border border-slate-200/80 p-3.5">
+              <div class="rounded-xl bg-[#f7f9fc] border border-slate-200/80 p-3.5">
                 <div class="text-xs font-medium text-slate-500">{{ t('域名') }}</div>
                 <div id="cert-domain" dir="ltr" class="mt-1.5 text-sm font-bold text-slate-900 font-mono break-all text-start">
                   {{ certDomainDisplay }}
                 </div>
               </div>
 
-              <div class="rounded-xl bg-[#f8fbf9] border border-slate-200/80 p-3.5">
+              <div class="rounded-xl bg-[#f7f9fc] border border-slate-200/80 p-3.5">
                 <div class="text-xs font-medium text-slate-500">{{ t('当前模式') }}</div>
                 <div id="cert-current-mode" class="mt-1.5 text-sm font-bold text-slate-900">
                   {{ certModeLabel }}
                 </div>
               </div>
 
-              <div class="rounded-xl bg-[#f8fbf9] border border-slate-200/80 p-3.5">
+              <div class="rounded-xl bg-[#f7f9fc] border border-slate-200/80 p-3.5">
                 <div class="text-xs font-medium text-slate-500">{{ t('颁发者') }}</div>
                 <div id="cert-issuer" class="mt-1.5 text-sm font-bold text-slate-900 break-all">
                   {{ certIssuerDisplay }}
                 </div>
               </div>
 
-              <div class="rounded-xl bg-[#f8fbf9] border border-slate-200/80 p-3.5">
+              <div class="rounded-xl bg-[#f7f9fc] border border-slate-200/80 p-3.5">
                 <div class="text-xs font-medium text-slate-500">{{ t('过期时间') }}</div>
                 <div id="cert-expires" dir="ltr" class="mt-1.5 text-sm font-bold text-slate-900 font-mono tabular-nums text-start">
                   {{ certExpiresDisplay }}
@@ -3554,7 +3554,7 @@ onUnmounted(() => {
                 :class="
                   certDaysValue !== null && certDaysValue < 14
                     ? 'bg-amber-50/80 border-amber-200/90'
-                    : 'bg-[#f8fbf9] border-slate-200/80'
+                    : 'bg-[#f7f9fc] border-slate-200/80'
                 "
               >
                 <div
@@ -3619,7 +3619,7 @@ onUnmounted(() => {
                     :placeholder="t('请输入或粘贴具备 Zone.DNS 编辑权限的 Cloudflare API Token')"
                     @click="revealCfToken"
                     @blur="cfTokenRevealed = false"
-                    class="cg-input w-full h-10 px-3.5 rounded-xl border border-emerald-100 bg-[#f6faf8] hover:bg-emerald-50/50 focus:bg-white font-mono text-xs transition"
+                    class="cg-input w-full h-10 px-3.5 rounded-xl border border-emerald-100 bg-[#f5f8fd] hover:bg-emerald-50/50 focus:bg-white font-mono text-xs transition"
                     :class="cfTokenRevealed ? 'text-slate-800' : 'text-slate-600 tracking-widest'"
                   />
                 </div>
@@ -3676,7 +3676,7 @@ onUnmounted(() => {
                 </li>
               </ol>
 
-              <div class="rounded-xl bg-[#f4fbf7] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
+              <div class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
                 {{ t('DNS 模式不需要占用 80 端口，也不要求灰云（可开启橙云代理）；Token 仅保存在本机') }}
                 <code class="font-mono font-semibold">/etc/clashgate/clashgate.env</code>。
               </div>
