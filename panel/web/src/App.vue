@@ -29,6 +29,7 @@ const boot = window.__CS_BOOT__ || {
   cert_days: null,
   cert_hours: null,
   custom_config_mode: false,
+  custom_config_saved: false,
   custom_config_raw: '',
   pending_reload_count: 0,
   pending_reload_items: [],
@@ -85,6 +86,7 @@ const state = reactive({
   cert_days: boot.cert_days !== undefined ? boot.cert_days : (boot.status ? boot.status.cert_days : null),
   cert_hours: boot.cert_hours !== undefined ? boot.cert_hours : (boot.status ? boot.status.cert_hours : null),
   custom_config_mode: !!boot.custom_config_mode,
+  custom_config_saved: !!boot.custom_config_saved,
   custom_config_raw: boot.custom_config_raw || '',
   pending_reload_count: Number(boot.pending_reload_count || (boot.status && boot.status.pending_reload_count) || 0),
   pending_reload_items: Array.isArray(boot.pending_reload_items) ? boot.pending_reload_items : [],
@@ -274,22 +276,37 @@ const confirmDialog = reactive({
   title: '',
   message: '',
   confirmText: '',
+  cancelText: '',
   tone: 'amber',
   onConfirm: null,
+  onCancel: null,
 })
 
-function openConfirmDialog({ title, message, confirmText, tone = 'amber', onConfirm }) {
+// onCancel (optional): a second action on the left button (e.g. "keep my config");
+// ✕ / Escape / backdrop only close the dialog and run nothing.
+function openConfirmDialog({ title, message, confirmText, cancelText = '', tone = 'amber', onConfirm, onCancel = null }) {
   confirmDialog.title = title || t('确认操作')
   confirmDialog.message = message || ''
   confirmDialog.confirmText = confirmText || t('确认')
+  confirmDialog.cancelText = cancelText
   confirmDialog.tone = tone
   confirmDialog.onConfirm = onConfirm || null
+  confirmDialog.onCancel = onCancel
   confirmDialog.show = true
 }
 
 function closeConfirmDialog() {
   confirmDialog.show = false
   confirmDialog.onConfirm = null
+  confirmDialog.onCancel = null
+}
+
+async function cancelConfirmDialog() {
+  const fn = confirmDialog.onCancel
+  closeConfirmDialog()
+  if (typeof fn === 'function') {
+    await fn()
+  }
 }
 
 async function acceptConfirmDialog() {
@@ -867,6 +884,7 @@ function applyServerState(newState) {
   if (newState.cert_days !== undefined) state.cert_days = newState.cert_days
   if (newState.cert_hours !== undefined) state.cert_hours = newState.cert_hours
   if (newState.custom_config_mode !== undefined) state.custom_config_mode = newState.custom_config_mode
+  if (newState.custom_config_saved !== undefined) state.custom_config_saved = !!newState.custom_config_saved
   if (newState.custom_server_enabled !== undefined) state.custom_server_enabled = !!newState.custom_server_enabled
   if (newState.auto_update !== undefined) state.auto_update = !!newState.auto_update
   if (newState.update_channel !== undefined) state.update_channel = newState.update_channel === 'test' ? 'test' : 'stable'
@@ -1219,68 +1237,80 @@ async function convertConfigFormat(mode = 'readable') {
   }
 }
 
-function autoFixCertPaths() {
-  const certPath = '/etc/clashgate/certs/fullchain.pem'
-  const keyPath = '/etc/clashgate/certs/privkey.pem'
-  const lines = (customConfigText.value || '').split(/\r?\n/)
+// Mirror of rewrite_cert_paths_in_yaml() in panel.py (keep in sync): point certificate /
+// private-key file paths under top-level `listeners:` / `tls:` at this server's certs.
+// Returns { text, changed } where changed counts paths that differ (relative ones included).
+const CG_CERT_PATH = '/etc/clashgate/certs/fullchain.pem'
+const CG_KEY_PATH = '/etc/clashgate/certs/privkey.pem'
+function isCertPathValue(val) {
+  const v = String(val || '').trim().replace(/^['"]|['"]$/g, '')
+  if (!v || v[0] === '|' || v[0] === '>' || v.startsWith('-----') || /^[A-Za-z0-9+/]{42,43}=$/.test(v)) return false
+  return /^(\/|\.\/|\.\.\/|~)/.test(v) || /\.(pem|crt|cer|key)$/i.test(v)
+}
+function fixCertPaths(raw) {
+  const lines = String(raw || '').split(/\r?\n/)
+  let top = ''
   let inReality = false
   let realityIndent = 0
-  let inProviders = false
-  let provIndent = 0
   let changed = 0
-
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     const stripped = line.replace(/^ +/, '')
     const indent = line.length - stripped.length
-    if (stripped && stripped.charAt(0) !== '#') {
-      if (inReality && indent <= realityIndent) inReality = false
-      if (inProviders && indent <= provIndent) inProviders = false
-      if (/^reality-config\s*:/.test(stripped)) {
-        inReality = true
-        realityIndent = indent
-        continue
-      }
-      if (/^proxy-providers\s*:/.test(stripped)) {
-        inProviders = true
-        provIndent = indent
-        continue
-      }
-      if (inProviders && indent === provIndent + 2 && /^default\s*:\s*(#.*)?$/.test(stripped)) {
-        lines[i] = line.slice(0, indent) + stripped.replace(/^default(\s*:)/, 'default-sub$1')
-        changed++
-        continue
-      }
-      const mc = stripped.match(/^((?:-\s+)?certificate\s*:\s*)([^#\n]+?)(\s*(?:#.*)?)$/)
-      if (mc) {
-        const cv = mc[2].trim().replace(/^['"]|['"]$/g, '')
-        if (cv !== certPath) changed++
-        lines[i] = line.slice(0, indent) + mc[1] + certPath + (mc[3] || '')
-        continue
-      }
-      if (!inReality) {
-        const mk = stripped.match(/^((?:-\s+)?private-key\s*:\s*)([^#\n]+?)(\s*(?:#.*)?)$/)
-        if (mk) {
-          const kv = mk[2].trim().replace(/^['"]|['"]$/g, '')
-          if (kv.indexOf('/') >= 0 || kv.indexOf('.') >= 0 || /key|pem/i.test(kv)) {
-            if (kv !== keyPath) changed++
-            lines[i] = line.slice(0, indent) + mk[1] + keyPath + (mk[3] || '')
-            continue
-          }
-        }
-      }
+    if (!stripped || stripped.charAt(0) === '#') continue
+    if (indent === 0) {
+      const mt = stripped.match(/^([A-Za-z0-9_-]+)\s*:/)
+      top = mt ? mt[1] : ''
+    }
+    if (inReality && indent <= realityIndent) inReality = false
+    if (/^(?:-\s+)?reality-config\s*:/.test(stripped)) {
+      inReality = true
+      realityIndent = indent
+      continue
+    }
+    if ((top !== 'listeners' && top !== 'tls') || inReality) continue
+    const m = stripped.match(/^((?:-\s+)?(certificate|private-key)\s*:\s*)([^#\n]+?)(\s*(?:#.*)?)$/)
+    if (!m || !isCertPathValue(m[3])) continue
+    const target = m[2] === 'certificate' ? CG_CERT_PATH : CG_KEY_PATH
+    if (m[3].trim().replace(/^['"]|['"]$/g, '') !== target) {
+      changed++
+      lines[i] = line.slice(0, indent) + m[1] + target + (m[4] || '')
     }
   }
-  customConfigText.value = lines.join('\n')
-  showToast(t('已自动修正 {changed} 处证书路径，请点击「更新 Mihomo 服务端配置」保存生效。', { changed }), true)
+  return { text: lines.join('\n'), changed }
+}
+
+async function saveCustomConfig(text, autoFix) {
+  customConfigText.value = text
+  const res = await postAction(
+    '/config/custom',
+    { custom_config_raw: text, auto_fix_certs: autoFix ? '1' : '0' },
+    'save-custom'
+  )
+  // A failed save returns the old server state; keep what the user submitted in the editor.
+  if (!res || !res.ok) customConfigText.value = text
 }
 
 async function submitCustomConfig() {
-  if (!customConfigText.value.trim()) {
+  const raw = customConfigText.value || ''
+  if (!raw.trim()) {
     showToast(t('请先粘贴完整的服务端配置'), false)
     return
   }
-  await postAction('/config/custom', { custom_config_raw: customConfigText.value }, 'save-custom')
+  const fixed = fixCertPaths(raw)
+  if (fixed.changed > 0) {
+    openConfirmDialog({
+      title: t('自动配置证书路径？'),
+      message: t('检测到 {n} 处证书路径不是本项目的证书路径（或是相对路径）。项目目录之外的证书，内核可能无法读取，建议自动配置为本项目证书（/etc/clashgate/certs/）。', { n: fixed.changed }),
+      confirmText: t('自动配置并保存'),
+      cancelText: t('保持我的配置'),
+      tone: 'emerald',
+      onConfirm: () => saveCustomConfig(fixed.text, true),
+      onCancel: () => saveCustomConfig(raw, false),
+    })
+    return
+  }
+  await saveCustomConfig(raw, false)
 }
 
 function resetTemplateConfig() {
@@ -1631,6 +1661,20 @@ function selectTab(tab) {
 
 async function toggleCustomServer() {
   const next = !state.custom_server_enabled
+  if (!next && state.custom_config_mode) {
+    openConfirmDialog({
+      title: t('关闭自定义服务端'),
+      message: t('关闭后，服务端将切换回面板生成的默认配置（默认服务端模板）并立即重载。你的自定义配置会保留在服务器上，重新开启后可一键恢复。'),
+      confirmText: t('关闭并切换'),
+      tone: 'amber',
+      onConfirm: () => applyCustomServer(false),
+    })
+    return
+  }
+  await applyCustomServer(next)
+}
+
+async function applyCustomServer(next) {
   const res = await postAction(
     '/action/settings',
     { custom_server_enabled: next ? '1' : '0' },
@@ -1927,14 +1971,14 @@ onUnmounted(() => {
               ✕
             </button>
           </div>
-          <p class="text-sm text-slate-600 leading-relaxed">{{ confirmDialog.message }}</p>
-          <div class="flex items-center justify-end gap-2.5 pt-2">
+          <p class="text-sm text-slate-600 leading-relaxed cg-wrap">{{ confirmDialog.message }}</p>
+          <div class="flex flex-wrap items-center justify-end gap-2.5 pt-2">
             <button
               type="button"
-              @click="closeConfirmDialog"
+              @click="cancelConfirmDialog"
               class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition cursor-pointer"
             >
-              {{ t('取消') }}
+              {{ confirmDialog.cancelText || t('取消') }}
             </button>
             <button
               type="button"
@@ -3370,11 +3414,14 @@ onUnmounted(() => {
                 <code class="font-mono font-semibold">certs/fullchain.pem</code> {{ t('与') }}
                 <code class="font-mono font-semibold">certs/privkey.pem</code>）。
               </div>
-              <div>
-                {{ t('2. 若您的自备配置中填写了其他证书路径或相对路径，请点击下方') }}
-                <b class="font-semibold">{{ t('「自动修改证书路径」') }}</b> {{ t('按钮一键修正为本机证书路径，随后点击') }}
-                <b class="font-semibold">{{ t('「更新 Mihomo 服务端配置」') }}</b> {{ t('校验并生效。') }}
-              </div>
+              <div>{{ t('2. 点击「更新 Mihomo 服务端配置」时会自动检查证书路径；如有其他证书路径或相对路径，会先询问是否改为本项目证书。') }}</div>
+            </div>
+
+            <div
+              v-if="state.custom_config_saved"
+              class="rounded-xl bg-sky-50 border border-sky-200/80 px-4 py-2.5 text-xs text-sky-900 leading-relaxed"
+            >
+              {{ t('编辑框中是你上次保存的自定义配置，点击「更新 Mihomo 服务端配置」即可恢复。') }}
             </div>
 
             <form @submit.prevent="submitCustomConfig" class="space-y-3.5">
@@ -3387,13 +3434,6 @@ onUnmounted(() => {
                 class="cg-input w-full p-4 rounded-2xl border border-slate-200 bg-[#f8faf9] text-slate-800 font-mono text-xs leading-relaxed focus:bg-white"
               ></textarea>
               <div class="flex items-center gap-2.5 flex-wrap">
-                <button
-                  type="button"
-                  @click="autoFixCertPaths"
-                  class="px-4 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-semibold transition cursor-pointer"
-                >
-                  {{ t('自动修改证书路径') }}
-                </button>
                 <button
                   type="submit"
                   :disabled="busyKey === 'save-custom'"

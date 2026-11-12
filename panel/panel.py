@@ -69,6 +69,8 @@ UPDATE_CHANNEL_MAP = {
 MIHOMO_DIR = CS_ROOT
 CONF = MIHOMO_DIR + "/config.yaml"
 CUSTOM_CONF = MIHOMO_DIR + "/custom_config.yaml"
+# Kept when custom mode is switched off, so turning it back on can restore the user's config.
+CUSTOM_SAVED = CUSTOM_CONF + ".saved"
 NODES_TSV = MIHOMO_DIR + "/nodes.tsv"
 FRAG_CONTROLLER = MIHOMO_DIR + "/controller.yaml"
 FRAG_REALITY = MIHOMO_DIR + "/listeners.reality.yaml"
@@ -1018,11 +1020,31 @@ def build_proxy_provider(url: str, name: str = "", existing: dict = None) -> tup
 
 
 # ---------------------------------------------------------------- custom server config helpers
+_CERT_FILE_EXT = re.compile(r"\.(pem|crt|cer|key)$", re.I)
+_WG_KEY_RE = re.compile(r"^[A-Za-z0-9+/]{42,43}=$")
+# Top-level sections whose certificate / private-key are this server's TLS files.
+_CERT_SECTIONS = ("listeners", "tls")
+
+
+def _is_cert_path_value(val: str) -> bool:
+    """True if a certificate/private-key value is a file path (not inline PEM or a key string)."""
+    v = (val or "").strip().strip("'\"")
+    if not v or v[0] in "|>" or v.startswith("-----") or _WG_KEY_RE.match(v):
+        return False
+    return v.startswith(("/", "./", "../", "~")) or bool(_CERT_FILE_EXT.search(v))
+
+
 def rewrite_cert_paths_in_yaml(raw_yaml: str, env: dict = None) -> tuple:
-    """Automatically rewrite TLS certificate/private-key paths in user server config to /etc/clashgate/certs/*.
-    Never modifies private-key inside reality-config blocks."""
+    """Point TLS certificate/private-key file paths under `listeners:` and `tls:` at this
+    server's own certs (CERT / KEY); also rename a reserved `default` proxy-provider.
+
+    Returns (new_yaml, n) where n counts certificate/key paths that differed from
+    CERT / KEY (relative paths included); n == 0 means nothing to ask the user about.
+    Never touches reality-config private keys, inline PEM, or outbound proxies.
+    Keep in sync with fixCertPaths() in panel/web/src/App.vue."""
     lines = raw_yaml.splitlines()
     out = []
+    top = ""
     in_reality = False
     reality_indent = 0
     in_providers = False
@@ -1033,11 +1055,14 @@ def rewrite_cert_paths_in_yaml(raw_yaml: str, env: dict = None) -> tuple:
         stripped = line.lstrip(" ")
         indent = len(line) - len(stripped)
         if stripped and not stripped.startswith("#"):
+            if indent == 0:
+                m_top = re.match(r"^([A-Za-z0-9_-]+)\s*:", stripped)
+                top = m_top.group(1) if m_top else ""
             if in_reality and indent <= reality_indent:
                 in_reality = False
             if in_providers and indent <= providers_indent:
                 in_providers = False
-            if re.match(r"^reality-config\s*:", stripped):
+            if re.match(r"^(?:-\s+)?reality-config\s*:", stripped):
                 in_reality = True
                 reality_indent = indent
                 out.append(line)
@@ -1050,29 +1075,17 @@ def rewrite_cert_paths_in_yaml(raw_yaml: str, env: dict = None) -> tuple:
             # Rename reserved provider key `default:` under `proxy-providers:` so mihomo -t passes
             if in_providers and indent == providers_indent + 2 and re.match(r"^default\s*:\s*(#.*)?$", stripped):
                 line = (" " * indent) + re.sub(r"^default(\s*:)", r"default-sub\1", stripped, count=1)
-                changed += 1
                 out.append(line)
                 continue
-            # Rewrite certificate:
-            m_cert = re.match(r"^((?:-\s+)?certificate\s*:\s*)([^#\n]+?)(\s*(?:#.*)?)$", stripped)
-            if m_cert:
-                cur_val = m_cert.group(2).strip().strip("'\"")
-                if cur_val != CERT:
-                    changed += 1
-                line = (" " * indent) + f"{m_cert.group(1)}{CERT}{m_cert.group(3)}"
-                out.append(line)
-                continue
-            # Rewrite private-key: (ONLY when not inside reality-config)
-            if not in_reality:
-                m_key = re.match(r"^((?:-\s+)?private-key\s*:\s*)([^#\n]+?)(\s*(?:#.*)?)$", stripped)
-                if m_key:
-                    cur_val = m_key.group(2).strip().strip("'\"")
-                    if "/" in cur_val or "." in cur_val or "key" in cur_val.lower() or "pem" in cur_val.lower():
-                        if cur_val != KEY:
-                            changed += 1
-                        line = (" " * indent) + f"{m_key.group(1)}{KEY}{m_key.group(3)}"
-                        out.append(line)
-                        continue
+            if top in _CERT_SECTIONS and not in_reality:
+                m = re.match(r"^((?:-\s+)?(certificate|private-key)\s*:\s*)([^#\n]+?)(\s*(?:#.*)?)$", stripped)
+                if m and _is_cert_path_value(m.group(3)):
+                    target = CERT if m.group(2) == "certificate" else KEY
+                    if m.group(3).strip().strip("'\"") != target:
+                        changed += 1
+                        line = (" " * indent) + f"{m.group(1)}{target}{m.group(4)}"
+                    out.append(line)
+                    continue
         out.append(line)
     res = "\n".join(out) + ("\n" if raw_yaml.endswith("\n") else "")
     return res, changed
@@ -3083,6 +3096,85 @@ def apply_custom_config(raw_yaml: str):
     wait_mihomo_ports()
 
 
+def new_default_reality_node(env: dict) -> dict:
+    """A fresh install-style VlessReality node on a random free-looking port."""
+    reserved = {80, 443, int(env.get("PANEL_PORT", "0") or 0), get_controller_port(env)}
+    port = 28443
+    for _ in range(1000):
+        cand = random.randint(20000, 39999)
+        if cand not in reserved:
+            port = cand
+            break
+    priv, pub = reality_keypair()
+    dec, enc = vless_x25519_keypair()
+    return {
+        "name": "VlessReality",
+        "port": port,
+        "uuid": str(uuidlib.uuid4()),
+        "priv": priv,
+        "pub": pub,
+        "sid": secrets.token_hex(4),
+        "sni": pick_reality_sni(),
+        "dec": dec,
+        "enc": enc,
+    }
+
+
+def disable_custom_config():
+    """Leave custom mode: keep the user's file as CUSTOM_SAVED, restore the panel's nodes from
+    before custom mode (*.tplbak), regenerate the default template config from them, validate
+    and restart Mihomo. On any failure everything is rolled back (still in custom mode)."""
+    if not is_custom_config_mode():
+        return
+    env = read_env()
+    old_specs = collect_ufw_specs(read_nodes(), load_inbounds())
+    state_files = (NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON)
+    files = (CUSTOM_CONF, CUSTOM_SAVED, CONF) + state_files + (
+        FRAG_REALITY, FRAG_EXTRA, FRAG_PROXIES, FRAG_PROVIDERS, FRAG_CONTROLLER)
+    backup = _snapshot_files(files)
+    try:
+        atomic_write(CUSTOM_SAVED, backup[CUSTOM_CONF], 0o640)
+        os.remove(CUSTOM_CONF)
+        if any(os.path.exists(p + ".tplbak") for p in state_files):
+            empty = {NODES_TSV: "", INBOUNDS: "[]\n", PROXIES_JSON: "[]\n", PROVIDERS_JSON: "{}\n"}
+            for p in state_files:
+                bak_p = p + ".tplbak"
+                data = empty[p]
+                if os.path.exists(bak_p):
+                    with open(bak_p) as f:
+                        data = f.read()
+                atomic_write(p, data, 0o600 if p.endswith(".json") else 0o640)
+        # else: no pre-custom snapshot; keep the nodes the panel tracked in custom mode.
+        nodes, inbs = read_nodes(), load_inbounds()
+        if not nodes and not inbs:
+            nodes = [new_default_reality_node(env)]
+        atomic_write(NODES_TSV, render_nodes_tsv(nodes), 0o640)
+        atomic_write(FRAG_REALITY, render_reality(nodes), 0o640)
+        atomic_write(FRAG_EXTRA, render_extra(inbs), 0o640)
+        atomic_write(FRAG_PROXIES, dump_yaml_proxies(load_server_proxies()), 0o640)
+        atomic_write(FRAG_PROVIDERS, dump_yaml_providers(load_proxy_providers()), 0o640)
+        atomic_write(FRAG_CONTROLLER, render_controller_fragment(env), 0o640)
+        get_routing().ensure_seeded()
+        atomic_write(CONF, assemble_config(), 0o640)
+        rc, out = validate_config()
+        if rc != 0:
+            raise RuntimeError("配置校验失败（mihomo -t）：" + out[-800:])
+        rc, out = run([SYSTEMCTL, "restart", "mihomo"])
+        if rc != 0:
+            raise RuntimeError("重启失败：" + out[-800:])
+        for p in state_files:
+            bak_p = p + ".tplbak"
+            if os.path.exists(bak_p):
+                os.remove(bak_p)
+    except Exception:
+        _restore_files(backup)
+        run([SYSTEMCTL, "restart", "mihomo"])
+        raise
+    sync_client_files()
+    sync_ufw(old_specs, collect_ufw_specs(read_nodes(), load_inbounds()))
+    wait_mihomo_ports()
+
+
 def reset_to_template_config():
     """Restore server config to clean default template and generate a default VlessReality node."""
     env = read_env()
@@ -3091,26 +3183,7 @@ def reset_to_template_config():
              FRAG_REALITY, FRAG_EXTRA, FRAG_PROXIES, FRAG_PROVIDERS, FRAG_CONTROLLER)
     backup = _snapshot_files(files)
     try:
-        reserved = {80, 443, int(env.get("PANEL_PORT", "0") or 0), get_controller_port(env)}
-        port = 28443
-        for _ in range(1000):
-            cand = random.randint(20000, 39999)
-            if cand not in reserved:
-                port = cand
-                break
-        priv, pub = reality_keypair()
-        dec, enc = vless_x25519_keypair()
-        default_node = {
-            "name": "VlessReality",
-            "port": port,
-            "uuid": str(uuidlib.uuid4()),
-            "priv": priv,
-            "pub": pub,
-            "sid": secrets.token_hex(4),
-            "sni": pick_reality_sni(),
-            "dec": dec,
-            "enc": enc,
-        }
+        default_node = new_default_reality_node(env)
         if os.path.exists(CUSTOM_CONF):
             os.remove(CUSTOM_CONF)
         atomic_write(NODES_TSV, render_nodes_tsv([default_node]), 0o640)
@@ -4276,8 +4349,9 @@ class Panel(BaseHTTPRequestHandler):
             })
 
         custom_active = is_custom_config_mode()
+        custom_saved = (not custom_active) and os.path.isfile(CUSTOM_SAVED)
         try:
-            with open(CUSTOM_CONF if custom_active else CONF) as f:
+            with open(CUSTOM_CONF if custom_active else (CUSTOM_SAVED if custom_saved else CONF)) as f:
                 cur_cfg = f.read()
         except FileNotFoundError:
             cur_cfg = assemble_config()
@@ -4323,6 +4397,7 @@ class Panel(BaseHTTPRequestHandler):
             "cert_days": cert_days,
             "cert_hours": cert_hours,
             "custom_config_mode": custom_active,
+            "custom_config_saved": custom_saved,
             "custom_server_enabled": bool(load_panel_settings().get("custom_server_enabled")),
             "auto_update": bool(load_panel_settings().get("auto_update")),
             **(lambda t: {"update_channel": t["channel"], "update_channel_label": t["label"]})(resolve_update_target()),
@@ -4712,6 +4787,16 @@ class Panel(BaseHTTPRequestHandler):
         if not updates:
             return self.respond_mutation(s, "设置项无效", False)
         with LOCK:
+            if updates.get("custom_server_enabled") is False and is_custom_config_mode():
+                try:
+                    disable_custom_config()
+                    clear_pending_reload()
+                except Exception as e:
+                    return self.respond_mutation(s, f"切换回默认服务端模板失败：{e}", False)
+                save_panel_settings({"custom_server_enabled": False})
+                updates.pop("custom_server_enabled")
+                if not updates:
+                    return self.respond_mutation(s, "已关闭自定义服务端，已切换回默认服务端模板并重载生效。", True)
             if "update_channel" in updates:
                 apply_update_channel_env(updates["update_channel"])
                 # Keep other toggles if sent together.
@@ -4731,6 +4816,8 @@ class Panel(BaseHTTPRequestHandler):
                 return self.respond_mutation(s, "已开启每周自动更新。更新面板时会同时更新 Mihomo 内核。", True)
             return self.respond_mutation(s, "已关闭每周自动更新。", True)
         if updates.get("custom_server_enabled"):
+            if not is_custom_config_mode() and os.path.isfile(CUSTOM_SAVED):
+                return self.respond_mutation(s, "已开启自定义服务端。上次的自定义配置已载入编辑框，点「更新 Mihomo 服务端配置」即可恢复。", True)
             return self.respond_mutation(s, "已开启自定义服务端。", True)
         if "custom_server_enabled" in updates:
             return self.respond_mutation(s, "已关闭自定义服务端。", True)
@@ -5445,15 +5532,18 @@ class Panel(BaseHTTPRequestHandler):
             return self.respond_mutation(s, "高级功能请到设置页开启", False)
         raw = form.get("custom_config_raw", "")
         auto_fix = form.get("auto_fix_certs") == "1"
+        fixed = 0
         with LOCK:
             try:
                 env = read_env()
                 if auto_fix:
-                    raw, _ = rewrite_cert_paths_in_yaml(raw, env)
+                    raw, fixed = rewrite_cert_paths_in_yaml(raw, env)
                 apply_custom_config(raw)
                 clear_pending_reload()
             except Exception as e:
                 return self.respond_mutation(s, f"更新自定义服务端配置失败：{e}", False)
+        if fixed:
+            return self.respond_mutation(s, f"已自动配置 {fixed} 处证书路径，自定义 Mihomo 服务端配置已通过校验并应用生效。", True)
         return self.respond_mutation(s, "自定义 Mihomo 服务端配置已通过校验并应用生效。", True)
 
     def do_reset_template_config(self, s):
