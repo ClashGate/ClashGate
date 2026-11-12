@@ -136,10 +136,10 @@ apply_update_channel() { # map UPDATE_CHANNEL → repo + branch (does not overri
       REPO_BRANCH=main
       ;;
     test|beat|测试)
-      UPDATE_CHANNEL=test
+      UPDATE_CHANNEL="test"
       REPO_OWNER=ClashGate
       REPO_NAME=ClashGate
-      REPO_BRANCH=test
+      REPO_BRANCH="test"
       ;;
   esac
   REPO_SLUG=${REPO_OWNER}/${REPO_NAME}
