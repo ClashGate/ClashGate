@@ -6,7 +6,6 @@ import {
   ShieldCheck,
   Server,
   Settings,
-  KeyRound,
   LogOut,
   RefreshCw,
   ArrowUp,
@@ -14,7 +13,6 @@ import {
   Cloud,
   Lock,
   Check,
-  CircleAlert,
   Waypoints,
 } from 'lucide-vue-next'
 
@@ -25,7 +23,6 @@ const icons = {
   shield: ShieldCheck,
   server: Server,
   settings: Settings,
-  key: KeyRound,
   logout: LogOut,
   refresh: RefreshCw,
   up: ArrowUp,
@@ -33,7 +30,6 @@ const icons = {
   cloud: Cloud,
   lock: Lock,
   check: Check,
-  alert: CircleAlert,
   routing: Waypoints,
 }
 
