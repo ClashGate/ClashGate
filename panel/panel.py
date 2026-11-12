@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.14 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.15 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -43,9 +43,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 from routing_mgr import RoutingManager, parse_yaml_document_factory  # noqa: E402
 
-# Versions compare as integer tuples (parse_version_tuple): 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
-# would sort below 1.09 on every installed panel); the next releases are 1.15, 1.16, ...
-VERSION = "1.14"
+# Versions compare as integer tuples (parse_version_tuple): 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
+# would sort below 1.09 on every installed panel); the next releases are 1.16, 1.17, ...
+VERSION = "1.15"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -3183,7 +3183,7 @@ def save_proxy_providers(new_providers: dict):
 # normal certificate verification, and each side checks that the other's announced panel URL really
 # reaches it (hello + instance id) before it writes an outbound for it.
 CLUSTER_PROTOCOL = 2          # 2: two-way links and full mesh (1 was the one-way pre-release)
-CLUSTER_MIN_VERSION = "1.14"
+CLUSTER_MIN_VERSION = "1.15"
 CLUSTER_LISTENER_PREFIX = "cg-cluster-"
 CLUSTER_FLOW = "xtls-rprx-vision"
 CLUSTER_TICKET_TTL = 300
