@@ -1,0 +1,234 @@
+"""ClashGate panel tests: run against a throw-away fake /etc/clashgate tree.
+
+Needs a Mihomo binary for `mihomo -t` (MIHOMO_BIN, default tests/.cache/mihomo; tests/run.sh
+downloads the pinned version). Run: python3 -m unittest discover -s tests -v
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+MIHOMO = os.environ.get("MIHOMO_BIN") or os.path.join(HERE, ".cache", "mihomo")
+if not os.path.isfile(MIHOMO):
+    raise SystemExit(f"Mihomo binary not found at {MIHOMO} (set MIHOMO_BIN or run tests/run.sh)")
+
+ROOT = tempfile.mkdtemp(prefix="cg-test-")
+os.environ.update(CLASHGATE_ROOT=ROOT, MIHOMO_BIN=MIHOMO, SYSTEMCTL="true",
+                  UFW_BIN="false", FIREWALL_CMD_BIN="false")
+CS = ROOT + "/etc/clashgate"
+os.makedirs(CS + "/certs")
+shutil.copytree(os.path.join(REPO, "resources"), CS + "/resources")
+sys.path.insert(0, os.path.join(REPO, "panel"))
+import panel as P  # noqa: E402
+
+with open(CS + "/clashgate.env", "w") as f:
+    f.write('MODE="auto-cert"\nSERVER_IP="1.2.3.4"\nDOMAIN="ex.sslip.io"\nPANEL_PORT="25183"\n'
+            'CONTROLLER_PORT="25184"\nMIHOMO_SECRET="test-secret"\n')
+for name in ("fullchain.pem", "privkey.pem"):
+    with open(CS + "/certs/" + name, "w") as f:
+        f.write("placeholder\n")
+
+
+def read(p, **kw):
+    with open(p, **kw) as f:
+        return f.read()
+
+
+def mihomo_t(path, home=None):
+    home = home or tempfile.mkdtemp()
+    os.makedirs(home + "/ui", exist_ok=True)
+    r = subprocess.run([MIHOMO, "-t", "-d", home, "-f", path], capture_output=True, text=True, timeout=180)
+    return r.returncode, (r.stdout + r.stderr)[-800:]
+
+
+def write_default_state(extra_kinds=()):
+    env = P.read_env()
+    P._write_template_state([], [], [], {}, env)  # build_inbound checks ports against current state
+    node = P.new_default_reality_node(env)
+    inbs = []
+    port = 30100
+    for kind in extra_kinds:
+        port += 1
+        inbs.append(P.build_inbound(kind, {"port": str(port), "name": f"{kind}-t"}, env))
+    P._write_template_state([node], inbs, [], {}, env)
+    return node, inbs
+
+
+class VersionTest(unittest.TestCase):
+    def test_order(self):
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12"]
+        tuples = [P.parse_version_tuple(v) for v in order]
+        self.assertEqual(tuples, sorted(tuples))
+        self.assertEqual(len(set(tuples)), len(tuples))
+        self.assertLess(P.parse_version_tuple("1.1"), P.parse_version_tuple("1.09"))  # why 1.1 is never used
+
+    def test_repo_versions_agree(self):
+        with open(os.path.join(REPO, "scripts/lib/common.sh")) as f:
+            cs = re.search(r"^CS_VERSION=([0-9.]+)", f.read(), re.M).group(1)
+        with open(os.path.join(REPO, "panel/web/package.json")) as f:
+            pkg = json.load(f)["version"]
+        self.assertEqual(P.VERSION, cs)
+        self.assertEqual(pkg, cs + ".0")
+        for readme in ("README.md", "README.en.md"):
+            with open(os.path.join(REPO, readme)) as f:
+                self.assertIn(f"version-v{cs}-", f.read(), readme)
+
+
+class ConfigGenerationTest(unittest.TestCase):
+    def test_every_inbound_kind_passes_mihomo_t(self):
+        kinds = [k for k in P.TYPES if k != "vless-reality"]
+        write_default_state(kinds)
+        rc, out = P.validate_config()
+        self.assertEqual(rc, 0, out)
+        conf = read(P.CONF)
+        for k in kinds:
+            self.assertIn(f"{k}-t", conf)
+
+    def test_subscription(self):
+        kinds = [k for k in P.TYPES if k != "vless-reality"]
+        write_default_state(kinds)
+        sub = P.render_subscription(P.read_env(), live=False)
+        self.assertNotIn("skip-cert-verify", sub)
+        d = tempfile.mkdtemp()
+        with open(d + "/c.yaml", "w") as f:
+            f.write(sub)
+        rc, out = mihomo_t(d + "/c.yaml", d)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("VlessReality", sub)
+
+    def test_no_skip_cert_verify_in_sources(self):
+        hits = []
+        for base in ("resources", "scripts"):
+            for dp, _, files in os.walk(os.path.join(REPO, base)):
+                for fn in files:
+                    p = os.path.join(dp, fn)
+                    try:
+                        txt = read(p, encoding="utf-8")
+                    except (UnicodeDecodeError, OSError):
+                        continue
+                    if re.search(r"skip-cert-verify\s*:\s*true", txt):
+                        hits.append(p)
+        self.assertEqual(hits, [])
+
+
+CERT_CASES = {
+    # name: (yaml, expected rewrite count)
+    "abs-other": ("listeners:\n  - name: h2\n    type: hysteria2\n    port: 443\n"
+                  "    certificate: /root/cert/fullchain.cer\n    private-key: \"/root/cert/my.key\"  # note\n", 2),
+    "relative": ("listeners:\n  - name: t\n    type: trojan\n    certificate: ./server.crt\n"
+                 "    private-key: certs/privkey.pem\n", 2),
+    "already-ok": ("tls:\n  certificate: /etc/clashgate/certs/fullchain.pem\n  private-key: /etc/clashgate/certs/privkey.pem\n"
+                   "listeners:\n  - name: v\n    type: vless\n    reality-config:\n      dest: a.com:443\n"
+                   "      private-key: aBcD_efgh-ijklmnopqrstuvwxyz0123456789ABCDE\n", 0),
+    "outbound-and-inline": ("proxies:\n  - name: wg\n    type: wireguard\n    private-key: /AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdef=\n"
+                            "    certificate: /home/u/client.pem\nlisteners:\n  - name: x\n    type: anytls\n"
+                            "    certificate: |\n      -----BEGIN CERTIFICATE-----\n      MIIB\n      -----END CERTIFICATE-----\n"
+                            "    private-key: |\n      -----BEGIN PRIVATE KEY-----\n", 0),
+    "tls-top": ("tls:\n  certificate: fullchain.pem\n  private-key: /etc/ssl/private/k.key\n"
+                "proxy-providers:\n  default:\n    type: http\n", 2),
+    "flow-list-dash": ("listeners:\n- name: a\n  type: tuic\n  certificate: /opt/a.pem\n  private-key: /opt/a.key\n", 2),
+    "wg-key-in-listener": ("listeners:\n  - name: w\n    type: wireguard\n    private-key: 8BzqKxXgYzQ2nqYvwz/3jP1yO4j0kGFxAa0bfH7zN2k=\n", 0),
+    "quoted-ok-and-comment": ("listeners:\n  - name: q\n    type: hysteria2\n    certificate: '/etc/clashgate/certs/fullchain.pem' # ok\n"
+                              "    private-key: \"/etc/clashgate/certs/privkey.pem\"\n", 0),
+    "home-tilde": ("listeners:\n  - name: h\n    type: anytls\n    certificate: ~/c.pem\n    private-key: ~/c.key\n", 2),
+    "commented-out": ("listeners:\n  - name: c\n    type: anytls\n    # certificate: /root/x.pem\n", 0),
+}
+
+
+class CertPathTest(unittest.TestCase):
+    def test_python_counts(self):
+        for name, (raw, want) in CERT_CASES.items():
+            out, n = P.rewrite_cert_paths_in_yaml(raw)
+            self.assertEqual(n, want, name)
+            again, n2 = P.rewrite_cert_paths_in_yaml(out)
+            self.assertEqual(n2, 0, name + " (idempotent)")
+            self.assertEqual(again, out, name)
+
+    def test_reserved_provider_renamed(self):
+        out, _ = P.rewrite_cert_paths_in_yaml(CERT_CASES["tls-top"][0])
+        self.assertIn("  default-sub:", out)
+
+    def test_js_mirror_matches(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        vue = read(os.path.join(REPO, "panel/web/src/App.vue"))
+        js = vue[vue.index("const CG_CERT_PATH"):vue.index("async function saveCustomConfig")]
+        js += ("\nconst c=JSON.parse(require('fs').readFileSync(0,'utf8'));"
+               "console.log(JSON.stringify(c.map(x=>{const r=fixCertPaths(x);return [r.text,r.changed]})))")
+        names = list(CERT_CASES)
+        r = subprocess.run([node, "-e", js], input=json.dumps([CERT_CASES[n][0] for n in names]),
+                           capture_output=True, text=True, check=True)
+        for name, (jtext, jn) in zip(names, json.loads(r.stdout)):
+            ptext, pn = P.rewrite_cert_paths_in_yaml(CERT_CASES[name][0])
+            self.assertEqual(jn, pn, name)
+            self.assertEqual(jtext, ptext.replace("default-sub:", "default:"), name)
+
+    def test_missing_cert_files(self):
+        raw = ("tls:\n  certificate: /etc/clashgate/certs/fullchain.pem\n  private-key: certs/privkey.pem\n"
+               "listeners:\n  - name: a\n    type: anytls\n    certificate: /nope/a.pem\n    private-key: ./nope.key\n")
+        self.assertEqual(P.missing_cert_files(raw), ["/nope/a.pem", "./nope.key"])
+
+
+class CustomModeTest(unittest.TestCase):
+    CUSTOM = None
+
+    def setUp(self):
+        for p in (P.CUSTOM_CONF, P.CUSTOM_SAVED):
+            if os.path.exists(p):
+                os.remove(p)
+        for p in (P.NODES_TSV, P.INBOUNDS, P.PROXIES_JSON, P.PROVIDERS_JSON):
+            if os.path.exists(p + ".tplbak"):
+                os.remove(p + ".tplbak")
+        write_default_state(["shadowsocks"])
+        with open(P.CONF) as f:
+            self.base_conf = f.read()
+
+    def test_apply_rejects_missing_cert(self):
+        bad = self.base_conf.replace("/etc/clashgate/certs/fullchain.pem", "/root/missing/fullchain.pem")
+        with self.assertRaises(ValueError) as cm:
+            P.apply_custom_config(bad)
+        self.assertIn("/root/missing/fullchain.pem", str(cm.exception))
+        self.assertFalse(P.is_custom_config_mode())
+
+    def test_disable_restores_backup(self):
+        P.apply_custom_config(self.base_conf)
+        self.assertTrue(P.is_custom_config_mode())
+        self.assertEqual(P.disable_custom_config(), "restored")
+        self.assertFalse(P.is_custom_config_mode())
+        self.assertTrue(os.path.isfile(P.CUSTOM_SAVED))
+        self.assertIn("shadowsocks-t", read(P.CONF))
+        self.assertEqual(P.validate_config()[0], 0)
+
+    def test_disable_without_backup_keeps_tracked_nodes(self):
+        P.apply_custom_config(self.base_conf)
+        for p in (P.NODES_TSV, P.INBOUNDS, P.PROXIES_JSON, P.PROVIDERS_JSON):
+            if os.path.exists(p + ".tplbak"):
+                os.remove(p + ".tplbak")
+        self.assertEqual(P.disable_custom_config(), "kept")
+        conf = read(P.CONF)
+        self.assertIn("shadowsocks-t", conf)
+        self.assertEqual(P.validate_config()[0], 0)
+
+    def test_disable_falls_back_to_reset(self):
+        P.apply_custom_config(self.base_conf)
+        for p in (P.NODES_TSV, P.INBOUNDS, P.PROXIES_JSON, P.PROVIDERS_JSON):
+            if os.path.exists(p + ".tplbak"):
+                os.remove(p + ".tplbak")
+        inbs = P.load_inbounds()
+        inbs[0]["listener"]["type"] = "no-such-type"   # template cannot render it -> mihomo -t fails
+        with open(P.INBOUNDS, "w") as f:
+            json.dump(inbs, f)
+        self.assertEqual(P.disable_custom_config(), "reset")
+        self.assertEqual(P.validate_config()[0], 0)
+        self.assertEqual(len(P.read_nodes()), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
