@@ -62,7 +62,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -228,6 +228,115 @@ class CustomModeTest(unittest.TestCase):
         self.assertEqual(P.disable_custom_config(), "reset")
         self.assertEqual(P.validate_config()[0], 0)
         self.assertEqual(len(P.read_nodes()), 1)
+
+
+NODE_NAMES_OK = ["东京", "Tokyo-1", "  hk 01  ", "A" * 20, "节点" * 10, "日本 🇯🇵", "de.fra_2", "direct-1"]
+NODE_NAMES_BAD = ["", "   ", "A" * 21, "节点" * 10 + "x", "a,b", 'a"b', "a'b", "a\\b", "a`b", "a{b}", "[x]",
+                  "a#b", "a|b", "<x>", "a\nb", "a\tb", "DIRECT", "reject", "Global", "pass"]
+
+
+class ClusterTest(unittest.TestCase):
+    def setUp(self):
+        write_default_state(["shadowsocks"])
+        self.addCleanup(self._clean)
+
+    def _clean(self):
+        for f in (P.CLUSTER_JSON, P.FRAG_CLUSTER_PROXIES, P.FRAG_CLUSTER_LISTENERS, P.PANEL_SETTINGS):
+            if os.path.exists(f):
+                os.remove(f)
+
+    def _state(self):
+        dec, enc = P.vless_mlkem768_pair()
+        member = {"id": "m1", "name": "东京-1", "url": "https://tokyo.example.com:8443", "token": "t" * 43,
+                  "version": "1.14", "created": 1, "instance": "a" * 32,
+                  "node": {"server": "203.0.113.9", "port": 31000, "uuid": "11111111-2222-4333-8444-555555555555",
+                           "encryption": enc}}
+        peer = {"id": "abc123", "name": "香港", "instance": "b" * 32, "token_hash": "0" * 64, "port": 31001,
+                "uuid": "66666666-7777-4888-9999-000000000000", "decryption": dec, "created": 1, "seen": 1}
+        return {"instance": "c" * 32, "members": [member], "peers": [peer]}, dec, enc
+
+    def test_node_name_validation(self):
+        for name in NODE_NAMES_OK:
+            self.assertEqual(P.validate_node_name(name), name.strip(), name)
+        for name in NODE_NAMES_BAD:
+            with self.assertRaises(ValueError, msg=repr(name)):
+                P.validate_node_name(name)
+        P.save_panel_settings({"node_name": " 大阪 "})
+        self.assertEqual(P.local_node_name(), "大阪")
+        with self.assertRaises(ValueError):
+            P.save_panel_settings({"node_name": "x" * 21})
+        self.assertEqual(P.local_node_name(), "大阪")
+        self.assertLessEqual(len(P.default_node_name()), P.NODE_NAME_MAX)
+
+    def test_node_name_js_mirror_matches(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        vue = read(os.path.join(REPO, "panel/web/src/App.vue"))
+        js = "const t=(s)=>s;\n" + vue[vue.index("const CG_NODE_NAME_MAX"):vue.index("// end node-name")]
+        js += ("\nconst c=JSON.parse(require('fs').readFileSync(0,'utf8'));"
+               "console.log(JSON.stringify(c.map(x=>nodeNameError(x)==='')))")
+        names = NODE_NAMES_OK + NODE_NAMES_BAD + ["a\u2028b", "a\x7fb", "ß" * 10, "e\u0301" * 10]
+        r = subprocess.run([node, "-e", js], input=json.dumps(names), capture_output=True, text=True, check=True)
+        for name, js_ok in zip(names, json.loads(r.stdout)):
+            try:
+                P.validate_node_name(name)
+                py_ok = True
+            except ValueError:
+                py_ok = False
+            self.assertEqual(js_ok, py_ok, repr(name))
+
+    def test_config_has_hidden_cluster_entries(self):
+        st, dec, enc = self._state()
+        self.assertTrue(dec.startswith("mlkem768x25519plus.native.600s."))
+        self.assertTrue(enc.startswith("mlkem768x25519plus.native.0rtt."))
+        P.save_cluster(st)
+        self.assertEqual(oct(os.stat(P.CLUSTER_JSON).st_mode & 0o777), "0o600")
+        conf = P.assemble_config()
+        with open(P.CONF, "w") as f:
+            f.write(conf)
+        rc, out = P.validate_config()
+        self.assertEqual(rc, 0, out)
+        self.assertIn('"name": "东京-1"', conf)
+        self.assertIn('"encryption": "' + enc + '"', conf)
+        self.assertIn('"name": "cg-cluster-abc123"', conf)
+        self.assertIn('"decryption": "' + dec + '"', conf)
+        self.assertIn('"flow": "xtls-rprx-vision"', conf)
+        self.assertNotIn("skip-cert-verify", conf)
+        # routing groups use include-all, so the member is selectable without listing it anywhere
+        self.assertIn("include-all: true", read(P.FRAG_PROXY_GROUPS) if os.path.exists(P.FRAG_PROXY_GROUPS) else conf)
+        self.assertIn(31001, P.used_ports(P.read_env()))
+        self.assertIn("31001/tcp", P.cluster_ufw_specs())
+        self.assertIn("东京-1", P.used_proxy_names())
+
+    def test_cluster_hidden_from_subscription_and_ui(self):
+        st, dec, enc = self._state()
+        P.save_cluster(st)
+        sub = P.render_subscription(P.read_env(), live=False)
+        for secret in ("东京-1", "香港", "cg-cluster", enc, dec, st["members"][0]["node"]["uuid"], st["peers"][0]["uuid"]):
+            self.assertNotIn(secret, sub)
+        self.assertNotIn("东京-1", [p.get("name") for p in P.load_server_proxies()])
+        pub = json.dumps(P.public_cluster_state(False), ensure_ascii=False)
+        self.assertIn("东京-1", pub)
+        self.assertIn("香港", pub)
+        for secret in (enc, dec, st["members"][0]["token"], st["peers"][0]["token_hash"],
+                       st["members"][0]["node"]["uuid"], st["peers"][0]["uuid"]):
+            self.assertNotIn(secret, pub)
+
+    def test_custom_mode_keeps_cluster_out_of_parsed_state(self):
+        st, _, _ = self._state()
+        P.save_cluster(st)
+        inbs, proxies, _ = P.parse_custom_config_state(P.assemble_config())
+        self.assertFalse([i for i in inbs if i["name"].startswith(P.CLUSTER_LISTENER_PREFIX)])
+        self.assertNotIn("东京-1", [p.get("name") for p in proxies])
+        self.assertIn("shadowsocks-t", [i["name"] for i in inbs])
+
+    def test_panel_url_normalization(self):
+        self.assertEqual(P.normalize_panel_url("panel.example.com:8443/"), "https://panel.example.com:8443")
+        self.assertEqual(P.normalize_panel_url("https://Panel.Example.com/x?y"), "https://panel.example.com")
+        for bad in ("", "http://a.com", "https://user:pw@a.com", "ftp://a.com", "https://"):
+            with self.assertRaises(P.ClusterError, msg=bad):
+                P.normalize_panel_url(bad)
 
 
 class SecurityTest(unittest.TestCase):
