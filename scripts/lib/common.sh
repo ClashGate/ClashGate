@@ -40,6 +40,7 @@ LIB_DIR=$CS_ROOT
 CS_ETC=$CS_ROOT
 ENV_FILE=$CS_ETC/clashgate.env
 PANEL_CFG=$CS_ETC/panel.json
+PANEL_SESSIONS=$CS_ETC/sessions.json      # signed-in panel sessions (dropped when the password changes)
 ACME_HOME=$CS_ETC/acme.sh                    # acme.sh 安装目录（--home），账户与证书都在这里
 ACMESH_VERSION=3.1.6                         # 固定版本，避免上游参数变动
 REPO_API=https://api.github.com/repos/MetaCubeX/mihomo/releases/latest

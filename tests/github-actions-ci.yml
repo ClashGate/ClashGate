@@ -1,3 +1,5 @@
+# GitHub Actions workflow for ClashGate. To enable CI, copy this file to .github/workflows/ci.yml
+# (pushing workflow files needs a token with the `workflow` scope).
 name: CI
 on:
   push:

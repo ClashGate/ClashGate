@@ -266,6 +266,7 @@ update_self() {
   tmp=$(mktemp -d /tmp/clashgate.XXXXXX)
   fetch_repo "$tmp"
   CS_HOME=$tmp install_files   # 替换 /etc/clashgate 下的代码子目录；保留配置与证书
+  chmod 1775 "$CONF_DIR" 2>/dev/null || true   # sticky: mihomo may not replace root-owned files
   rm -rf "$tmp"
   install -m 644 "$LIB_DIR/scripts/init/mihomo.service" "$UNIT"
   if [[ $MODE == auto-cert ]]; then
@@ -408,6 +409,7 @@ do_passwd() {
   PANEL_HASH=$(printf '%s\n' "$p1" | python3 "$LIB_DIR/panel/panel.py" hash-password)
   SUB_TOKEN=$(panel_cfg_get sub_token)
   write_panel_cfg
+  rm -f "$PANEL_SESSIONS"   # sign out every browser that used the old password
   systemctl restart clashgate
   printf '面板密码已修改。登录地址：%s（用户名 admin）\n' "$(panel_url)"
 }
@@ -416,6 +418,7 @@ do_reset_password() {
   load_env
   [[ $MODE == auto-cert && -f $PANEL_CFG ]] || die "未安装管理面板（仅证书模式提供）"
   set_panel_password
+  rm -f "$PANEL_SESSIONS"   # sign out every browser that used the old password
   systemctl restart clashgate
   printf '管理面板：%s\n用户名：admin\n新密码：%s\n' "$(panel_url)" "$PANEL_PASS"
 }
@@ -497,7 +500,7 @@ do_uninstall() {
   fi
   rm -rf "$CS_ROOT"
   if [[ -n $cert_bak || -n $acme_bak ]]; then
-    install -d -m 775 "$CS_ROOT"
+    install -d -m 1775 "$CS_ROOT"
     if [[ -n $cert_bak ]]; then
       install -d -m 750 "$CONF_DIR/certs"
       cp -a "$cert_bak/." "$CONF_DIR/certs/" 2>/dev/null || true
