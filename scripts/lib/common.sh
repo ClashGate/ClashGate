@@ -4,9 +4,9 @@
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/i18n.sh"   # CLASHGATE_LANG=en|zh；默认中文
 
-# Compared as integer tuples by installed panels (1.11 > 1.10 > 1.09): never use 1.1 / 1.2, the next is 1.12.
-CS_VERSION=1.11
-CS_SOURCE_SHA=20261112-v1.11
+# Compared as integer tuples by installed panels (1.12 > 1.11 > 1.10 > 1.09): never use 1.1 / 1.2, the next is 1.13.
+CS_VERSION=1.12
+CS_SOURCE_SHA=20261112-v1.12
 REPO_OWNER=${REPO_OWNER:-ClashGate}
 REPO_NAME=${REPO_NAME:-ClashGate}
 REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
