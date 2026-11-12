@@ -2,6 +2,8 @@
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { t, lang, setLang, LANGS, langLabel } from './i18n.js'
 import CgIcon from './CgIcon.vue'
+import XmasArt from './XmasArt.vue'
+import { theme, setTheme } from './theme.js'
 
 const boot = window.__CS_BOOT__ || {
   page: 'dashboard',
@@ -65,6 +67,7 @@ const boot = window.__CS_BOOT__ || {
 }
 
 const pageMode = ref(boot.page || 'dashboard')
+const isXmas = computed(() => theme.value === 'christmas')
 const state = reactive({
   version: boot.version || '',
   mihomo_version: boot.mihomo_version || (boot.status && boot.status.mihomo_version) || '',
@@ -1826,7 +1829,12 @@ onUnmounted(() => {
 <template>
   <!-- Login -->
   <div v-if="pageMode === 'login'" class="cg-login">
+    <template v-if="isXmas">
+      <XmasArt kind="snow" />
+      <div class="cg-xmas-login" aria-hidden="true"><XmasArt kind="scene" /></div>
+    </template>
     <div class="cg-login-card">
+      <XmasArt v-if="isXmas" kind="holly" />
       <div class="flex justify-end mb-4">
         <div class="cg-lang">
           <button
@@ -1843,7 +1851,7 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="flex items-center gap-3.5 mb-7">
-        <img src="/assets/logo.png" alt="" class="cg-logo" />
+        <span class="cg-logo-wrap"><img src="/assets/logo.png" alt="" class="cg-logo" /><XmasArt v-if="isXmas" kind="hat" /></span>
         <div>
           <div class="flex items-center gap-2">
             <h1 class="cg-wordmark text-[22px] leading-none text-slate-900">ClashGate</h1>
@@ -2139,10 +2147,11 @@ onUnmounted(() => {
       </div>
     </Transition>
 
+    <XmasArt v-if="isXmas" kind="snow" />
     <div class="cg-shell">
       <aside class="cg-side">
         <div class="cg-brand">
-          <img src="/assets/logo.png" alt="" class="cg-logo" />
+          <span class="cg-logo-wrap"><img src="/assets/logo.png" alt="" class="cg-logo" /><XmasArt v-if="isXmas" kind="hat" /></span>
           <div class="min-w-0">
             <div class="cg-wordmark text-[18px] leading-none text-[#1a2330]">ClashGate</div>
             <div class="cg-brand-sub">{{ t('简单安全的 Mihomo 服务端') }}</div>
@@ -2177,6 +2186,7 @@ onUnmounted(() => {
             <CgIcon name="settings" />{{ t('设置') }}
           </button>
         </nav>
+        <div v-if="isXmas" class="cg-xmas-side" aria-hidden="true"><XmasArt kind="scene" /></div>
       </aside>
 
       <div class="cg-column">
@@ -2184,7 +2194,7 @@ onUnmounted(() => {
     <header class="sticky top-0 z-30 cg-top">
       <div class="cg-topbar px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
         <div class="flex items-center gap-2.5 min-w-0 lg:hidden">
-          <img src="/assets/logo.png" alt="" class="cg-logo" />
+          <span class="cg-logo-wrap"><img src="/assets/logo.png" alt="" class="cg-logo" /><XmasArt v-if="isXmas" kind="hat" /></span>
           <span class="cg-wordmark text-[18px] text-slate-900">ClashGate</span>
         </div>
         <div class="hidden lg:block min-w-0">
@@ -3789,9 +3799,37 @@ onUnmounted(() => {
               <p class="text-xs text-slate-500 mt-1 leading-relaxed">{{ t('更新当前登录密码。') }}</p>
             </button>
           </section>
+
+          <section class="cg-surface rounded-2xl p-5 sm:p-6">
+            <div class="flex items-center justify-between gap-4">
+              <div class="min-w-0">
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('皮肤') }}</h2>
+                <p class="text-xs text-slate-500 mt-1 leading-relaxed">{{ t('只改变面板外观，保存在当前浏览器。') }}</p>
+              </div>
+              <div class="flex shrink-0 rounded-lg border border-slate-200 p-0.5 bg-white" role="radiogroup" :aria-label="t('皮肤')">
+                <button
+                  type="button"
+                  role="radio"
+                  :aria-checked="theme === 'default' ? 'true' : 'false'"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                  :class="theme === 'default' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  @click="setTheme('default')"
+                >{{ t('默认') }}</button>
+                <button
+                  type="button"
+                  role="radio"
+                  :aria-checked="theme === 'christmas' ? 'true' : 'false'"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                  :class="theme === 'christmas' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  @click="setTheme('christmas')"
+                >{{ t('圣诞') }}</button>
+              </div>
+            </div>
+          </section>
         </div>
       </Transition>
     </main>
+    <div v-if="isXmas" class="cg-xmas-foot" aria-hidden="true"><XmasArt kind="scene" /></div>
       </div>
     </div>
   </div>

@@ -1,0 +1,266 @@
+/* ClashGate "Christmas" skin. Active only on <html data-theme="christmas">; the default skin is untouched.
+   Green is the action colour (red stays reserved for danger), red / gold are decorative accents. */
+html[data-theme="christmas"] {
+  --color-emerald-50: #eef8f1;
+  --color-emerald-100: #d8f0e0;
+  --color-emerald-200: #b2e0c3;
+  --color-emerald-300: #7fca9c;
+  --color-emerald-400: #49ad74;
+  --color-emerald-500: #24945a;
+  --color-emerald-600: #1a7f47;
+  --color-emerald-700: #136338;
+  --color-emerald-800: #114f2f;
+  --color-emerald-900: #0f3f27;
+  --color-emerald-950: #072615;
+  --cgx-green: #1a7f47;
+  --cgx-green-hover: #136338;
+  --cgx-green-rgb: 26, 127, 71;
+  --cgx-red: #d9393a;
+  --cgx-gold: #f2b12e;
+  background: #f8f7f3;
+}
+
+html[data-theme="christmas"] body {
+  background-color: #f8f7f3;
+  background-image:
+    radial-gradient(900px 460px at 100% -8%, rgba(217, 57, 58, 0.07), transparent 62%),
+    radial-gradient(760px 420px at -6% 0%, rgba(26, 127, 71, 0.06), transparent 60%),
+    linear-gradient(180deg, #fbfaf7 0%, #f3f5f0 100%);
+}
+html[data-theme="christmas"] ::selection {
+  background-color: rgba(var(--cgx-green-rgb), 0.18);
+  color: #0f3f27;
+}
+
+/* Content sits above the falling snow. */
+html[data-theme="christmas"] .cg-shell,
+html[data-theme="christmas"] .cg-login-card {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---- accent colour swaps (same selectors as style.css) ---- */
+html[data-theme="christmas"] .cg-btn-primary,
+html[data-theme="christmas"] .cg-nav.is-active,
+html[data-theme="christmas"] .cg-mobile-nav .cg-nav.is-active,
+html[data-theme="christmas"] .cg-switch.is-on,
+html[data-theme="christmas"] .cg-tool.is-update {
+  background: var(--cgx-green);
+  border-color: var(--cgx-green);
+}
+html[data-theme="christmas"] .cg-btn-primary:hover:not(:disabled),
+html[data-theme="christmas"] .cg-tool.is-update:hover:not(:disabled) {
+  background: var(--cgx-green-hover);
+}
+html[data-theme="christmas"] .cg-btn-primary {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 1px 2px rgba(19, 99, 56, 0.22),
+    0 6px 16px -10px rgba(var(--cgx-green-rgb), 0.7);
+}
+html[data-theme="christmas"] .cg-btn-primary:disabled { box-shadow: none; }
+html[data-theme="christmas"] .cg-nav.is-active,
+html[data-theme="christmas"] .cg-mobile-nav .cg-nav.is-active {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 6px 14px -8px rgba(var(--cgx-green-rgb), 0.65);
+}
+html[data-theme="christmas"] .cg-nav:hover { background: rgba(var(--cgx-green-rgb), 0.08); }
+html[data-theme="christmas"] .cg-nav.is-active:hover { background: var(--cgx-green); }
+html[data-theme="christmas"] .cg-nav.is-locked:hover { background: transparent; }
+html[data-theme="christmas"] .cg-switch.is-on { box-shadow: inset 0 1px 2px rgba(19, 99, 56, 0.35); }
+html[data-theme="christmas"] .cg-lang-btn[aria-expanded="true"],
+html[data-theme="christmas"] .cg-lang-item.is-active {
+  border-color: #b2e0c3;
+  background: #eef8f1;
+  color: var(--cgx-green-hover);
+}
+html[data-theme="christmas"] .cg-lang-item.is-active { border-color: transparent; }
+html[data-theme="christmas"] .cg-surface-emerald {
+  background-image: linear-gradient(180deg, rgba(var(--cgx-green-rgb), 0.06), transparent 46%);
+}
+html[data-theme="christmas"] .cg-feature {
+  background-image:
+    linear-gradient(135deg, rgba(217, 57, 58, 0.07), transparent 46%),
+    linear-gradient(#ffffff, #ffffff);
+}
+html[data-theme="christmas"] #stat-card-status { box-shadow: inset 3px 0 0 var(--cgx-red); }
+html[data-theme="christmas"] [dir="rtl"] #stat-card-status { box-shadow: inset -3px 0 0 var(--cgx-red); }
+html[data-theme="christmas"] .cg-rail .cg-stat-mode { background: #e6f5ec; color: var(--cgx-green-hover); }
+html[data-theme="christmas"] .cg-live.is-ok {
+  background: var(--cgx-green);
+  box-shadow: 0 0 0 3px rgba(var(--cgx-green-rgb), 0.18);
+}
+html[data-theme="christmas"] .cg-input:focus,
+html[data-theme="christmas"] select.cg-input:focus,
+html[data-theme="christmas"] textarea.cg-input:focus {
+  border-color: var(--cgx-green);
+  box-shadow: 0 0 0 3px rgba(var(--cgx-green-rgb), 0.16);
+}
+html[data-theme="christmas"] :where(button, a, [role="button"], [tabindex], summary, select, input[type="checkbox"], input[type="radio"]):focus-visible {
+  outline-color: rgba(var(--cgx-green-rgb), 0.6);
+}
+html[data-theme="christmas"] .cg-side {
+  background: linear-gradient(180deg, #fcfbf8 0%, #f4f6f1 100%);
+}
+html[data-theme="christmas"] .cg-login-card::before {
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--cgx-red) 30%, var(--cgx-gold) 50%, var(--cgx-green) 70%, transparent);
+}
+
+/* Empty states: a little gift instead of the inbox tray. */
+html[data-theme="christmas"] .cg-empty {
+  background-image: linear-gradient(180deg, rgba(217, 57, 58, 0.04), transparent 70%);
+}
+html[data-theme="christmas"] .cg-empty::before {
+  width: 36px;
+  height: 36px;
+  background-color: #fdeceb;
+  background-size: 24px 24px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='5' y='13' width='22' height='15' rx='2' fill='%23e0413e'/%3E%3Crect x='3.5' y='9' width='25' height='6' rx='1.6' fill='%23ef5350'/%3E%3Crect x='14' y='9' width='4' height='19' fill='%231a7f47'/%3E%3Cpath d='M16 9C11 2 6 5 10 8.5ZM16 9C21 2 26 5 22 8.5Z' fill='%2324945a'/%3E%3C/svg%3E");
+  box-shadow: 0 0 0 4px rgba(217, 57, 58, 0.07);
+}
+
+/* ---- top bar: candy-cane stripe on top, a string of lights along the bottom ---- */
+html[data-theme="christmas"] .cg-top::before,
+html[data-theme="christmas"] .cg-top::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+html[data-theme="christmas"] .cg-top::before {
+  top: 0;
+  height: 4px;
+  background: repeating-linear-gradient(-45deg, var(--cgx-red) 0 8px, #ffffff 8px 14px, var(--cgx-green) 14px 22px, #ffffff 22px 28px);
+  opacity: 0.9;
+}
+html[data-theme="christmas"] .cg-top::after {
+  bottom: -1px;
+  height: 13px;
+  background-repeat: repeat-x;
+  background-size: 96px 13px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 13'%3E%3Cpath d='M0 2Q12 6 24 2T48 2T72 2T96 2' fill='none' stroke='%2367806f' stroke-width='1'/%3E%3Cg%3E%3Crect x='10.6' y='3.4' width='2.8' height='2.4' rx='.6' fill='%2394a39a'/%3E%3Cellipse cx='12' cy='8.6' rx='2.6' ry='3.6' fill='%23e0413e'/%3E%3Crect x='34.6' y='1.6' width='2.8' height='2.4' rx='.6' fill='%2394a39a'/%3E%3Cellipse cx='36' cy='6.8' rx='2.6' ry='3.6' fill='%23f2b12e'/%3E%3Crect x='58.6' y='3.4' width='2.8' height='2.4' rx='.6' fill='%2394a39a'/%3E%3Cellipse cx='60' cy='8.6' rx='2.6' ry='3.6' fill='%2324945a'/%3E%3Crect x='82.6' y='1.6' width='2.8' height='2.4' rx='.6' fill='%2394a39a'/%3E%3Cellipse cx='84' cy='6.8' rx='2.6' ry='3.6' fill='%233d8fe0'/%3E%3C/g%3E%3C/svg%3E");
+  opacity: 0.95;
+}
+
+@media (max-width: 1023px) {
+  /* room for the candy-cane stripe and the Santa hat above the mobile logo */
+  html[data-theme="christmas"] .cg-topbar { padding-top: 18px; }
+}
+
+/* ---- decorations (XmasArt.vue) ---- */
+.cg-xmas-snow,
+.cg-xmas-scene,
+.cg-xmas-hat,
+.cg-xmas-holly,
+.cg-xmas-deco {
+  pointer-events: none;
+  user-select: none;
+}
+.cg-xmas-snow {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+}
+.cg-xmas-snow span {
+  position: absolute;
+  top: -12px;
+  border-radius: 999px;
+  background: #c9d8ea;
+  opacity: 0.75;
+  animation-name: cgxSnow;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@keyframes cgxSnow {
+  0% { transform: translate3d(0, -12px, 0); }
+  50% { transform: translate3d(var(--drift, 12px), 50vh, 0); }
+  100% { transform: translate3d(0, 104vh, 0); }
+}
+
+.cg-logo-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.cg-xmas-hat {
+  position: absolute;
+  width: 28px;
+  height: auto;
+  top: -13px;
+  left: -9px;
+  transform: rotate(-20deg);
+  filter: drop-shadow(0 1px 1px rgba(26, 35, 48, 0.18));
+}
+[dir="rtl"] .cg-xmas-hat {
+  left: auto;
+  right: -9px;
+  transform: scaleX(-1) rotate(-20deg);
+}
+
+.cg-xmas-holly {
+  position: absolute;
+  top: -14px;
+  left: -14px;
+  width: 58px;
+  height: auto;
+  transform: rotate(-12deg);
+}
+[dir="rtl"] .cg-xmas-holly {
+  left: auto;
+  right: -14px;
+  transform: scaleX(-1) rotate(-12deg);
+}
+
+/* Login: scene drawn at the bottom of the page, behind the card. */
+.cg-xmas-login {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  display: flex;
+  justify-content: center;
+}
+.cg-xmas-login .cg-xmas-scene {
+  /* about a quarter of the viewport height, so it stays below the centred card */
+  width: min(420px, 92vw, calc(24vh * 1.733));
+  height: auto;
+  display: block;
+}
+
+/* Desktop sidebar: scene fills the empty space under the navigation (in normal flow, so it never covers it). */
+.cg-xmas-side {
+  margin-top: auto;
+  padding: 16px 0 0;
+}
+.cg-xmas-side .cg-xmas-scene {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+/* Small screens: the same scene closes the page, below all content. */
+.cg-xmas-foot {
+  display: flex;
+  justify-content: center;
+  padding: 8px 16px 0;
+}
+.cg-xmas-foot .cg-xmas-scene {
+  width: min(300px, 86vw);
+  height: auto;
+  display: block;
+}
+@media (min-width: 1024px) {
+  .cg-xmas-foot { display: none; }
+}
+@media (max-height: 700px) {
+  .cg-xmas-side { display: none; }
+}
+@media (max-height: 640px) {
+  .cg-xmas-login { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cg-xmas-snow { display: none; }
+}

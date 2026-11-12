@@ -358,7 +358,11 @@ export const EN = {
  "删除中…": "Deleting…",
  "暂无待生效的变更": "No pending changes",
  "转换结果": "Result",
- "{n} 天": "{n} days"
+ "{n} 天": "{n} days",
+ "皮肤": "Skin",
+ "只改变面板外观，保存在当前浏览器。": "Changes only how the panel looks; saved in this browser.",
+ "默认": "Default",
+ "圣诞": "Christmas"
 }
 
 export const LANGS = ['zh', 'en', 'ru', 'fa']
