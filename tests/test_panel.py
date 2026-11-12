@@ -236,9 +236,12 @@ class CustomModeTest(unittest.TestCase):
         self.assertEqual(len(P.read_nodes()), 1)
 
 
-NODE_NAMES_OK = ["东京", "Tokyo-1", "  hk 01  ", "A" * 20, "节点" * 10, "日本 🇯🇵", "de.fra_2", "direct-1"]
-NODE_NAMES_BAD = ["", "   ", "A" * 21, "节点" * 10 + "x", "a,b", 'a"b', "a'b", "a\\b", "a`b", "a{b}", "[x]",
-                  "a#b", "a|b", "<x>", "a\nb", "a\tb", "DIRECT", "reject", "Global", "pass"]
+NODE_NAMES_OK = ["东京", "Tokyo-1", "  hk 01  ", "A" * 15, "节点" * 7 + "x", "日本 🇯🇵", "de.fra_2", "direct-1",
+                 "a,b", 'a"b', "a'b", "a\\b", "a`b", "a{b}", "[x]", "a#b", "a|b", "<x>", "k: v", "&*!%@", "#1 🚀"]
+NODE_NAMES_BAD = ["", "   ", "A" * 16, "节点" * 8, "a\nb", "a\tb", "a\rb", "a\x00b", "a\x7fb", "a\u0085b", "a\u2028b",
+                  "a\u200bb", "a\u202eb", "a\ufeffb", "DIRECT", "reject", "Global", "pass"]
+# Every symbol the user may type, spread over names of at most 15 characters.
+SYMBOL_NAMES = ['B,"\'[]{}#|<>🚀', "C:&*!%@`~ $^ 1", "D \\ /?=+;()", "🇯🇵 东京-#1"]
 
 
 class UpdateCheckTest(unittest.TestCase):
@@ -359,9 +362,52 @@ class ClusterTest(unittest.TestCase):
         P.save_panel_settings({"node_name": " 大阪 "})
         self.assertEqual(P.local_node_name(), "大阪")
         with self.assertRaises(ValueError):
-            P.save_panel_settings({"node_name": "x" * 21})
+            P.save_panel_settings({"node_name": "x" * 16})
         self.assertEqual(P.local_node_name(), "大阪")
         self.assertLessEqual(len(P.default_node_name()), P.NODE_NAME_MAX)
+        self.assertEqual(P.NODE_NAME_MAX, 15)
+        # a name saved under the old 20-character limit is shortened, not dropped
+        cur = json.loads(read(P.PANEL_SETTINGS))
+        cur["node_name"] = "y" * 20
+        with open(P.PANEL_SETTINGS, "w") as f:
+            json.dump(cur, f)
+        self.assertEqual(P.local_node_name(), "y" * 15)
+        # names announced by other (older) panels keep the old 20-character limit
+        self.assertEqual(P.validate_peer_name("z" * 20), "z" * 20)
+        with self.assertRaises(ValueError):
+            P.validate_peer_name("z" * 21)
+
+    def test_symbol_names_are_quoted_everywhere(self):
+        st, dec, enc = self._state()
+        base = st["links"][0]
+        links = []
+        for i, name in enumerate(SYMBOL_NAMES):
+            self.assertEqual(P.validate_node_name(name), name)
+            l = json.loads(json.dumps(base))
+            l.update(id=f"id{i:04d}", instance=str(i) * 32, name=name)
+            l["in"]["port"] = 31001 + i
+            links.append(l)
+        st["links"] = links
+        P.save_cluster(st)
+        conf = P.assemble_config()
+        with open(P.CONF, "w") as f:
+            f.write(conf)
+        rc, out = P.validate_config()
+        self.assertEqual(rc, 0, out)
+        for name in SYMBOL_NAMES:
+            self.assertIn('"name": ' + json.dumps(name, ensure_ascii=False), conf)
+        self.assertEqual(P.cluster_proxy_names(), set(SYMBOL_NAMES))
+        self.assertTrue(set(SYMBOL_NAMES) <= P.used_proxy_names())
+        # hidden from the subscription and the outbound list, in both template and custom mode
+        sub = P.render_subscription(P.read_env(), live=False)
+        for name in SYMBOL_NAMES:
+            self.assertNotIn(name, sub)
+        self.assertFalse(set(SYMBOL_NAMES) & {p.get("name") for p in P.load_server_proxies()})
+        inbs, proxies, _ = P.parse_custom_config_state(conf)
+        self.assertFalse(set(SYMBOL_NAMES) & {p.get("name") for p in proxies})
+        self.assertFalse([i for i in inbs if i["name"].startswith(P.CLUSTER_LISTENER_PREFIX)])
+        names = [m["name"] for m in P.public_cluster_state(False)["members"]]
+        self.assertEqual(sorted(names), sorted(SYMBOL_NAMES))
 
     def test_node_name_js_mirror_matches(self):
         node = shutil.which("node")
@@ -371,7 +417,7 @@ class ClusterTest(unittest.TestCase):
         js = "const t=(s)=>s;\n" + vue[vue.index("const CG_NODE_NAME_MAX"):vue.index("// end node-name")]
         js += ("\nconst c=JSON.parse(require('fs').readFileSync(0,'utf8'));"
                "console.log(JSON.stringify(c.map(x=>nodeNameError(x)==='')))")
-        names = NODE_NAMES_OK + NODE_NAMES_BAD + ["a\u2028b", "a\x7fb", "ß" * 10, "e\u0301" * 10]
+        names = NODE_NAMES_OK + NODE_NAMES_BAD + SYMBOL_NAMES + ["ß" * 15, "e\u0301" * 7, "e\u0301" * 8, "a\u00a0b", "a\u2066b"]
         r = subprocess.run([node, "-e", js], input=json.dumps(names), capture_output=True, text=True, check=True)
         for name, js_ok in zip(names, json.loads(r.stdout)):
             try:

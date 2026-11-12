@@ -205,15 +205,22 @@ def target_server():
     return srv.server_address[1]
 
 
+def mihomo_t(conf_path):
+    d = tempfile.mkdtemp(dir=TMP)
+    r = subprocess.run([MIHOMO, "-t", "-d", d, "-f", conf_path], capture_output=True, text=True)
+    return r.returncode, r.stdout + r.stderr
+
+
 def curl_via(proxy_dict, url):
     """Run a client core with only this outbound and fetch url through it."""
     d = tempfile.mkdtemp(dir=TMP)
     with socket.socket() as so:   # a free port (cluster inbounds take random ports too)
         so.bind(("127.0.0.1", 0))
         port = so.getsockname()[1]
+    proxy_dict = {**proxy_dict, "name": "via"}   # node names may contain commas; keep the client rule simple
     with open(d + "/c.yaml", "w") as f:
         f.write(f"mixed-port: {port}\nmode: rule\nlog-level: warning\nproxies:\n  - {json.dumps(proxy_dict)}\n"
-                f"rules:\n  - {json.dumps('MATCH,' + proxy_dict['name'], ensure_ascii=False)}\n")
+                f"rules:\n  - MATCH,via\n")
     p = subprocess.Popen([MIHOMO, "-d", d, "-f", d + "/c.yaml"], stdout=open(d + "/log", "w"), stderr=subprocess.STDOUT)
     try:
         for _ in range(50):
@@ -297,7 +304,7 @@ def main():
                           + ("" if out.endswith("\n200") else f" ({out[-200:]!r})"))
 
     print("[name validation]")
-    for bad in ("a,b", "x" * 21, "DIRECT", 'q"q', ""):
+    for bad in ("x" * 16, "DIRECT", "a\nb", "a\u200bb", ""):
         r = a.post("/action/settings", node_name=bad)
         check(not r["ok"], f"rejects node name {bad!r}: {r['msg']}")
     r = a.post("/action/settings", node_name="A-Node")
@@ -398,6 +405,18 @@ def main():
     b.post("/action/settings", node_name="Taken")
     check(wait_for(lambda: '"name": "Taken"' in read(cs["C"] + "/config.yaml")), "C took the new name")
     check('"name": "B-东京"' in read(cs["A"] + "/config.yaml"), "A kept the old name (it clashes with A's own outbound)")
+    for sym in ('B,"\'[]{}#|<>🚀', "B:&*!%@`~ $^ 1"):
+        r = b.post("/action/settings", node_name=sym)
+        check(r["ok"], f"B takes a name full of symbols {sym!r}: {r['msg']}")
+        quoted = json.dumps(sym, ensure_ascii=False)
+        check(wait_for(lambda: all(f'"name": {quoted}' in read(cs[w] + "/config.yaml") for w in ("A", "C"))),
+              f"A and C write {sym!r} quoted into the live config")
+        for w in ("A", "C"):
+            check(member_names(cl[w]) == sorted([sym] + [f"{o}-Node" for o in ("A", "C") if o != w]), f"{w} lists {sym!r}")
+            rc, out = mihomo_t(cs[w] + "/config.yaml")
+            check(rc == 0, f"{w}'s config with {sym!r} passes mihomo -t" + ("" if rc == 0 else f": {out[-300:]}"))
+            out = traffic(w, sym)
+            check(out.endswith("\n200") and "hello-through-cluster" in out, f"traffic {w} -> {sym!r}")
     b.post("/action/settings", node_name="B-Node")
     check(wait_for(lambda: all('"name": "B-Node"' in read(cs[w] + "/config.yaml") for w in ("A", "C"))), "name back to B-Node")
     r = a.post("/cluster/sync")
@@ -452,9 +471,7 @@ def main():
 
     print("[mihomo -t on final configs]")
     for who in ("A", "B", "C", "D"):
-        dd = tempfile.mkdtemp(dir=TMP)
-        rc = subprocess.run([MIHOMO, "-t", "-d", dd, "-f", cs[who] + "/config.yaml"], capture_output=True).returncode
-        check(rc == 0, f"{who} config passes mihomo -t")
+        check(mihomo_t(cs[who] + "/config.yaml")[0] == 0, f"{who} config passes mihomo -t")
 
     print()
     print("FAILED: %d" % len(FAILS) if FAILS else "all cluster e2e checks passed")

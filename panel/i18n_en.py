@@ -263,7 +263,7 @@ TABLE = [
     ("「{}」是内核保留名称，请换一个", "“{}” is a name reserved by the core. Choose another one"),
     ("本机名称不能为空", "The node name cannot be empty"),
     ("本机名称最多 {} 个字符", "The node name can be at most {} characters"),
-    ("本机名称不能包含逗号、引号、反斜杠、方括号、花括号以及 # | < > 等符号", "The node name cannot contain commas, quotes, backslashes, brackets, braces or symbols like # | < >"),
+    ("本机名称不能包含换行、控制字符或不可见字符", "The node name cannot contain line breaks, control characters or invisible characters"),
     ("本机名称已保存为「{}」", "Node name saved as “{}”"),
     ("不能添加本机", "You cannot add this panel to itself"),
     ("另一个集群操作正在进行，请稍候再试", "Another cluster operation is in progress. Try again shortly"),

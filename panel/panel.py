@@ -2063,26 +2063,35 @@ def forget_session(tok: str):
 
 
 # ---------------------------------------------------------------- local node name (本机名称)
-# Other panels in a cluster use this as the Mihomo proxy name of the link to this server, so it must
-# be short, unique-looking and safe inside rules ("RULE-SET,x,NAME"), YAML and the routing UI.
+# Other panels in a cluster use this as the Mihomo proxy name of the link to this server. Any visible
+# character is allowed: proxies are always written as JSON flow mappings (quoted, escaped), and cluster
+# outbounds are never referenced from rule strings. Only invisible/unsafe characters are refused.
 # Mirrored in App.vue (CG_NODE_NAME ... end node-name); tests compare both.
-NODE_NAME_MAX = 20
-_NODE_NAME_BAD = re.compile(r"[\x00-\x1f\x7f\u0085\u2028\u2029,\"'\\`{}\[\]#|<>]")
+NODE_NAME_MAX = 15
+# Names announced by other panels: older 1.14/1.15 builds allowed up to 20 characters.
+NODE_NAME_PEER_MAX = 20
+# Control characters, line/paragraph separators, zero-width and bidi-override characters.
+_NODE_NAME_BAD = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")
 RESERVED_PROXY_NAMES = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"}
 
 
-def validate_node_name(raw) -> str:
+def validate_node_name(raw, max_len: int = NODE_NAME_MAX) -> str:
     """Return the cleaned 本机名称 or raise ValueError with a beginner-readable reason."""
     name = str(raw or "").strip()
     if not name:
         raise ValueError("本机名称不能为空")
-    if len(name) > NODE_NAME_MAX:
-        raise ValueError(f"本机名称最多 {NODE_NAME_MAX} 个字符")
+    if len(name) > max_len:
+        raise ValueError(f"本机名称最多 {max_len} 个字符")
     if _NODE_NAME_BAD.search(name):
-        raise ValueError("本机名称不能包含逗号、引号、反斜杠、方括号、花括号以及 # | < > 等符号")
+        raise ValueError("本机名称不能包含换行、控制字符或不可见字符")
     if name.upper() in RESERVED_PROXY_NAMES:
         raise ValueError(f"「{name}」是内核保留名称，请换一个")
     return name
+
+
+def validate_peer_name(raw) -> str:
+    """A name another panel announced for itself (same rules, older builds' length limit)."""
+    return validate_node_name(raw, NODE_NAME_PEER_MAX)
 
 
 def default_node_name() -> str:
@@ -2114,7 +2123,8 @@ def load_panel_settings() -> dict:
             if ch in ("stable", "test"):
                 out["update_channel"] = ch
             try:
-                out["node_name"] = validate_node_name(raw.get("node_name") or "")
+                # Names saved under the old 20-character limit are shortened, not dropped.
+                out["node_name"] = validate_node_name(str(raw.get("node_name") or "").strip()[:NODE_NAME_MAX])
             except ValueError:
                 pass
     except Exception:
@@ -3604,7 +3614,7 @@ def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
     if r_inst == my_inst:
         raise ClusterError("不能添加本机")
     try:
-        rname = validate_node_name(hello.get("name"))
+        rname = validate_peer_name(hello.get("name"))
     except ValueError:
         raise ClusterError("对方面板的本机名称无效，请先在对方面板的集群页重新填写")
     if _link_by(load_cluster(), instance=r_inst):
@@ -3624,7 +3634,7 @@ def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
             raise _remote_error(status, obj, "对方面板没能创建集群节点")
         node = _parse_node(obj.get("node") if isinstance(obj.get("node"), dict) else {})
         try:
-            rname = validate_node_name(obj.get("name") or rname)
+            rname = validate_peer_name(obj.get("name") or rname)
         except ValueError:
             pass
         link = {"id": secrets.token_hex(6), "instance": r_inst, "name": rname, "url": base, "key": key,
@@ -3755,7 +3765,7 @@ def cluster_sync() -> dict:
             rep["offline"].append(l.get("name", ""))
             continue
         try:
-            name = validate_node_name(obj.get("name"))
+            name = validate_peer_name(obj.get("name"))
         except ValueError:
             name = None
         views[l["instance"]] = [m for m in (obj.get("members") or [])
@@ -5762,7 +5772,7 @@ class Panel(BaseHTTPRequestHandler):
         if inst == cluster_instance_id():
             return self._cjson(400, {"ok": False, "code": "self", "msg": "不能添加本机"})
         try:
-            peer_name = validate_node_name(form.get("name"))
+            peer_name = validate_peer_name(form.get("name"))
             url = normalize_panel_url(str(form.get("url") or ""))
             node = _parse_node(form)
             key = str(form.get("key") or "")
@@ -5833,7 +5843,7 @@ class Panel(BaseHTTPRequestHandler):
         if not link:
             return err
         try:
-            name = validate_node_name(form.get("name"))
+            name = validate_peer_name(form.get("name"))
         except ValueError:
             name = None
         fields = {"seen": int(time.time()), "version": str(form.get("version") or link.get("version") or "")[:16]}

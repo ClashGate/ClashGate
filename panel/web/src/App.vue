@@ -1242,14 +1242,15 @@ function deleteProxy(name) {
 }
 
 // CG_NODE_NAME: mirror of validate_node_name() in panel.py (tests/test_panel.py compares both).
-const CG_NODE_NAME_MAX = 20
-const CG_NODE_NAME_BAD = /[\x00-\x1f\x7f\u0085\u2028\u2029,"'\\`{}\[\]#|<>]/
+const CG_NODE_NAME_MAX = 15
+// Control characters, line/paragraph separators, zero-width and bidi-override characters.
+const CG_NODE_NAME_BAD = /[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/
 const CG_RESERVED_PROXY_NAMES = ['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS', 'COMPATIBLE', 'GLOBAL']
 function nodeNameError(raw) {
   const name = String(raw == null ? '' : raw).trim()
   if (!name) return t('本机名称不能为空')
   if (Array.from(name).length > CG_NODE_NAME_MAX) return t('本机名称最多 {n} 个字符', { n: CG_NODE_NAME_MAX })
-  if (CG_NODE_NAME_BAD.test(name)) return t('本机名称不能包含逗号、引号、反斜杠、方括号、花括号以及 # | < > 等符号')
+  if (CG_NODE_NAME_BAD.test(name)) return t('本机名称不能包含换行、控制字符或不可见字符')
   if (CG_RESERVED_PROXY_NAMES.includes(name.toUpperCase())) return t('「{name}」是内核保留名称，请换一个', { name })
   return ''
 }
@@ -3522,10 +3523,11 @@ onUnmounted(() => {
                     <!-- Hint and error share one grid cell; the invisible copy of the longest error keeps the height fixed. -->
                     <div id="node-name-help" class="grid mt-2 text-xs leading-5" aria-live="polite">
                       <p class="col-start-1 row-start-1 text-slate-500" :class="nodeNameErr ? 'invisible' : ''">
-                        {{ t('最多 {n} 个字符，不能包含逗号、引号、括号以及 # | < > 等符号。', { n: CG_NODE_NAME_MAX }) }}
+                        {{ t('最多 {n} 个字符，文字、数字、符号和表情都可以使用。', { n: CG_NODE_NAME_MAX }) }}
                       </p>
                       <p class="col-start-1 row-start-1 text-rose-600" :class="nodeNameErr ? '' : 'invisible'">{{ nodeNameErr }}</p>
-                      <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ t('本机名称不能包含逗号、引号、反斜杠、方括号、花括号以及 # | < > 等符号') }}</p>
+                      <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ t('本机名称不能包含换行、控制字符或不可见字符') }}</p>
+                      <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ t('「{name}」是内核保留名称，请换一个', { name: 'REJECT-DROP' }) }}</p>
                     </div>
                   </form>
                 </section>
