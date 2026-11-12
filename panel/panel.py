@@ -110,6 +110,9 @@ REALITY_SNI_POOL = (
 )
 PBKDF2_ITER = 600_000
 SESSION_TTL = 7 * 24 * 3600
+LOGIN_WINDOW = 600              # seconds
+LOGIN_MAX_FAILS_PER_IP = 5      # per IPv4 address / IPv6 /64 within the window
+LOGIN_MAX_FAILS_TOTAL = 50      # all sources together (distributed guessing)
 _SESSION_LOCK = threading.Lock()
 _MASQUE_LOCK = threading.Lock()
 
@@ -301,6 +304,14 @@ def ensure_unified_root():
     """Ensure /etc/clashgate and client directory exist."""
     os.makedirs(CS_ROOT, mode=0o775, exist_ok=True)
     os.makedirs(CLIENT_DIR, mode=0o700, exist_ok=True)
+    # Mihomo (group mihomo) writes its caches here; the sticky bit stops it from renaming or
+    # deleting root-owned files (binary, scripts, env, panel config) in this directory.
+    try:
+        st = os.stat(CS_ROOT)
+        if st.st_mode & 0o020 and not st.st_mode & 0o1000:
+            os.chmod(CS_ROOT, (st.st_mode & 0o7777) | 0o1000)
+    except OSError:
+        pass
 
 
 def hash_password(pw: str) -> str:
@@ -585,6 +596,10 @@ def zashboard_url(env: dict) -> str:
 
 
 def write_env_var(key: str, val: str):
+    val = str(val)
+    # One KEY="value" per line: a newline or quote would let a value inject another setting.
+    if re.search(r'[\r\n"\\]', val):
+        raise ValueError(f"{key} 含有不支持的字符")
     lines = []
     found = False
     try:
@@ -2015,6 +2030,14 @@ def _save_sessions_file(sessions: dict):
 def remember_session(tok: str, sess: dict):
     with _SESSION_LOCK:
         Panel.sessions[tok] = sess
+        _save_sessions_file(Panel.sessions)
+
+
+def revoke_other_sessions(keep_tok: str):
+    """After a password change only the session that made it stays signed in."""
+    with _SESSION_LOCK:
+        for tok in [t for t in Panel.sessions if t != keep_tok]:
+            Panel.sessions.pop(tok, None)
         _save_sessions_file(Panel.sessions)
 
 
@@ -4245,7 +4268,9 @@ class Panel(BaseHTTPRequestHandler):
     fails: dict = {}
 
     def log_message(self, fmt, *args):
-        sys.stderr.write("%s %s\n" % (self.client_ip(), fmt % args))
+        # Never log the subscription token (the access log goes to the journal).
+        line = re.sub(r"/sub/[^/\s\"]+", "/sub/<token>", fmt % args)
+        sys.stderr.write("%s %s\n" % (self.client_ip(), line))
 
     # -- utils
     def client_ip(self):
@@ -4292,6 +4317,7 @@ class Panel(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Cache-Control", "no-store")
             for k, v in (headers or {}).items():
                 self.send_header(k, v)
@@ -4791,10 +4817,27 @@ class Panel(BaseHTTPRequestHandler):
         base = panel_base_url(read_env(), self.cfg)
         return f"{base}/sub/{token}/mihomo.yaml" if (token and base) else ""
 
+    def login_bucket(self) -> str:
+        """Rate-limit key: the IPv4 address, or the /64 of an IPv6 one (one host rotates within it)."""
+        ip = self.client_ip()
+        if ip.startswith("::ffff:"):
+            ip = ip[7:]
+        if ":" in ip:
+            try:
+                import ipaddress
+                return str(ipaddress.ip_network(ip + "/64", strict=False))
+            except ValueError:
+                pass
+        return ip
+
     def do_login(self, form):
-        ip, now = self.client_ip(), time.time()
-        recent = [t for t in self.fails.get(ip, []) if now - t < 600]
-        if len(recent) >= 5:
+        ip, now = self.login_bucket(), time.time()
+        with _SESSION_LOCK:
+            for k in [k for k, v in self.fails.items() if not v or now - v[-1] >= LOGIN_WINDOW]:
+                self.fails.pop(k, None)   # prune so the table cannot grow without bound
+            recent = [t for t in self.fails.get(ip, []) if now - t < LOGIN_WINDOW]
+            total = sum(len(v) for v in self.fails.values())
+        if len(recent) >= LOGIN_MAX_FAILS_PER_IP or total >= LOGIN_MAX_FAILS_TOTAL:
             return self.send(429, self.login_page("尝试次数过多，请 10 分钟后再试。"))
         if self.cfg_path and os.path.isfile(self.cfg_path):
             try:
@@ -4815,7 +4858,8 @@ class Panel(BaseHTTPRequestHandler):
                 cookie += "; Secure"
             return self.redirect("/", cookie)
         recent.append(now)
-        self.fails[ip] = recent
+        with _SESSION_LOCK:
+            self.fails[ip] = recent
         self.send(401, self.login_page("用户名或密码错误。"))
 
     def do_discard_pending(self, s):
@@ -4914,6 +4958,7 @@ class Panel(BaseHTTPRequestHandler):
             disk_cfg["password_hash"] = new_hash
             if cfg_file:
                 atomic_write(cfg_file, json.dumps(disk_cfg, indent=2, ensure_ascii=False) + "\n", 0o600)
+        revoke_other_sessions(self.session()[0])
         return self.respond_mutation(s, "面板密码已修改", True)
 
     def do_action(self, s, action):

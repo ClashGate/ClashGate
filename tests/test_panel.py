@@ -230,5 +230,49 @@ class CustomModeTest(unittest.TestCase):
         self.assertEqual(len(P.read_nodes()), 1)
 
 
+class SecurityTest(unittest.TestCase):
+    def test_env_value_cannot_inject_lines(self):
+        for bad in ('x\nREPO_OWNER=evil', 'a"b', "back\\slash", "cr\r"):
+            with self.assertRaises(ValueError):
+                P.write_env_var("MIHOMO_SECRET", bad)
+        P.write_env_var("MIHOMO_SECRET", "test-secret")
+        self.assertEqual(P.read_env()["MIHOMO_SECRET"], "test-secret")
+
+    def test_password_change_revokes_other_sessions(self):
+        P.Panel.sessions = {"keep": {"csrf": "a", "exp": 9e12}, "old": {"csrf": "b", "exp": 9e12}}
+        P.revoke_other_sessions("keep")
+        self.assertEqual(list(P.Panel.sessions), ["keep"])
+        self.assertEqual(oct(os.stat(P.SESSIONS_JSON).st_mode & 0o777), "0o600")
+
+    def _handler(self, ip):
+        h = P.Panel.__new__(P.Panel)
+        h.client_address = (ip, 1234)
+        return h
+
+    def test_login_bucket(self):
+        self.assertEqual(self._handler("203.0.113.5").login_bucket(), "203.0.113.5")
+        self.assertEqual(self._handler("::ffff:203.0.113.5").login_bucket(), "203.0.113.5")
+        a = self._handler("2001:db8:1:2:aaaa::1").login_bucket()
+        b = self._handler("2001:db8:1:2:bbbb::9").login_bucket()
+        self.assertEqual(a, b)
+
+    def test_access_log_hides_sub_token(self):
+        import io
+        h = self._handler("198.51.100.7")
+        buf, old = io.StringIO(), sys.stderr
+        sys.stderr = buf
+        try:
+            h.log_message('"%s" %s %s', "GET /sub/SECRETTOKEN1234567/mihomo.yaml HTTP/1.1", "200", "-")
+        finally:
+            sys.stderr = old
+        self.assertNotIn("SECRETTOKEN", buf.getvalue())
+        self.assertIn("/sub/<token>/mihomo.yaml", buf.getvalue())
+
+    def test_sticky_root_dir(self):
+        os.chmod(P.CS_ROOT, 0o775)
+        P.ensure_unified_root()
+        self.assertTrue(os.stat(P.CS_ROOT).st_mode & 0o1000)
+
+
 if __name__ == "__main__":
     unittest.main()

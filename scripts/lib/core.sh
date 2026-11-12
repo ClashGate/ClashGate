@@ -42,7 +42,7 @@ install_deps() {
 
 install_core() {
   log "安装最新稳定版 Mihomo 内核"
-  install -d -m 775 "$CS_ROOT"
+  install -d -m 1775 "$CS_ROOT"
   local a rel tag url tmp
   a=$(arch)
   rel=$(curl -fsSL --retry 3 "$REPO_API") || die "无法获取 Mihomo 版本信息（请确认服务器可以访问 GitHub）"
@@ -89,7 +89,7 @@ ensure_user() {
   local nologin=/usr/sbin/nologin
   [[ -x $nologin ]] || nologin=/sbin/nologin
   id mihomo >/dev/null 2>&1 || useradd --system --no-create-home --shell "$nologin" mihomo
-  install -d -m 775 -o root -g mihomo "$CONF_DIR"
+  install -d -m 1775 -o root -g mihomo "$CONF_DIR"
   install -d -m 750 -o root -g mihomo "$CONF_DIR/certs"
   install -d -m 700 -o root -g root "$CLIENT_DIR"
 }
