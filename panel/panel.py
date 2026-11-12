@@ -4244,6 +4244,8 @@ def start_traffic_poller(interval: int = 30):
 def parse_version_tuple(v: str) -> tuple:
     s = (v or "").strip().lstrip("vV")
     nums = [int(x) for x in re.findall(r"\d+", s)]
+    while len(nums) > 1 and nums[-1] == 0:  # 1.15.0 == 1.15, so "1.15.0" is never offered over 1.15
+        nums.pop()
     return tuple(nums) if nums else (0,)
 
 
@@ -4673,9 +4675,9 @@ def public_update_check(core_current: str = "") -> dict:
         slot = data[key]
         latest = str(slot.get("latest") or "").lstrip("vV")
         current = installed[key] or str(slot.get("current") or "").lstrip("vV")
-        has = bool(slot.get("has_update"))
-        if has and latest and current:
-            has = parse_version_tuple(latest) > parse_version_tuple(current)
+        # Only a strictly newer release than the installed build counts; a missing side means no badge.
+        has = bool(slot.get("has_update") and latest and current
+                   and parse_version_tuple(latest) > parse_version_tuple(current))
         out[key] = {
             "checked_at": int(slot.get("checked_at") or 0),
             "current": current,
@@ -4683,6 +4685,24 @@ def public_update_check(core_current: str = "") -> dict:
             "has_update": has,
         }
     return out
+
+
+def refresh_update_check_for_version():
+    """Run at startup: a cached panel check recorded by another build (i.e. before an
+    upgrade or downgrade) is re-evaluated against this VERSION and stamped with it, so the
+    stored file never keeps claiming an update that is already installed."""
+    data = load_update_check()
+    slot = data["panel"]
+    if str(slot.get("current") or "").lstrip("vV") == VERSION:
+        return False
+    latest = str(slot.get("latest") or "").lstrip("vV")
+    slot["current"] = VERSION
+    slot["has_update"] = bool(latest and parse_version_tuple(latest) > parse_version_tuple(VERSION))
+    try:
+        save_update_check(data)
+    except Exception as e:
+        sys.stderr.write(f"update check cache refresh failed: {e}\n")
+    return True
 
 
 def _update_due(slot: dict) -> bool:
@@ -6948,6 +6968,7 @@ def serve(cfg_path):
     Panel.sessions = _load_sessions_file()
     cluster_instance_id()   # create it before any request can race for it
     start_traffic_poller(30)
+    refresh_update_check_for_version()
     start_weekly_update_check()
     threading.Thread(target=run_snell_migration, name="snell-v6-migration", daemon=True).start()
     addr = (cfg.get("listen", "0.0.0.0"), int(cfg.get("port", 8443)))

@@ -68,6 +68,12 @@ class VersionTest(unittest.TestCase):
         self.assertEqual(len(set(tuples)), len(tuples))
         self.assertLess(P.parse_version_tuple("1.1"), P.parse_version_tuple("1.09"))  # why 1.1 is never used
 
+    def test_trailing_zeros_do_not_count(self):
+        self.assertEqual(P.parse_version_tuple("1.15.0"), P.parse_version_tuple("1.15"))
+        self.assertEqual(P.parse_version_tuple("v1.15.0.0"), P.parse_version_tuple("1.15"))
+        self.assertGreater(P.parse_version_tuple("1.15.1"), P.parse_version_tuple("1.15"))
+        self.assertEqual(P.parse_version_tuple("0"), (0,))
+
     def test_repo_versions_agree(self):
         with open(os.path.join(REPO, "scripts/lib/common.sh")) as f:
             cs = re.search(r"^CS_VERSION=([0-9.]+)", f.read(), re.M).group(1)
@@ -233,6 +239,95 @@ class CustomModeTest(unittest.TestCase):
 NODE_NAMES_OK = ["东京", "Tokyo-1", "  hk 01  ", "A" * 20, "节点" * 10, "日本 🇯🇵", "de.fra_2", "direct-1"]
 NODE_NAMES_BAD = ["", "   ", "A" * 21, "节点" * 10 + "x", "a,b", 'a"b', "a'b", "a\\b", "a`b", "a{b}", "[x]",
                   "a#b", "a|b", "<x>", "a\nb", "a\tb", "DIRECT", "reject", "Global", "pass"]
+
+
+class UpdateCheckTest(unittest.TestCase):
+    """After an upgrade the panel must never show the update it just installed."""
+
+    def setUp(self):
+        if os.path.exists(P.UPDATE_CHECK_JSON):
+            os.remove(P.UPDATE_CHECK_JSON)
+
+    def _bump(self, v, n=1):
+        t = list(P.parse_version_tuple(v))
+        t[-1] += n
+        return ".".join(str(x) for x in t)
+
+    def _stale(self, current, latest):
+        with open(P.UPDATE_CHECK_JSON, "w") as f:
+            json.dump({"panel": {"checked_at": 100, "current": current, "latest": latest, "has_update": True},
+                       "core": {"checked_at": 100, "current": "1.19.0", "latest": "1.19.1", "has_update": True}}, f)
+
+    def test_check_recorded_before_upgrade_is_not_shown(self):
+        old = "1.01"
+        self._stale(old, P.VERSION)                       # checked on the old build: "VERSION is available"
+        pub = P.public_update_check("v1.19.1")
+        self.assertFalse(pub["panel"]["has_update"])
+        self.assertEqual(pub["panel"]["current"], P.VERSION)
+        self.assertFalse(pub["core"]["has_update"])       # core already upgraded too
+        self._stale(old, P.VERSION + ".0")                # same version spelled differently
+        self.assertFalse(P.public_update_check("")["panel"]["has_update"])
+        self._stale(old, self._bump(P.VERSION))           # a genuinely newer build is still offered
+        self.assertTrue(P.public_update_check("")["panel"]["has_update"])
+        self._stale(old, "")                              # nothing to compare: no badge
+        self.assertFalse(P.public_update_check("")["panel"]["has_update"])
+
+    def test_startup_rewrites_cache_written_by_another_build(self):
+        self._stale("1.01", P.VERSION)
+        self.assertTrue(P.refresh_update_check_for_version())
+        slot = P.load_update_check()["panel"]
+        self.assertEqual((slot["current"], slot["has_update"]), (P.VERSION, False))
+        self.assertFalse(P.refresh_update_check_for_version())   # idempotent
+        newer = self._bump(P.VERSION)
+        self._stale("1.01", newer)
+        P.refresh_update_check_for_version()
+        self.assertTrue(P.load_update_check()["panel"]["has_update"])
+
+    def test_frontend_never_flashes_update_during_or_after_upgrade(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not installed")
+        vue = read(os.path.join(REPO, "panel/web/src/App.vue"))
+        js = vue[vue.index("// update-state: pure helpers"):vue.index("// end update-state")]
+        js += r"""
+const out = {}
+out.newer = [cgVersionNewer('1.16', '1.15'), cgVersionNewer('1.15', '1.15'), cgVersionNewer('1.15.0', '1.15'),
+             cgVersionNewer('1.14', '1.15'), cgVersionNewer('v1.15.1', '1.15'), cgVersionNewer('1.10', '1.9')]
+// 1. 检查更新 finds 1.16 while 1.15 is installed: badge
+let slot = { checked_at: 1, current: '1.15', latest: '1.16', has_update: true }
+out.found = cgShowUpdate(slot, '1.15', false)
+// 2. upgrade running (old page, old version): no badge
+out.running = cgShowUpdate(slot, '1.15', true)
+// 3. upgrade done, page about to reload: still "upgrading", slot already cleared
+slot = cgSlotAfterUpgrade(slot, '1.16')
+out.reloading = cgShowUpdate(slot, '1.16', true)
+// 4. even if the upgrading flag dropped before the browser replaced the page
+out.afterFlag = cgShowUpdate(slot, '1.16', false)
+out.slot = slot
+// 5. a stale slot from before the upgrade, compared with the new installed version
+out.stale = cgShowUpdate({ has_update: true, latest: '1.16' }, '1.16', false)
+out.staleZero = cgShowUpdate({ has_update: true, latest: '1.16.0' }, '1.16', false)
+console.log(JSON.stringify(out))
+"""
+        r = subprocess.run([node, "-e", js], capture_output=True, text=True, check=True)
+        out = json.loads(r.stdout)
+        self.assertEqual(out["newer"], [True, False, False, False, True, True])
+        self.assertTrue(out["found"])
+        for k in ("running", "reloading", "afterFlag", "stale", "staleZero"):
+            self.assertFalse(out[k], k)
+        self.assertEqual((out["slot"]["current"], out["slot"]["has_update"]), ("1.16", False))
+        # The buttons use the guarded computeds, and the upgrade watcher keeps the page in the
+        # upgrading state once it decides to reload (location.reload() returns immediately).
+        self.assertNotRegex(vue, r"(?:v-if|:class|:title)=\"[^\"]*(?:panelUpdate|coreUpdate)\.has_update")
+        self.assertIn("'is-update': panelHasUpdate", vue)
+        self.assertIn("'is-update': coreHasUpdate", vue)
+        body = vue[vue.index("async function reloadPanelAfterUpgrade"):vue.index("const createRoutingForm")]
+        self.assertIn("if (!reloading) upgradeInProgress.value = false", body)
+        for m in re.finditer(r"window\.location\.reload\(\)", body):
+            self.assertIn("reloading = true", body[max(0, m.start() - 400):m.start()], "reload without keeping the upgrading state")
+        self.assertIn("cgSlotAfterUpgrade(", body)
+        self.assertRegex(vue, r"const panelHasUpdate = computed\(\(\) =>\s*cgShowUpdate\(panelUpdate\.value, state\.version, "
+                              r"upgradeInProgress\.value \|\| busyKey\.value === '/action/upgrade-self'\)")
 
 
 class ClusterTest(unittest.TestCase):

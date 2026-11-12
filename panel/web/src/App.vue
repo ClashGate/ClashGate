@@ -391,6 +391,42 @@ const pageTitle = computed(() => {
 const coreUpdate = computed(() => state.update_check.core || {})
 const panelUpdate = computed(() => state.update_check.panel || {})
 
+// update-state: pure helpers (mirrored by tests/test_panel.py)
+// Versions compare as integer tuples like the backend's parse_version_tuple (1.15 > 1.14, 1.15.0 == 1.15).
+function cgVersionTuple(v) {
+  const nums = (String(v || '').trim().replace(/^v/i, '').match(/\d+/g) || ['0']).map(Number)
+  while (nums.length > 1 && nums[nums.length - 1] === 0) nums.pop()
+  return nums
+}
+function cgVersionNewer(a, b) {
+  const x = cgVersionTuple(a), y = cgVersionTuple(b)
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] || 0) - (y[i] || 0)
+    if (d) return d > 0
+  }
+  return false
+}
+// The badge is shown only for a version strictly newer than what is installed now,
+// and never while an upgrade is running or the page is about to reload after one.
+function cgShowUpdate(slot, installed, upgrading) {
+  if (upgrading || !slot || !slot.has_update) return false
+  if (!slot.latest || !installed) return true
+  return cgVersionNewer(slot.latest, installed)
+}
+// After an upgrade lands, the cached check result describes the old build: drop it.
+function cgSlotAfterUpgrade(slot, version) {
+  return { ...(slot || {}), current: version || (slot && slot.current) || '', has_update: false }
+}
+// end update-state
+
+const upgradeInProgress = ref(false)
+const panelHasUpdate = computed(() =>
+  cgShowUpdate(panelUpdate.value, state.version, upgradeInProgress.value || busyKey.value === '/action/upgrade-self')
+)
+const coreHasUpdate = computed(() =>
+  cgShowUpdate(coreUpdate.value, state.mihomo_version, upgradeInProgress.value || busyKey.value === '/action/update-core')
+)
+
 function versionLabel(v) {
   const s = String(v || '').trim()
   if (!s) return ''
@@ -819,7 +855,6 @@ async function checkUpdateAndPrompt() {
   if (res.msg) showToast(res.msg, true)
 }
 
-const upgradeInProgress = ref(false)
 let statePollTimer = null
 
 async function refreshServerStateSilent() {
@@ -1472,9 +1507,22 @@ async function resumeUpgradeIfRunning() {
 async function reloadPanelAfterUpgrade(previousVersion) {
   // Upgrade runs detached on the server; the panel restarts during it.
   // Poll status (tolerating connection drops) until done, then report + reload.
+  // Once we decide to reload, the page stays in the "upgrading" state until the browser
+  // replaces it: location.reload() returns at once and the old page keeps rendering for a
+  // moment, which used to flash the stale "update available" badge.
   const deadline = Date.now() + 360000
   let sawDown = false
   let stage = ''
+  let reloading = false
+  const reloadSoon = async (ms, version) => {
+    reloading = true
+    if (version) {
+      state.version = version
+      state.update_check = { ...state.update_check, panel: cgSlotAfterUpgrade(state.update_check.panel, version) }
+    }
+    await new Promise((r) => setTimeout(r, ms))
+    window.location.reload()
+  }
   upgradeInProgress.value = true
   try {
     while (Date.now() < deadline) {
@@ -1486,7 +1534,7 @@ async function reloadPanelAfterUpgrade(previousVersion) {
           credentials: 'same-origin',
           cache: 'no-store',
         })
-        if (res.status === 401) { window.location.reload(); return }
+        if (res.status === 401) { reloading = true; window.location.reload(); return }
         if (!res.ok) { sawDown = true; continue }
         d = await res.json()
       } catch {
@@ -1505,22 +1553,19 @@ async function reloadPanelAfterUpgrade(previousVersion) {
       if (!d || d.state !== 'done') continue
       if (Number(d.rc) === 0) {
         showToast(t('升级成功！当前版本 {v}，即将刷新页面', { v: d.version || '' }), true)
-        await new Promise((r) => setTimeout(r, 800))
-        window.location.reload()
+        await reloadSoon(800, d.version)
         return
       }
       showToast(t('升级失败：{msg}', { msg: d.tail || `exit ${d.rc}` }), false)
       if (d.version && previousVersion && d.version !== previousVersion) {
-        await new Promise((r) => setTimeout(r, 2500))
-        window.location.reload()
+        await reloadSoon(2500, d.version)
       }
       return
     }
     showToast(t('升级超时，正在刷新页面……'), false)
-    await new Promise((r) => setTimeout(r, 1500))
-    window.location.reload()
+    await reloadSoon(1500, '')
   } finally {
-    upgradeInProgress.value = false
+    if (!reloading) upgradeInProgress.value = false
   }
 }
 
@@ -2330,12 +2375,12 @@ onUnmounted(() => {
             :disabled="busyKey === '/action/update-core'"
             @click="updateCoreDirect"
             class="cg-tool px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border-slate-200 text-slate-800"
-            :class="{ 'is-update': coreUpdate.has_update }"
-            :title="coreUpdate.has_update ? updateHint(coreUpdate.latest) : undefined"
+            :class="{ 'is-update': coreHasUpdate }"
+            :title="coreHasUpdate ? updateHint(coreUpdate.latest) : undefined"
           >
             <CgIcon name="refresh" :size="14" />
             <span>{{ busyKey === '/action/update-core' ? t('更新内核中…') : t('更新内核') }}</span>
-            <CgIcon v-if="coreUpdate.has_update && busyKey !== '/action/update-core'" name="up" :size="13" />
+            <CgIcon v-if="coreHasUpdate" name="up" :size="13" />
           </button>
           <button
             type="button"
@@ -2361,8 +2406,8 @@ onUnmounted(() => {
             :disabled="busyKey === '/action/check-update' || busyKey === '/action/upgrade-self' || upgradeInProgress"
             @click="checkUpdateAndPrompt"
             class="cg-tool px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 border border-slate-200 disabled:opacity-50 text-slate-700 transition cursor-pointer inline-flex items-center gap-1.5"
-            :class="{ 'is-update': panelUpdate.has_update }"
-            :title="panelUpdate.has_update ? updateHint(panelUpdate.latest) : undefined"
+            :class="{ 'is-update': panelHasUpdate }"
+            :title="panelHasUpdate ? updateHint(panelUpdate.latest) : undefined"
           >
             <span>{{
               busyKey === '/action/upgrade-self' || upgradeInProgress
@@ -2371,7 +2416,7 @@ onUnmounted(() => {
                   ? t('检查中…')
                   : t('检查更新')
             }}</span>
-            <CgIcon v-if="panelUpdate.has_update && busyKey !== '/action/check-update' && busyKey !== '/action/upgrade-self'" name="up" :size="13" />
+            <CgIcon v-if="panelHasUpdate && busyKey !== '/action/check-update' && busyKey !== '/action/upgrade-self'" name="up" :size="13" />
           </button>
           <div class="cg-lang">
             <button
