@@ -1,5 +1,5 @@
-# GitHub Actions workflow for ClashGate. To enable CI, copy this file to .github/workflows/ci.yml
-# (pushing workflow files needs a token with the `workflow` scope).
+# GitHub Actions workflow for ClashGate: tests/run.sh on every push and pull request.
+# Actions pinned to majors that run on Node 24 (checkout v7, setup-node v7).
 name: CI
 on:
   push:
@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: panel/web/package-lock.json
       - name: Install shellcheck
