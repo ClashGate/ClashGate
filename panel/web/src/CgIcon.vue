@@ -14,6 +14,7 @@ import {
   Lock,
   Check,
   Waypoints,
+  Network,
 } from 'lucide-vue-next'
 
 const icons = {
@@ -31,6 +32,7 @@ const icons = {
   lock: Lock,
   check: Check,
   routing: Waypoints,
+  cluster: Network,
 }
 
 defineProps({

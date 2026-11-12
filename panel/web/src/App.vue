@@ -64,6 +64,7 @@ const boot = window.__CS_BOOT__ || {
   proxies: [],
   providers: [],
   routing: { ok: true, custom_mode: false, groups: [], error: '' },
+  cluster: { node_name: '', node_name_set: false, node_name_max: 20, locked: false, members: [], peers: [] },
 }
 
 const pageMode = ref(boot.page || 'dashboard')
@@ -99,6 +100,7 @@ const state = reactive({
   proxies: Array.isArray(boot.proxies) ? boot.proxies : [],
   providers: Array.isArray(boot.providers) ? boot.providers : [],
   routing: boot.routing && typeof boot.routing === 'object' ? boot.routing : { ok: true, custom_mode: false, groups: [], error: '' },
+  cluster: normalizeCluster(boot.cluster),
   custom_server_enabled: !!boot.custom_server_enabled,
   auto_update: !!boot.auto_update,
   update_channel: boot.update_channel === 'test' ? 'test' : 'stable',
@@ -127,6 +129,18 @@ const state = reactive({
     },
   },
 })
+
+function normalizeCluster(c) {
+  const src = c && typeof c === 'object' ? c : {}
+  return {
+    node_name: String(src.node_name || ''),
+    node_name_set: !!src.node_name_set,
+    node_name_max: Number(src.node_name_max || 20),
+    locked: !!src.locked,
+    members: Array.isArray(src.members) ? src.members : [],
+    peers: Array.isArray(src.peers) ? src.peers : [],
+  }
+}
 
 const showPendingDiff = ref(false)
 const showVersionPanel = ref(false)
@@ -368,6 +382,7 @@ const pageTitle = computed(() => {
     certs: t('HTTPS 证书'),
     advanced: t('自定义服务端'),
     settings: t('设置'),
+    cluster: t('集群'),
   }
   return titles[activeTab.value] || t('首页')
 })
@@ -418,11 +433,12 @@ const converterPlaceholder = computed(
   () => t('在此粘贴节点配置，例如：') + '\n- {"name":"VlessReality","type":"vless","server":"1.2.3.4","port":28443,...}'
 )
 
-const VALID_TABS = ['inbounds', 'outbounds', 'routing', 'readable', 'certs', 'advanced', 'settings']
+const VALID_TABS = ['inbounds', 'outbounds', 'routing', 'cluster', 'readable', 'certs', 'advanced', 'settings']
 const TAB_PATHS = {
   inbounds: '/',
   outbounds: '/outbounds',
   routing: '/routing',
+  cluster: '/cluster',
   readable: '/readable',
   advanced: '/advanced',
   certs: '/certs',
@@ -444,6 +460,7 @@ function tabFromPath() {
   if (p === '/readable' || p === '/convert') return 'readable'
   if (p === '/outbounds') return 'outbounds'
   if (p === '/routing') return 'routing'
+  if (p === '/cluster') return 'cluster'
   return 'inbounds'
 }
 
@@ -926,6 +943,12 @@ function applyServerState(newState) {
   if (Array.isArray(newState.proxies)) state.proxies = newState.proxies
   if (Array.isArray(newState.providers)) state.providers = newState.providers
   if (newState.routing && typeof newState.routing === 'object') state.routing = newState.routing
+  if (newState.cluster && typeof newState.cluster === 'object') {
+    state.cluster = normalizeCluster(newState.cluster)
+    // Keep what the user is typing; follow the server only while the field is untouched.
+    if (nodeNameInput.value === nodeNameSaved.value) nodeNameInput.value = state.cluster.node_name
+    nodeNameSaved.value = state.cluster.node_name
+  }
 }
 
 function formatFetchError(err) {
@@ -1179,6 +1202,104 @@ function deleteProxy(name) {
     confirmText: t('确认删除'),
     tone: 'rose',
     onConfirm: () => postAction('/proxies/delete', { name }, `del-proxy-${name}`),
+  })
+}
+
+// CG_NODE_NAME: mirror of validate_node_name() in panel.py (tests/test_panel.py compares both).
+const CG_NODE_NAME_MAX = 20
+const CG_NODE_NAME_BAD = /[\x00-\x1f\x7f\u0085\u2028\u2029,"'\\`{}\[\]#|<>]/
+const CG_RESERVED_PROXY_NAMES = ['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS', 'COMPATIBLE', 'GLOBAL']
+function nodeNameError(raw) {
+  const name = String(raw == null ? '' : raw).trim()
+  if (!name) return t('本机名称不能为空')
+  if (Array.from(name).length > CG_NODE_NAME_MAX) return t('本机名称最多 {n} 个字符', { n: CG_NODE_NAME_MAX })
+  if (CG_NODE_NAME_BAD.test(name)) return t('本机名称不能包含逗号、引号、反斜杠、方括号、花括号以及 # | < > 等符号')
+  if (CG_RESERVED_PROXY_NAMES.includes(name.toUpperCase())) return t('「{name}」是内核保留名称，请换一个', { name })
+  return ''
+}
+// end node-name
+
+const nodeNameInput = ref(state.cluster.node_name)
+const nodeNameSaved = ref(state.cluster.node_name)
+const nodeNameErr = computed(() => nodeNameError(nodeNameInput.value))
+const nodeNameLength = computed(() => Array.from(String(nodeNameInput.value || '').trim()).length)
+
+async function saveNodeName() {
+  if (busyKey.value) return
+  if (nodeNameErr.value) {
+    showToast(nodeNameErr.value, false)
+    return
+  }
+  await postAction('/action/settings', { node_name: nodeNameInput.value.trim() }, 'save-node-name')
+}
+
+const clusterForm = reactive({ url: '', password: '' })
+const clusterTouched = reactive({ url: false, password: false })
+
+function clusterUrlError(raw) {
+  const s = String(raw || '').trim()
+  if (!s) return t('请填写对方面板地址')
+  if (/^http:\/\//i.test(s)) return t('面板地址必须以 https:// 开头')
+  let u = null
+  try {
+    u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`)
+  } catch {
+    u = null
+  }
+  if (!u || u.protocol !== 'https:' || !u.hostname || u.username || u.password) {
+    return t('面板地址格式不对，例如 https://example.com:8443')
+  }
+  return ''
+}
+
+const clusterUrlErr = computed(() => clusterUrlError(clusterForm.url))
+const clusterPwErr = computed(() => (clusterForm.password ? '' : t('请填写对方面板密码')))
+
+async function submitAddCluster() {
+  if (busyKey.value) return
+  clusterTouched.url = true
+  clusterTouched.password = true
+  const err = clusterUrlErr.value || clusterPwErr.value
+  if (err) {
+    showToast(err, false)
+    return
+  }
+  const res = await postAction(
+    '/cluster/add',
+    { url: clusterForm.url.trim(), password: clusterForm.password },
+    'cluster-add'
+  )
+  if (res && res.ok) {
+    clusterForm.url = ''
+    clusterForm.password = ''
+    clusterTouched.url = false
+    clusterTouched.password = false
+  } else {
+    clusterForm.password = ''
+  }
+}
+
+function removeClusterMember(m) {
+  openConfirmDialog({
+    title: t('移除集群成员'),
+    message: t('确定移除「{name}」？本机会立即删除这个出站，并通知对方面板删除为本机创建的专用入站。', { name: m.name }),
+    confirmText: t('确认移除'),
+    tone: 'rose',
+    onConfirm: () => postAction('/cluster/remove', { id: m.id }, `cl-rm-${m.id}`),
+  })
+}
+
+function refreshClusterMember(m) {
+  return postAction('/cluster/refresh', { id: m.id }, `cl-rf-${m.id}`)
+}
+
+function removeClusterPeer(p) {
+  openConfirmDialog({
+    title: t('删除接入'),
+    message: t('确定删除「{name}」接入本机的专用入站？删除后立即生效，对方面板上的这个出站将无法再连接。', { name: p.name }),
+    confirmText: t('确认删除'),
+    tone: 'rose',
+    onConfirm: () => postAction('/cluster/peer-remove', { id: p.id }, `cl-peer-${p.id}`),
   })
 }
 
@@ -1647,14 +1768,20 @@ async function onRoutingDrop(idx) {
   if (!(res && res.ok) && !(res && res.state && res.state.routing) && state.routing) state.routing.groups = before
 }
 
+// Pages that are locked in the current mode, with the toast that explains why.
+function tabLockedMsg(tab) {
+  if (tab === 'advanced' && !state.custom_server_enabled) return t('高级功能请到设置页开启')
+  if ((tab === 'routing' || tab === 'cluster') && state.custom_server_enabled) {
+    return t('已启用自定义服务端配置，请自行修改相关配置')
+  }
+  return ''
+}
+
 function selectTab(tab) {
   if (!VALID_TABS.includes(tab)) return
-  if (tab === 'advanced' && !state.custom_server_enabled) {
-    showToast(t('高级功能请到设置页开启'), false)
-    return
-  }
-  if (tab === 'routing' && state.custom_server_enabled) {
-    showToast(t('已启用自定义服务端配置，请自行修改相关配置'), false)
+  const locked = tabLockedMsg(tab)
+  if (locked) {
+    showToast(locked, false)
     return
   }
   activeTab.value = tab
@@ -1688,7 +1815,7 @@ async function applyCustomServer(next) {
     '/action/settings'
   )
   if (res && res.ok && !next && activeTab.value === 'advanced') selectTab('inbounds')
-  if (res && res.ok && next && activeTab.value === 'routing') selectTab('inbounds')
+  if (res && res.ok && next && (activeTab.value === 'routing' || activeTab.value === 'cluster')) selectTab('inbounds')
 }
 
 async function toggleAutoUpdate() {
@@ -1779,12 +1906,7 @@ onMounted(() => {
   if (boot.flash_msg) {
     showToast(boot.flash_msg, boot.flash_ok !== false)
   }
-  const lockedMsg =
-    activeTab.value === 'advanced' && !state.custom_server_enabled
-      ? t('高级功能请到设置页开启')
-      : activeTab.value === 'routing' && state.custom_server_enabled
-        ? t('已启用自定义服务端配置，请自行修改相关配置')
-        : ''
+  const lockedMsg = tabLockedMsg(activeTab.value)
   if (lockedMsg) {
     activeTab.value = 'inbounds'
     try { window.history.replaceState({ tab: 'inbounds' }, '', '/') } catch {}
@@ -1792,12 +1914,7 @@ onMounted(() => {
   }
   window.addEventListener('popstate', () => {
     const next = tabFromPath()
-    const locked =
-      next === 'advanced' && !state.custom_server_enabled
-        ? t('高级功能请到设置页开启')
-        : next === 'routing' && state.custom_server_enabled
-          ? t('已启用自定义服务端配置，请自行修改相关配置')
-          : ''
+    const locked = tabLockedMsg(next)
     if (locked) {
       activeTab.value = 'inbounds'
       try { window.history.replaceState({ tab: 'inbounds' }, '', '/') } catch {}
@@ -2168,6 +2285,9 @@ onUnmounted(() => {
           <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
             <CgIcon :name="state.custom_server_enabled ? 'lock' : 'routing'" />{{ t('服务端分流') }}
           </button>
+          <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'cluster' }" @click="selectTab('cluster')">
+            <CgIcon :name="state.custom_server_enabled ? 'lock' : 'cluster'" />{{ t('集群') }}
+          </button>
           <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
             <CgIcon name="convert" />{{ t('节点转换') }}
           </button>
@@ -2402,6 +2522,9 @@ onUnmounted(() => {
         </button>
         <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
           <CgIcon :name="state.custom_server_enabled ? 'lock' : 'routing'" :size="15" />{{ t('服务端分流') }}
+        </button>
+        <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'cluster' }" @click="selectTab('cluster')">
+          <CgIcon :name="state.custom_server_enabled ? 'lock' : 'cluster'" :size="15" />{{ t('集群') }}
         </button>
         <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
           <CgIcon name="convert" :size="15" />{{ t('节点转换') }}
@@ -3301,6 +3424,153 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- Cluster (集群): other ClashGate panels as hidden outbounds -->
+        <div v-else-if="activeTab === 'cluster'" key="cluster" class="space-y-4">
+          <div v-if="state.custom_server_enabled" class="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm font-semibold text-amber-800">
+            {{ t('已启用自定义服务端配置，请自行修改相关配置') }}
+          </div>
+          <div
+            class="space-y-4"
+            :class="state.custom_server_enabled ? 'opacity-50 pointer-events-none select-none' : ''"
+            :inert="state.custom_server_enabled || undefined"
+            :aria-disabled="state.custom_server_enabled ? 'true' : undefined"
+          >
+            <section class="cg-surface rounded-2xl px-5 py-4 sm:px-6 flex items-center justify-between gap-3 flex-wrap">
+              <div class="min-w-0">
+                <div class="text-xs font-medium text-slate-500">{{ t('本机名称') }}</div>
+                <div class="text-base font-bold text-slate-900 cg-wrap" dir="auto">{{ state.cluster.node_name || '—' }}</div>
+                <p class="text-xs text-slate-500 mt-0.5">{{ t('其他面板添加本机后，会用这个名字显示本机。') }}</p>
+              </div>
+              <button
+                type="button"
+                @click="selectTab('settings')"
+                class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition cursor-pointer"
+              >{{ t('去设置修改') }}</button>
+            </section>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+              <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
+                <div>
+                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('添加其他面板') }}</h2>
+                  <p class="text-xs text-slate-500 mt-1 leading-relaxed">
+                    {{ t('填写另一台 VPS 上 ClashGate 面板的地址和密码。对方会自动生成一个 VLESS 后量子加密节点，本机把它写入服务端出站，名称就是对方的本机名称。') }}
+                  </p>
+                </div>
+                <form @submit.prevent="submitAddCluster" class="space-y-3" novalidate>
+                  <div>
+                    <label for="cl-url" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('对方面板地址') }}</label>
+                    <input
+                      id="cl-url"
+                      v-model="clusterForm.url"
+                      name="url"
+                      dir="ltr"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="https://example.com:8443"
+                      @blur="clusterTouched.url = true"
+                      :aria-invalid="clusterTouched.url && clusterUrlErr ? 'true' : undefined"
+                      class="cg-input w-full h-10 px-3 rounded-xl border bg-white text-sm text-slate-900"
+                      :class="clusterTouched.url && clusterUrlErr ? 'border-rose-300' : 'border-slate-200'"
+                    />
+                    <p v-if="clusterTouched.url && clusterUrlErr" class="text-xs text-rose-600 mt-1">{{ clusterUrlErr }}</p>
+                  </div>
+                  <div>
+                    <label for="cl-pw" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('对方面板密码') }}</label>
+                    <input
+                      id="cl-pw"
+                      v-model="clusterForm.password"
+                      name="password"
+                      type="password"
+                      autocomplete="new-password"
+                      @blur="clusterTouched.password = true"
+                      :aria-invalid="clusterTouched.password && clusterPwErr ? 'true' : undefined"
+                      class="cg-input w-full h-10 px-3 rounded-xl border bg-white text-sm text-slate-900"
+                      :class="clusterTouched.password && clusterPwErr ? 'border-rose-300' : 'border-slate-200'"
+                    />
+                    <p v-if="clusterTouched.password && clusterPwErr" class="text-xs text-rose-600 mt-1">{{ clusterPwErr }}</p>
+                    <p v-else class="text-xs text-slate-500 mt-1">{{ t('密码只用这一次，不会保存在本机。') }}</p>
+                  </div>
+                  <button
+                    type="submit"
+                    :disabled="busyKey === 'cluster-add'"
+                    class="cg-btn-primary px-4 py-2 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer"
+                  >{{ busyKey === 'cluster-add' ? t('正在连接对方面板…') : t('添加到集群') }}</button>
+                </form>
+                <ul class="text-xs text-slate-500 leading-relaxed space-y-1 list-disc ps-4">
+                  <li>{{ t('对方面板需要 ClashGate 1.14 或更高版本，并使用有效的 HTTPS 证书。') }}</li>
+                  <li>{{ t('添加后立即生效，不需要点「重载配置」。') }}</li>
+                  <li>{{ t('这个出站不会出现在节点列表和客户端订阅里，可以在 Zashboard 的分流策略组里选择它作为出口。') }}</li>
+                </ul>
+              </section>
+
+              <div class="space-y-4 min-w-0">
+                <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
+                  <div class="flex items-center gap-2.5">
+                    <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('已添加的面板') }}</h2>
+                    <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-sky-50 text-sky-700 border border-sky-200/70 tabular-nums">{{ state.cluster.members.length }}</span>
+                  </div>
+                  <div
+                    v-if="state.cluster.members.length === 0"
+                    class="cg-empty py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-500"
+                  >{{ t('还没有添加其他面板') }}</div>
+                  <div v-else class="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden">
+                    <div v-for="m in state.cluster.members" :key="m.id" class="p-4 flex flex-wrap items-center justify-between gap-3">
+                      <div class="space-y-1 min-w-0 flex-[1_1_12rem]">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="font-bold text-sm text-slate-900 cg-wrap" dir="auto">{{ m.name }}</span>
+                          <span class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-sky-50 text-sky-700 border border-sky-200/70">{{ t('后量子加密') }}</span>
+                        </div>
+                        <div class="text-xs text-slate-500 font-mono cg-wrap" dir="ltr">{{ m.url }}</div>
+                      </div>
+                      <div class="flex items-center gap-2 shrink-0 flex-wrap">
+                        <button
+                          type="button"
+                          :disabled="!!busyKey"
+                          @click="refreshClusterMember(m)"
+                          class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-sky-50 text-slate-700 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer"
+                        >{{ busyKey === `cl-rf-${m.id}` ? t('检查中…') : t('检查') }}</button>
+                        <button
+                          type="button"
+                          :disabled="!!busyKey"
+                          @click="removeClusterMember(m)"
+                          class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                        >{{ busyKey === `cl-rm-${m.id}` ? t('移除中…') : t('移除') }}</button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
+                  <div>
+                    <div class="flex items-center gap-2.5">
+                      <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('接入本机的面板') }}</h2>
+                      <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-slate-100 text-slate-700 border border-slate-200 tabular-nums">{{ state.cluster.peers.length }}</span>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-1 leading-relaxed">{{ t('这些面板添加了本机，本机为每个面板开了一个专用入站。') }}</p>
+                  </div>
+                  <div
+                    v-if="state.cluster.peers.length === 0"
+                    class="cg-empty py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-xs text-slate-500"
+                  >{{ t('还没有面板添加本机') }}</div>
+                  <div v-else class="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden">
+                    <div v-for="p in state.cluster.peers" :key="p.id" class="p-4 flex flex-wrap items-center justify-between gap-3">
+                      <div class="space-y-1 min-w-0 flex-[1_1_12rem]">
+                        <span class="font-bold text-sm text-slate-900 cg-wrap" dir="auto">{{ p.name }}</span>
+                        <div class="text-xs text-slate-500 tabular-nums">{{ t('专用入站端口') }} <bdi dir="ltr">{{ p.port }}</bdi></div>
+                      </div>
+                      <button
+                        type="button"
+                        :disabled="!!busyKey"
+                        @click="removeClusterPeer(p)"
+                        class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer shrink-0"
+                      >{{ busyKey === `cl-peer-${p.id}` ? t('删除中…') : t('删除') }}</button>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
         <div v-else-if="activeTab === 'readable'" key="readable" class="space-y-6">
           <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-5">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -3789,6 +4059,36 @@ onUnmounted(() => {
             </div>
           </section>
 
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-3">
+            <div>
+              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('本机名称') }}</h2>
+              <p class="text-xs text-slate-500 mt-1 leading-relaxed">
+                {{ t('其他面板把本机加入集群时，用这个名字显示本机。最多 {n} 个字符。', { n: state.cluster.node_name_max || 20 }) }}
+              </p>
+            </div>
+            <form class="flex items-start gap-2" @submit.prevent="saveNodeName" novalidate>
+              <div class="flex-1 min-w-0">
+                <input
+                  id="node-name"
+                  v-model="nodeNameInput"
+                  name="node_name"
+                  dir="auto"
+                  autocomplete="off"
+                  :aria-label="t('本机名称')"
+                  :aria-invalid="nodeNameErr ? 'true' : undefined"
+                  class="cg-input w-full h-10 px-3 rounded-xl border bg-white text-sm text-slate-900"
+                  :class="nodeNameErr ? 'border-rose-300' : 'border-slate-200'"
+                />
+                <p v-if="nodeNameErr" class="text-xs text-rose-600 mt-1">{{ nodeNameErr }}</p>
+                <p v-else class="text-xs text-slate-400 mt-1 tabular-nums">{{ nodeNameLength }} / {{ state.cluster.node_name_max || 20 }}</p>
+              </div>
+              <button
+                type="submit"
+                :disabled="busyKey === 'save-node-name' || !!nodeNameErr || nodeNameInput.trim() === state.cluster.node_name && state.cluster.node_name_set"
+                class="cg-btn-primary h-10 px-4 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer shrink-0"
+              >{{ busyKey === 'save-node-name' ? t('保存中…') : t('保存') }}</button>
+            </form>
+          </section>
           <section class="cg-surface rounded-2xl">
             <button
               type="button"
