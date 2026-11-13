@@ -1258,13 +1258,19 @@ function nodeNameError(raw) {
 
 const nodeNameInput = ref(state.cluster.node_name)
 const nodeNameSaved = ref(state.cluster.node_name)
-const nodeNameErr = computed(() => nodeNameError(nodeNameInput.value))
 const nodeNameLength = computed(() => Array.from(String(nodeNameInput.value || '').trim()).length)
+// Only the over-limit hint is shown while typing; other errors appear on save.
+const nodeNameOverLimit = computed(() => nodeNameLength.value > CG_NODE_NAME_MAX)
+const nodeNameHint = computed(() => (
+  nodeNameOverLimit.value ? t('本机名称最多 {n} 个字符', { n: CG_NODE_NAME_MAX }) : ''
+))
 
 async function saveNodeName() {
   if (busyKey.value) return
-  if (nodeNameErr.value) {
-    showToast(nodeNameErr.value, false)
+  if (nodeNameOverLimit.value) return
+  const err = nodeNameError(nodeNameInput.value)
+  if (err) {
+    showToast(err, false)
     return
   }
   await postAction('/action/settings', { node_name: nodeNameInput.value.trim() }, 'save-node-name')
@@ -3502,33 +3508,32 @@ onUnmounted(() => {
                           autocomplete="off"
                           spellcheck="false"
                           :aria-label="t('本机名称')"
-                          :aria-invalid="nodeNameErr ? 'true' : undefined"
-                          aria-describedby="node-name-help"
+                          :aria-invalid="nodeNameOverLimit ? 'true' : undefined"
+                          :aria-describedby="nodeNameHint ? 'node-name-help' : undefined"
                           class="cg-input w-full h-10 ps-3 pe-16 rounded-xl border bg-white text-sm text-slate-900"
-                          :class="nodeNameErr ? 'border-rose-300' : 'border-slate-200'"
+                          :class="nodeNameOverLimit ? 'border-rose-300' : 'border-slate-200'"
                         />
                         <span
                           class="pointer-events-none absolute inset-y-0 end-3 flex items-center text-xs tabular-nums"
-                          :class="nodeNameErr ? 'text-rose-500' : 'text-slate-400'"
+                          :class="nodeNameOverLimit ? 'text-rose-500' : 'text-slate-400'"
                           dir="ltr"
                           aria-hidden="true"
                         >{{ nodeNameLength }}/{{ CG_NODE_NAME_MAX }}</span>
                       </div>
                       <button
                         type="submit"
-                        :disabled="!!busyKey || !!nodeNameErr || (state.cluster.node_name_set && nodeNameInput.trim() === state.cluster.node_name)"
+                        :disabled="!!busyKey || nodeNameOverLimit || (state.cluster.node_name_set && nodeNameInput.trim() === state.cluster.node_name)"
                         class="cg-btn-primary h-10 min-w-[5.5rem] px-5 rounded-xl disabled:opacity-50 text-sm font-semibold cursor-pointer shrink-0"
                       >{{ busyKey === 'save-node-name' ? t('保存中…') : t('保存') }}</button>
                     </div>
-                    <!-- Hint and error share one grid cell; the invisible copy of the longest error keeps the height fixed. -->
-                    <div id="node-name-help" class="grid mt-2 text-xs leading-5" aria-live="polite">
-                      <p class="col-start-1 row-start-1 text-slate-500" :class="nodeNameErr ? 'invisible' : ''">
-                        {{ t('最多 {n} 个字符，文字、数字、符号和表情都可以使用。', { n: CG_NODE_NAME_MAX }) }}
-                      </p>
-                      <p class="col-start-1 row-start-1 text-rose-600" :class="nodeNameErr ? '' : 'invisible'">{{ nodeNameErr }}</p>
-                      <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ t('本机名称不能包含换行、控制字符或不可见字符') }}</p>
-                      <p class="col-start-1 row-start-1 invisible" aria-hidden="true">{{ t('「{name}」是内核保留名称，请换一个', { name: 'REJECT-DROP' }) }}</p>
-                    </div>
+                    <!-- Hint is omitted until the input is over the 15-character limit, so the card stays tight. -->
+                    <div
+                      v-if="nodeNameHint"
+                      id="node-name-help"
+                      class="mt-2 text-xs leading-5 text-rose-600"
+                      role="alert"
+                      aria-live="polite"
+                    >{{ nodeNameHint }}</div>
                   </form>
                 </section>
 

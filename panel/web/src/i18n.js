@@ -364,7 +364,6 @@ export const EN = {
  "默认": "Default",
  "圣诞": "Christmas",
   "集群": "Cluster",
-  "最多 {n} 个字符，文字、数字、符号和表情都可以使用。": "Up to {n} characters. Letters, numbers, symbols and emoji are all fine.",
   "「{name}」是内核保留名称，请换一个": "“{name}” is a name reserved by the core. Choose another one",
   "保存": "Save",
   "其他面板添加本机后，会用这个名字显示本机。": "Other panels that add this server show it by this name.",
