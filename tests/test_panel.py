@@ -183,8 +183,8 @@ class CertPathTest(unittest.TestCase):
         node = shutil.which("node")
         if not node:
             self.skipTest("node not installed")
-        vue = frontend_script_text()
-        js = vue[vue.index("const CG_CERT_PATH"):vue.index("async function saveCustomConfig")]
+        vue = read(os.path.join(REPO, "panel/web/src/composables/validation.js"))
+        js = vue[vue.index("const CG_CERT_PATH"):vue.index("// end cert-path")]
         js += ("\nconst c=JSON.parse(require('fs').readFileSync(0,'utf8'));"
                "console.log(JSON.stringify(c.map(x=>{const r=fixCertPaths(x);return [r.text,r.changed]})))")
         names = list(CERT_CASES)
@@ -432,7 +432,7 @@ class ClusterTest(unittest.TestCase):
         node = shutil.which("node")
         if not node:
             self.skipTest("node not installed")
-        vue = frontend_script_text()
+        vue = read(os.path.join(REPO, "panel/web/src/composables/validation.js"))
         js = "const t=(s)=>s;\n" + vue[vue.index("const CG_NODE_NAME_MAX"):vue.index("// end node-name")]
         js += ("\nconst c=JSON.parse(require('fs').readFileSync(0,'utf8'));"
                "console.log(JSON.stringify(c.map(x=>nodeNameError(x)==='')))")
