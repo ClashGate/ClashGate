@@ -4,7 +4,11 @@ import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from
 import { t, lang, setLang, LANGS, langLabel } from '../i18n.js'
 import { theme, setTheme } from '../theme.js'
 
+let _panel
+
 export function usePanel() {
+  if (_panel) return _panel
+
   const boot = window.__CS_BOOT__ || {
     page: 'dashboard',
     initial_tab: 'inbounds',
@@ -1997,7 +2001,7 @@ export function usePanel() {
     document.removeEventListener('keydown', handleKeydown)
   })
 
-  return {
+  return (_panel = {
     boot,
     pageMode,
     isXmas,
@@ -2183,5 +2187,5 @@ export function usePanel() {
     masqueYamlNamed,
     addMasqueOutbound,
     retryMasque,
-  }
+  })
 }
