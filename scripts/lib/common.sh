@@ -18,6 +18,8 @@ REPO_BRANCH=${REPO_BRANCH:-test}
 REPO_TARBALL=${REPO_TARBALL:-https://github.com/$REPO_SLUG/archive/refs/heads/$REPO_BRANCH.tar.gz}
 INSTALL_RAW_URL=https://raw.githubusercontent.com/$REPO_SLUG/$REPO_BRANCH/install.sh
 CS_ROOT=/etc/clashgate
+# Top-level paths copied/replaced atomically by install_files (and the reinstall bootstrap).
+CS_TREE_PARTS=(install.sh uninstall.sh panel resources scripts)
 SELF_BIN=/usr/local/bin/clashgate
 BIN=$CS_ROOT/mihomo
 CONF_DIR=$CS_ROOT
@@ -285,10 +287,10 @@ install_files() { # 把源码树 $CS_HOME 安装到统一目录 /etc/clashgate�
   install -d -m 700 "$CLIENT_DIR"
   local stage=$CS_ROOT/.stage.$$ d
   rm -rf "$stage"; install -d -m 755 "$stage"
-  for d in install.sh uninstall.sh panel resources scripts; do cp -r "$CS_HOME/$d" "$stage/"; done
+  for d in "${CS_TREE_PARTS[@]}"; do cp -r "$CS_HOME/$d" "$stage/"; done
   rm -rf "$stage/panel/__pycache__" "$stage/panel/web/node_modules"
   chmod 755 "$stage/install.sh" "$stage/uninstall.sh" "$stage/scripts/cmd/clashgate.sh" "$stage/scripts/certctl.sh" "$stage/panel/panel.py"
-  for d in install.sh uninstall.sh panel resources scripts; do
+  for d in "${CS_TREE_PARTS[@]}"; do
     rm -rf "$CS_ROOT/$d.old"
     if [[ -e $CS_ROOT/$d ]]; then mv "$CS_ROOT/$d" "$CS_ROOT/$d.old"; fi
     mv "$stage/$d" "$CS_ROOT/$d"

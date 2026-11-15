@@ -212,7 +212,7 @@ do_install() {
   if [[ $CS_HOME -ef $LIB_DIR ]]; then # 从已安装副本运行（clashgate install）：先复制出来，避免重装时删掉自己
     local tmp
     tmp=$(mktemp -d /tmp/clashgate.XXXXXX)
-    for d in install.sh uninstall.sh panel resources scripts; do cp -r "$LIB_DIR/$d" "$tmp/"; done
+    for d in "${CS_TREE_PARTS[@]}"; do cp -r "$LIB_DIR/$d" "$tmp/"; done
     CS_BOOTSTRAP_TMP=$tmp CS_DEFAULT_ACTION=install exec bash "$tmp/scripts/cmd/clashgate.sh" "${ORIG_ARGS[@]}"
   fi
   interactive_setup
