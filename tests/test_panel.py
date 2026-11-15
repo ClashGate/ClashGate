@@ -12,6 +12,8 @@ import sys
 import tempfile
 import unittest
 
+import guardlib
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 MIHOMO = os.environ.get("MIHOMO_BIN") or os.path.join(HERE, ".cache", "mihomo")
@@ -85,6 +87,9 @@ class VersionTest(unittest.TestCase):
             with open(os.path.join(REPO, readme)) as f:
                 self.assertIn(f"version-v{cs}-", f.read(), readme)
 
+    def test_import_surface_unchanged(self):
+        guardlib.assert_surface(P)
+
 
 class ConfigGenerationTest(unittest.TestCase):
     def test_every_inbound_kind_passes_mihomo_t(self):
@@ -121,6 +126,9 @@ class ConfigGenerationTest(unittest.TestCase):
                     if re.search(r"skip-cert-verify\s*:\s*true", txt):
                         hits.append(p)
         self.assertEqual(hits, [])
+
+    def test_fixed_inputs_match_golden_config_and_subscription(self):
+        guardlib.assert_goldens(P)
 
 
 CERT_CASES = {
