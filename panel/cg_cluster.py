@@ -209,6 +209,23 @@ def _live_conf_with_cluster() -> str:
     return live
 
 
+def _cluster_ports_ready(want: set) -> bool:
+    return not want or want.issubset(set(mihomo_status()["listening"]))
+
+
+def _wait_cluster_ports(want: set, timeout: float = 8.0) -> bool:
+    """Wait until every cluster inbound is actually listening, or timeout."""
+    if not want:
+        return True
+    deadline = time.monotonic() + timeout
+    while True:
+        if _cluster_ports_ready(want):
+            return True
+        if time.monotonic() >= deadline:
+            return _cluster_ports_ready(want)
+        time.sleep(0.15)
+
+
 def apply_cluster_live(old_specs: set):
     """Write the cluster change into config.yaml, validate, reload the core, update the firewall.
     Caller holds LOCK and has already saved cluster.json; raises (config restored) on failure."""
@@ -230,15 +247,13 @@ def apply_cluster_live(old_specs: set):
     rc, out = run([SYSTEMCTL, "reload", "mihomo"])
     if rc == 0:
         want = cluster_ports(st)
-        if want:
-            deadline = time.monotonic() + 2.0
-            while True:
-                now_st = mihomo_status()
-                if want.issubset(set(now_st["listening"])) or time.monotonic() >= deadline:
-                    break
-                time.sleep(0.15)
-            if now_st["listening"] and not want.issubset(set(now_st["listening"])):
-                rc, out = run([SYSTEMCTL, "restart", "mihomo"])
+        if want and not _wait_cluster_ports(want):
+            # Reload can return before the new inbound is bound, or bind can fail
+            # (port already taken). Restart once, then fail rather than report success.
+            rc, out = run([SYSTEMCTL, "restart", "mihomo"])
+            if rc == 0 and not _wait_cluster_ports(want):
+                rc = 1
+                out = (out or "") + "集群入站端口未能在重载后开始监听"
     if rc != 0:
         if backup is not None:
             atomic_write(CONF, backup, 0o640)

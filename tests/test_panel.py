@@ -7,10 +7,12 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import guardlib
 
@@ -502,6 +504,82 @@ class ClusterTest(unittest.TestCase):
             json.dump({"instance": "d" * 32, "members": [{"id": "x"}], "peers": [{"id": "y"}]}, f)
         st = P.load_cluster()
         self.assertEqual((st["instance"], st["links"]), ("d" * 32, []))
+
+    def test_pick_port_skips_a_bound_port(self):
+        """pick_port must not return a port that bind() would reject (other process or TIME_WAIT)."""
+        holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.addCleanup(holder.close)
+        occupied = None
+        for p in range(23450, 23600):
+            if p in P.used_ports(P.read_env()):
+                continue
+            try:
+                holder.bind(("0.0.0.0", p))
+                occupied = p
+                break
+            except OSError:
+                continue
+        self.assertIsNotNone(occupied, "could not bind a test port")
+        self.assertFalse(P.pick_port.__globals__['port_is_available'](occupied))
+        free = None
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            for p in range(occupied + 1, occupied + 80):
+                if p in P.used_ports(P.read_env()):
+                    continue
+                try:
+                    probe.bind(("0.0.0.0", p))
+                    free = p
+                    break
+                except OSError:
+                    continue
+        finally:
+            probe.close()
+        self.assertIsNotNone(free, "could not find a free follow-up port")
+        self.assertTrue(P.pick_port.__globals__['port_is_available'](free))
+        seq = iter([occupied, occupied, free])
+        with mock.patch.object(P.pick_port.__globals__["random"], "randint",
+                               side_effect=lambda a, b: next(seq)):
+            self.assertEqual(P.pick_port(P.read_env()), free)
+
+    def test_apply_cluster_live_fails_if_inbound_never_listens(self):
+        """systemctl reload/restart succeeding is not enough if the cluster port never binds."""
+        st, _, _ = self._state()
+        P.save_cluster(st)
+        P.render_cluster_listeners(st)
+        P.render_cluster_proxies(st)
+        g = P.apply_cluster_live.__globals__
+        real_run = g["run"]
+
+        def fake_run(cmd, **kw):
+            joined = " ".join(str(c) for c in cmd)
+            if any(k in joined for k in ("reload", "restart", "is-active", "show")):
+                return 0, "active\n"
+            if joined.endswith("-v") or " -v" in joined:
+                return 0, "Mihomo Meta v1.19.34\n"
+            return real_run(cmd, **kw)
+
+        def fake_status():
+            # Other ports may be up; the new cluster inbound is not.
+            return {"active": "active", "listening": [80, 443, 25183], "pid": "1",
+                    "version": "", "since": "", "restarts": "", "cert": {}}
+
+        with mock.patch.dict(g, {"run": fake_run, "mihomo_status": fake_status}):
+            # Shrink the wait so the test does not sleep 16s.
+            with mock.patch.object(P, "apply_cluster_live", P.apply_cluster_live):
+                pass
+            orig_wait = g["_wait_cluster_ports"]
+
+            def quick_wait(want, timeout=8.0):
+                return orig_wait(want, timeout=0.01)
+
+            g["_wait_cluster_ports"] = quick_wait
+            try:
+                with self.assertRaises(RuntimeError) as cm:
+                    P.apply_cluster_live(set())
+                self.assertIn("监听", str(cm.exception))
+            finally:
+                g["_wait_cluster_ports"] = orig_wait
 
     def test_report_text(self):
         rep = {"linked": ["B", "C"], "meshed": 2, "failed": ["D ↔ E"], "dropped": [], "offline": ["F"]}

@@ -439,11 +439,30 @@ def used_ports(env) -> set:
     return ports
 
 
+def port_is_available(port: int) -> bool:
+    """True if a new TCP listener can bind 0.0.0.0:port the way Mihomo does (no SO_REUSEADDR).
+
+    used_ports() only knows this panel's reserved ports. On a host that also has other
+    processes (or TIME_WAIT leftovers), bind() is the check that matches listen errors.
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    except OSError:
+        return False
+    try:
+        s.bind(("0.0.0.0", int(port)))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
 def pick_port(env) -> int:
     used = used_ports(env)
     for _ in range(1000):
         p = random.randint(20000, 39999)
-        if p not in used:
+        if p not in used and port_is_available(p):
             return p
     raise RuntimeError("没有可用的随机端口")
 
