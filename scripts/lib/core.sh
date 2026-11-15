@@ -191,7 +191,7 @@ seed_routing() {
   done
   if [[ -f $LIB_DIR/panel/panel.py ]]; then
     CS_ROOT="$CS_ROOT" PYTHONPATH="$LIB_DIR/panel${PYTHONPATH:+:$PYTHONPATH}" python3 -c \
-      'import os,importlib.util; p=os.path.join(os.environ["CS_ROOT"],"panel","panel.py"); spec=importlib.util.spec_from_file_location("cg_panel_seed", p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); m.get_routing().ensure_seeded(force=False)' \
+      'import os,importlib.util,sys; p=os.path.join(os.environ["CS_ROOT"],"panel","panel.py"); spec=importlib.util.spec_from_file_location("cg_panel_seed", p); m=importlib.util.module_from_spec(spec); sys.modules[spec.name]=m; sys.modules.setdefault("panel", m); spec.loader.exec_module(m); m.get_routing().ensure_seeded(force=False)' \
       || warn "分流默认模板生成失败（可稍后在面板「服务端分流」中恢复）"
   fi
   [[ -f $FRAG_RULE_PROVIDERS ]] || : > "$FRAG_RULE_PROVIDERS"

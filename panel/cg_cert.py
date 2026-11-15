@@ -1,6 +1,12 @@
 """Rewrite server TLS certificate paths inside a Mihomo config. Moved unchanged."""
 import os
 import re
+import sys
+
+
+def _panel():
+    """The already-loaded panel module (aliased even when loaded as cg_panel_seed)."""
+    return sys.modules.get("panel") or sys.modules["__main__"]
 
 # ---------------------------------------------------------------- custom server config helpers
 _CERT_FILE_EXT = re.compile(r"\.(pem|crt|cer|key)$", re.I)
@@ -54,7 +60,7 @@ def server_cert_paths(raw_yaml: str) -> list:
 def missing_cert_files(raw_yaml: str) -> list:
     """Referenced cert/key paths that are not readable files. Relative paths resolve against the
     Mihomo home directory (-d), as the core resolves them."""
-    import panel as P
+    P = _panel()
     missing = []
     for p in server_cert_paths(raw_yaml):
         # Absolute paths are as the core sees them; ROOT only prefixes them in local test trees.
@@ -72,7 +78,7 @@ def rewrite_cert_paths_in_yaml(raw_yaml: str, env: dict = None) -> tuple:
     CERT / KEY (relative paths included); n == 0 means nothing to ask the user about.
     Never touches reality-config private keys, inline PEM, or outbound proxies.
     Keep in sync with fixCertPaths() in panel/web/src/App.vue."""
-    import panel as P
+    P = _panel()
     lines = raw_yaml.splitlines()
     changed = 0
     for i, m, kind in list(_iter_server_cert_lines(lines)):
@@ -103,7 +109,7 @@ def rewrite_cert_paths_in_yaml(raw_yaml: str, env: dict = None) -> tuple:
 
 def sync_env_from_custom_config(raw_yaml: str):
     """Sync CONTROLLER_PORT and MIHOMO_SECRET from a custom server config if present."""
-    import panel as P
+    P = _panel()
     for pat in (
         r'^\s*external-controller-tls\s*:\s*["\']?[^"\':\s]+:(\d+)["\']?',
         r'^\s*external-controller\s*:\s*["\']?[^"\':\s]+:(\d+)["\']?',

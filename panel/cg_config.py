@@ -15,6 +15,8 @@ import tempfile
 import threading
 import time
 
+from routing_mgr import RoutingManager, parse_yaml_document_factory
+
 
 def bind():
     """Copy path constants from the panel module. Imported after those exist."""

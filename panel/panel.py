@@ -40,10 +40,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse, quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-# `python3 panel.py serve` loads this file as __main__. Later modules import panel
-# and must get this same module, not a second copy.
-if __name__ == "__main__":
-    sys.modules["panel"] = sys.modules[__name__]
+# `python3 panel.py serve` loads this file as __main__. scripts/lib/core.sh
+# seed_routing loads it via importlib as cg_panel_seed (and historically did
+# not pre-register that name in sys.modules). Later modules bind() from
+# sys.modules["panel"] or do `import panel` and must get this same module,
+# not a second copy.
+if __name__ != "panel":
+    _mod = sys.modules.get(__name__)
+    if _mod is None:
+        import gc as _gc
+        import types as _types
+        _g = globals()
+        _mod = next((obj for obj in _gc.get_referrers(_g)
+                     if isinstance(obj, _types.ModuleType) and obj.__dict__ is _g), None)
+        del _gc, _types, _g
+        if _mod is None:
+            raise RuntimeError("clashgate: cannot identify the panel module")
+    sys.modules.setdefault(__name__, _mod)
+    sys.modules.setdefault("panel", _mod)
+    del _mod
 
 from i18n_en import tr as _tr_msg, detect_lang as _detect_lang  # noqa: E402  (0.97 i18n: zh default, en on cookie clashgate_lang=en)
 from routing_mgr import RoutingManager, parse_yaml_document_factory  # noqa: E402
