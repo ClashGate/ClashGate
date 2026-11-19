@@ -21,4 +21,3 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
       - name: Run tests
         run: tests/run.sh
-
