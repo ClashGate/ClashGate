@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.26" src="https://img.shields.io/badge/version-v1.26-1d6fe0" />
+  <img alt="Version: v1.27" src="https://img.shields.io/badge/version-v1.27-1d6fe0" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -25,20 +25,11 @@
 - **省心维护**：面板一键检查更新，可开启自动更新；内核更新、证书续期都会自动处理，还有运行状态面板（Zashboard）。
 - **多语言界面**：管理面板支持中文、English、Русский、فارسی，安装程序和命令行支持中文、English、Русский。
 
-## 系统要求
-
-- 带 systemd 的 Linux（x86_64 / arm64 / armv7），需要 root 权限；
-- 推荐 Debian 11+、Ubuntu 20.04+、Rocky / Alma 8+、Fedora；
-- 自动证书模式（带管理面板）需要 Python 3.9 或更高版本：Rocky / Alma 8 会自动安装新版 Python；更老的系统（如 CentOS 7）只能使用无证书模式；
-- 自动证书模式还需要一个解析到本服务器的域名。使用 Cloudflare 时请把这条记录设为灰云（DNS only）。
-
 ## 一键安装
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ClashGate/ClashGate/main/install.sh | bash
 ```
-
-安装时先选择语言（中文 / English / Русский），之后按提示选择模式、填写域名。
 
 ## 常用命令
 

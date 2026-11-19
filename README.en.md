@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.26" src="https://img.shields.io/badge/version-v1.26-1d6fe0" />
+  <img alt="Version: v1.27" src="https://img.shields.io/badge/version-v1.27-1d6fe0" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -25,20 +25,11 @@
 - **Low maintenance**: check for updates in one click or turn on auto-update; core updates and certificate renewals are handled for you, and a runtime dashboard (Zashboard) is included.
 - **Multi-language**: the admin panel speaks 中文, English, Русский and فارسی; the installer and command line speak 中文, English and Русский.
 
-## System requirements
-
-- Linux (x86_64 / arm64 / armv7) with systemd, run as root.
-- Recommended: Debian 11+, Ubuntu 20.04+, Rocky / Alma 8+, Fedora.
-- Auto-certificate mode (with the admin panel) needs Python 3.9 or newer. On Rocky / Alma 8 a newer Python is installed automatically; older systems (such as CentOS 7) can only use no-certificate mode.
-- Auto-certificate mode also needs a domain pointing at the server. On Cloudflare, set that record to grey cloud (DNS only).
-
 ## Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ClashGate/ClashGate/main/install.sh | bash
 ```
-
-The installer first asks for a language (中文 / English / Русский), then for the mode and domain.
 
 ## Commands
 
