@@ -110,6 +110,12 @@ def render_spa_html(title: str, boot_data: dict, fallback_html: str = "") -> str
     )
 
 
+def cli_default_lang(env=None) -> str:
+    """CLI language chosen at install / `clashgate lang`: the panel's language until a browser picks one."""
+    v = ((env if env is not None else read_env()).get("CLASHGATE_LANG") or "").strip().lower()
+    return v if v in ("zh", "en", "ru") else ""
+
+
 def parse_cert(info: str) -> dict:
     out = {}
     m = re.search(r"notAfter=(.+)", info)
@@ -1912,7 +1918,8 @@ class Panel(BaseHTTPRequestHandler):
     def login_page(self, err=""):
         err = self.tr(err)
         mver = get_mihomo_version_num()
-        boot = {"page": "login", "version": VERSION, "mihomo_version": mver, "login_error": err}
+        boot = {"page": "login", "version": VERSION, "mihomo_version": mver, "login_error": err,
+                "default_lang": cli_default_lang()}
         return render_spa_html(self.tr("登录 · ClashGate"), boot, self.noscript_notice())
 
     def noscript_notice(self) -> str:
@@ -1935,6 +1942,7 @@ class Panel(BaseHTTPRequestHandler):
             "initial_tab": initial_tab,
             "flash_msg": msg,
             "flash_ok": ok,
+            "default_lang": cli_default_lang(env),
             **state,
         }
         return render_spa_html("ClashGate", boot, self.noscript_notice())

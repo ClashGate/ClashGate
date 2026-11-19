@@ -1,25 +1,39 @@
 # shellcheck shell=bash
-# clashgate i18n: CLASHGATE_LANG=en|zh (default: LC_ALL/LANG starting with "en" -> en, else zh).
-# Source strings are Chinese; in English mode every user-facing message is looked up in i18n.en.tsv
-# ("%s" = placeholder). Unmapped text falls back to Chinese.
-_cs_lang_detect() {
-  case ${CLASHGATE_LANG:-} in
-    en|EN|en_*|en-*) echo en; return ;;
-    zh|ZH|zh_*|zh-*) echo zh; return ;;
+# clashgate i18n: zh (source text) | en | ru.
+# Language order: CLASHGATE_LANG (this run) > CLASHGATE_LANG saved in /etc/clashgate/clashgate.env
+# (installer picker / `clashgate lang`) > LC_ALL/LANG (en* -> en, ru* -> ru) > zh.
+# Source strings are Chinese; in en/ru mode every user-facing message is looked up in i18n.<lang>.tsv
+# ("%s" = placeholder). Unmapped text falls back to Chinese. Persian (fa) is panel-only (terminals render RTL badly).
+_cs_lang_norm() { # any spelling -> zh|en|ru, or nothing
+  case ${1:-} in
+    en|EN|en_*|en-*|English|english) echo en ;;
+    ru|RU|ru_*|ru-*) echo ru ;;
+    zh|ZH|zh_*|zh-*|cn|CN) echo zh ;;
   esac
-  case ${LC_ALL:-${LANG:-}} in en*) echo en ;; *) echo zh ;; esac
+}
+_cs_lang_saved() { # CLASHGATE_LANG persisted in the install env file (root only; silent otherwise)
+  local f=${CS_LANG_FILE:-/etc/clashgate/clashgate.env} v   # CS_LANG_FILE: tests only
+  [[ -r $f ]] || return 0
+  v=$(sed -n 's/^CLASHGATE_LANG="\{0,1\}\([A-Za-z_-]*\)"\{0,1\}$/\1/p' "$f" 2>/dev/null | tail -n1)
+  _cs_lang_norm "$v"
+}
+_cs_lang_detect() {
+  local v
+  v=$(_cs_lang_norm "${CLASHGATE_LANG:-}"); [[ -n $v ]] && { echo "$v"; return; }
+  v=$(_cs_lang_saved); [[ -n $v ]] && { echo "$v"; return; }
+  v=$(_cs_lang_norm "${LC_ALL:-}"); [[ -n $v ]] || v=$(_cs_lang_norm "${LANG:-}")   # LC_ALL=C.UTF-8 -> look at LANG
+  echo "${v:-zh}"
 }
 CS_LANG=$(_cs_lang_detect)
+CS_LANG_SAVED=$(_cs_lang_saved)   # what save_env writes back (installer / `clashgate lang` change it)
 export CS_LANG
 
-L() { if [[ $CS_LANG == en ]]; then builtin printf '%s' "$2"; else builtin printf '%s' "$1"; fi; }
-
-if [[ $CS_LANG == en ]]; then
+if [[ $CS_LANG != zh ]]; then
   declare -A _EN=()
   _EN_KEYS=()
   _cs_load_en() {
     local f k v
-    f="$(dirname "${BASH_SOURCE[0]}")/i18n.en.tsv"
+    f="$(dirname "${BASH_SOURCE[0]}")/i18n.$CS_LANG.tsv"
     [[ -r $f ]] || return 0
     while IFS=$'\t' read -r k v; do
       [[ -n $k && -n $v ]] || continue
@@ -29,7 +43,18 @@ if [[ $CS_LANG == en ]]; then
     mapfile -t _EN_KEYS < <(for k in "${_EN_KEYS[@]}"; do printf '%d\t%s\n' "${#k}" "$k"; done | sort -t$'\t' -k1,1nr | cut -f2-)
   }
   _cs_load_en
+fi
 
+# L 中文 English: short inline labels. Russian comes from i18n.ru.tsv (keyed by the Chinese text), else English.
+L() {
+  case $CS_LANG in
+    en) builtin printf '%s' "$2" ;;
+    ru) builtin printf '%s' "${_EN[$1]-$2}" ;;
+    *)  builtin printf '%s' "$1" ;;
+  esac
+}
+
+if [[ $CS_LANG != zh ]]; then
   _tr_fmt() { REPLY=${_EN[$1]-$1}; }
 
   # translate an expanded message; keys with %s act as patterns

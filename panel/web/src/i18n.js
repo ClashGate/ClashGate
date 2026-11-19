@@ -456,6 +456,11 @@ function detect() {
     v = m ? m[1] : ''
   }
   if (!LANGS.includes(v)) {
+    // Language chosen in the installer / `clashgate lang` (only until this browser picks one).
+    const d = (window.__CS_BOOT__ || {}).default_lang
+    if (LANGS.includes(d)) v = d
+  }
+  if (!LANGS.includes(v)) {
     const nav = (navigator.language || '').toLowerCase()
     if (nav.startsWith('ru')) v = 'ru'
     else if (nav.startsWith('fa')) v = 'fa'

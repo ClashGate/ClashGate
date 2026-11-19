@@ -226,7 +226,6 @@ mihomo 用户无法读取证书私钥	The mihomo user cannot read the private ke
 \033[1;31m失败\033[0m（%s，clashgate log 查看原因）	\033[1;31mfailed\033[0m (%s; see clashgate log)
 端口 %s / %s 已被占用，请先停止占用程序：	Ports %s / %s are already in use; stop the occupying program first:
 80 端口已被其他程序占用（端口模式申请证书需要临时占用 80 端口），请先停止占用程序或改用「DNS API 模式」/「手动证书模式」：	Port 80 is in use by another program (port mode needs port 80 temporarily); stop it or switch to "DNS API mode" / "Manual certificate mode":
-%s 安装：%s	%s install: %s
 确定卸载 ClashGate？会先退出集群，然后删除所有节点、证书和配置 [y/N]：	Uninstall ClashGate? This server leaves its cluster first, then all nodes, certificates and config are deleted [y/N]: 
 没能退出集群（找不到 Python 3.9+），请到其他成员的面板里手动删除这台服务器	Could not leave the cluster (Python 3.9+ not found); remove this server from the other members' panels by hand
 正在退出集群（通知 %s 个成员）	Leaving the cluster (notifying %s members)
@@ -240,3 +239,10 @@ acme.sh v%s 下载或安装失败（请确认服务器可以访问 GitHub）	Fai
 系统自带的 Python 版本过低（%s），正在安装新版 Python	The system Python is too old (%s); installing a newer Python
 已安装 %s	Installed %s
 管理面板需要 Python 3.9 或更高版本（当前：%s）。请换用较新的系统（Debian 11+ / Ubuntu 20.04+ / Rocky 或 Alma 8+ / Fedora），或手动安装 Python 3.9+ 后重试	The admin panel needs Python 3.9 or newer (current: %s). Use a newer system (Debian 11+ / Ubuntu 20.04+ / Rocky or Alma 8+ / Fedora), or install Python 3.9+ yourself and try again
+语言 / Language	Language
+未知语言：%s（可选 zh|en|ru）	Unknown language: %s (choose zh|en|ru)
+当前命令行语言：%s。切换：clashgate lang zh|en|ru\n	Current CLI language: %s. Switch: clashgate lang zh|en|ru\n
+当前终端设置了 CLASHGATE_LANG=%s，本终端里仍以它为准；unset CLASHGATE_LANG 后使用新语言	CLASHGATE_LANG=%s is set in this terminal and still wins here; run unset CLASHGATE_LANG to use the new language
+正在从 GitHub (%s @ %s) 下载安装文件……\n	Downloading install files from GitHub (%s @ %s)...\n
+  Mihomo：%s  %s\n	  Mihomo: %s  %s\n
+Mihomo：%s\n	Mihomo: %s\n

@@ -30,12 +30,40 @@ Usage: clashgate [subcommand]
   restart           restart the core
   update            update core + scripts and panel (update core / update self updates only one)
   log               show recent logs
+  lang [zh|en|ru]   switch and save the CLI language (no argument: choose from a list)
   uninstall         uninstall
   install           reinstall (choose the mode when prompted)
   help              show this help
 
-Language: set CLASHGATE_LANG=en|zh (default: zh, or en when LANG starts with en)
+Language: clashgate lang zh|en|ru saves it; CLASHGATE_LANG=zh|en|ru overrides it for one run
 One-click install: curl -fsSL $INSTALL_RAW_URL | bash
+EOF
+    return 0
+  fi
+  if [[ $CS_LANG == ru ]]; then
+    cat <<EOF
+ClashGate (clashgate) - команда управления прокси-сервером (v$CS_VERSION)
+
+Использование: clashgate [подкоманда]
+  (без аргументов)  открыть интерактивное меню
+  status            показать состояние (службы, порты, сертификат)
+  info              показать конфигурацию узлов (фрагмент proxies, каталог клиента, ссылка подписки)
+  sub               показать ссылку подписки (режимы с сертификатом)
+  reset-sub         сменить ссылку подписки; старая ссылка сразу перестаёт работать
+  passwd            изменить пароль панели (свой)
+  reset-password    сбросить пароль панели (случайный)
+  reset-secret      сбросить API-секрет Zashboard (случайный)
+  cert              сейчас запросить / продлить / проверить сертификат
+  restart           перезапустить ядро
+  update            обновить ядро + скрипты и панель (update core / update self обновляет только одно)
+  log               показать последние журналы
+  lang [zh|en|ru]   сменить и сохранить язык командной строки (без аргумента: выбор из списка)
+  uninstall         удалить
+  install           переустановить (режим выбирается в диалоге)
+  help              показать эту справку
+
+Язык: clashgate lang zh|en|ru сохраняет выбор; CLASHGATE_LANG=zh|en|ru действует только на один запуск
+Установка одной командой: curl -fsSL $INSTALL_RAW_URL | bash
 EOF
     return 0
   fi
@@ -55,11 +83,12 @@ ClashGate (clashgate) —— 代理服务端管理命令 (v$CS_VERSION)
   restart           重启内核
   update            更新内核 + 自身脚本与面板（update core / update self 只更新其一）
   log               查看最近日志
+  lang [zh|en|ru]   切换并保存命令行语言（不带参数时从列表选择）
   uninstall         卸载
   install           重新安装（按提示选择模式）
   help              显示本帮助
 
-语言：CLASHGATE_LANG=en|zh（默认中文；LANG 以 en 开头时为英文）
+语言：clashgate lang zh|en|ru 切换并保存；CLASHGATE_LANG=zh|en|ru 只对本次运行生效
 一键安装：curl -fsSL $INSTALL_RAW_URL | bash
 EOF
 }
@@ -208,6 +237,11 @@ print_summary() {
 
 # ------------------------------------------------------------ actions
 do_install() {
+  # 安装语言：交互终端且没有 CLASHGATE_LANG / 已保存的语言时先选择（install.sh 已选过则跳过），选完用新语言重新运行
+  if [[ -z ${CLASHGATE_LANG:-} && -z ${CS_LANG_PICKED:-} && -z ${CS_LANG_SAVED:-} ]] && has_tty; then
+    CLASHGATE_LANG=$(pick_lang "$CS_LANG") CS_LANG_PICKED=1 exec bash "$CS_HOME/scripts/cmd/clashgate.sh" "${ORIG_ARGS[@]}"
+  fi
+  CS_LANG_SAVED=$CS_LANG   # 安装时使用的语言就是之后命令行（及面板默认）的语言
   check_os
   if [[ $CS_HOME -ef $LIB_DIR ]]; then # 从已安装副本运行（clashgate install）：先复制出来，避免重装时删掉自己
     local tmp
@@ -452,6 +486,30 @@ do_log() {
   return 0
 }
 
+# clashgate lang [zh|en|ru]：切换并保存命令行语言（写入 clashgate.env 的 CLASHGATE_LANG）
+do_lang() {
+  require_installed
+  local v=""
+  if [[ -n ${LANG_ARG:-} ]]; then
+    v=$(_cs_lang_norm "$LANG_ARG")
+    [[ -n $v ]] || die "未知语言：$LANG_ARG（可选 zh|en|ru）"
+  elif has_tty; then
+    v=$(pick_lang "${CS_LANG_SAVED:-$CS_LANG}")
+  else
+    printf '当前命令行语言：%s。切换：clashgate lang zh|en|ru\n' "$(lang_name "$CS_LANG")"
+    return 0
+  fi
+  save_cli_lang "$v"
+  case $v in
+    en) builtin printf 'CLI language set to English (saved; CLASHGATE_LANG=zh|en|ru still overrides it for one run)\n' ;;
+    ru) builtin printf 'Язык командной строки: русский (сохранено; CLASHGATE_LANG=zh|en|ru по-прежнему действует на один запуск)\n' ;;
+    *)  builtin printf '命令行语言已切换为中文（已保存；CLASHGATE_LANG=zh|en|ru 仍可临时覆盖本次运行）\n' ;;
+  esac
+  if [[ -n ${CLASHGATE_LANG:-} && $(_cs_lang_norm "$CLASHGATE_LANG") != "$v" ]]; then
+    warn "当前终端设置了 CLASHGATE_LANG=$CLASHGATE_LANG，本终端里仍以它为准；unset CLASHGATE_LANG 后使用新语言"
+  fi
+}
+
 do_menu() {
   require_installed; load_env
   has_tty || { usage; return 0; }
@@ -461,7 +519,7 @@ do_menu() {
     items+=(sub reset-sub passwd reset-password reset-secret cert)
     labels+=("查看订阅链接" "更换订阅链接" "修改面板密码（自定义）" "重置面板密码（随机）" "重置 Zashboard 密钥（随机）" "立即申请 / 续期 / 校验证书")
   fi
-  items+=(restart log update uninstall); labels+=("重启内核" "查看日志" "更新内核 + 脚本与面板" "卸载")
+  items+=(restart log update lang uninstall); labels+=("重启内核" "查看日志" "更新内核 + 脚本与面板" "语言 / Language" "卸载")
   while :; do
     printf '\n\033[1mClashGate v%s 管理菜单\033[0m（%s' "$CS_VERSION" "$([[ $MODE == auto-cert ]] && echo "$(mode_label) · $DOMAIN" || echo '无证书模式')"
     printf '）  Mihomo：%s\n' "$(svc_state mihomo)"
@@ -471,6 +529,10 @@ do_menu() {
     [[ $c == 0 ]] && return 0
     if [[ $c =~ ^[0-9]+$ ]] && ((c >= 1 && c <= ${#items[@]})); then
       printf '\n'
+      if [[ ${items[$((c - 1))]} == lang ]]; then   # 换语言后用新语言重新打开菜单
+        ( do_lang ) && exec env -u CLASHGATE_LANG bash "$CS_HOME/scripts/cmd/clashgate.sh" menu
+        continue
+      fi
       ( STEP=0; "do_${items[$((c - 1))]//-/_}" ) || true
       [[ ${items[$((c - 1))]} == uninstall && ! -f $STATE ]] && return 0
       ask '按回车返回菜单……' '' >/dev/null
@@ -546,7 +608,7 @@ do_uninstall() {
 ACTION=""
 while (($#)); do
   case "$1" in
-    install|update|uninstall|info|status|sub|passwd|restart|log|menu|reset-password|reset-secret|reset-sub|cert) ACTION=$1 ;;
+    install|update|uninstall|info|status|sub|passwd|restart|log|menu|reset-password|reset-secret|reset-sub|cert|lang) ACTION=$1 ;;
     core|self) [[ $ACTION == update ]] || die "未知参数：$1"; UPDATE_WHAT=$1 ;;
     help) usage; exit 0 ;;
     # 以下为开发/测试用隐藏参数，不写入用户文档
@@ -562,7 +624,9 @@ while (($#)); do
     --production|--tls-production) TLS=production ;;
     --tls-internal) TLS=internal ;;
     -h|--help) usage; exit 0 ;;
-    *) die "未知参数：$1（查看帮助：-h）" ;;
+    *)
+      [[ $ACTION == lang && -z ${LANG_ARG:-} ]] || die "未知参数：$1（查看帮助：-h）"
+      LANG_ARG=$1 ;;
   esac
   shift
 done
