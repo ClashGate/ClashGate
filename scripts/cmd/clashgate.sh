@@ -28,7 +28,7 @@ Usage: clashgate [subcommand]
   reset-secret      reset the Zashboard API secret (random)
   cert              request / renew / validate the certificate now
   restart           restart the core
-  update            update core + scripts and panel (update core / update self updates only one)
+  update            update core, scripts and panel
   log               show recent logs
   lang [zh|en|ru]   switch and save the CLI language (no argument: choose from a list)
   uninstall         uninstall
@@ -55,7 +55,7 @@ ClashGate (clashgate) - команда управления прокси-сер�
   reset-secret      сбросить API-секрет Zashboard (случайный)
   cert              сейчас запросить / продлить / проверить сертификат
   restart           перезапустить ядро
-  update            обновить ядро + скрипты и панель (update core / update self обновляет только одно)
+  update            обновить ядро, скрипты и панель
   log               показать последние журналы
   lang [zh|en|ru]   сменить и сохранить язык командной строки (без аргумента: выбор из списка)
   uninstall         удалить
@@ -81,7 +81,7 @@ ClashGate (clashgate) —— 代理服务端管理命令 (v$CS_VERSION)
   reset-secret      重置 Zashboard API 密钥（随机生成）
   cert              立即申请 / 续期 / 校验证书
   restart           重启内核
-  update            更新内核 + 自身脚本与面板（update core / update self 只更新其一）
+  update            更新内核、脚本与面板
   log               查看最近日志
   lang [zh|en|ru]   切换并保存命令行语言（不带参数时从列表选择）
   uninstall         卸载
@@ -278,15 +278,14 @@ do_install() {
   print_summary
 }
 
-# clashgate update [core|self]：默认同时更新 Mihomo 内核与 clashgate 自身（脚本、面板、模板、unit）
+# clashgate update：同时更新 Mihomo 内核与 clashgate 自身（脚本、面板、模板、unit）；面板的「升级」与自动更新也调用它
 do_update() {
   require_installed; load_env
-  local what=${UPDATE_WHAT:-all}
-  STEP=0; TOTAL=$([[ $what == all ]] && echo 4 || echo 3)
+  STEP=0; TOTAL=4
   install_deps
   if [[ $MODE == auto-cert ]]; then ensure_python; fi
-  [[ $what == self ]] || install_core
-  [[ $what == core ]] || update_self
+  install_core
+  update_self
   log "重启服务"
   validate_conf || die "配置未通过校验（mihomo -t），未重启"
   systemctl restart mihomo
@@ -609,7 +608,6 @@ ACTION=""
 while (($#)); do
   case "$1" in
     install|update|uninstall|info|status|sub|passwd|restart|log|menu|reset-password|reset-secret|reset-sub|cert|lang) ACTION=$1 ;;
-    core|self) [[ $ACTION == update ]] || die "未知参数：$1"; UPDATE_WHAT=$1 ;;
     help) usage; exit 0 ;;
     # 以下为开发/测试用隐藏参数，不写入用户文档
     -d|--domain) DOMAIN=${2:?缺少域名}; MODE=auto-cert; MODE_SET=1; shift ;;

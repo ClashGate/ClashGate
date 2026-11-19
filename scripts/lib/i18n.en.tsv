@@ -152,7 +152,6 @@ Zashboard：%s\n新的 API 密钥（Secret）：%s\n	Zashboard: %s\nNew API secr
 确定卸载 ClashGate？所有节点、证书和配置都会被删除 [y/N]：	Uninstall ClashGate? All nodes, certificates and config will be deleted [y/N]: 
 已取消	Cancelled
 已卸载：Mihomo、管理面板、证书（含 acme.sh）、配置和客户端文件。	Uninstalled: Mihomo, admin panel, certificates (incl. acme.sh), config and client files.
-未知参数：%s	Unknown argument: %s
 缺少域名	missing domain
 缺少 Cloudflare API Token	missing Cloudflare API Token
 缺少面板端口	missing panel port
