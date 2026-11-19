@@ -239,7 +239,7 @@ const {
               id="cert-empty-notice"
               class="rounded-xl bg-amber-50/90 border border-amber-200/80 px-4 py-3 text-xs text-amber-900 leading-relaxed"
             >
-              {{ t('当前为无证书模式或未检测到证书文件（/etc/clashgate/certs/fullchain.pem）。如需启用自动证书，可在下方配置 Cloudflare DNS 模式并申请证书。') }}
+              {{ t('当前为无证书模式或未检测到证书文件（/etc/clashgate/certs/fullchain.pem）。可在下方选择 Cloudflare DNS 或端口模式自动申请证书；已有自己的证书，也可以放好文件后选择「手动证书」。') }}
             </div>
 
             <!-- 手动证书提示 -->
@@ -248,7 +248,7 @@ const {
               id="cert-manual-notice"
               class="rounded-xl bg-[#f1f6fe] border border-emerald-200/80 px-4 py-3 text-xs text-emerald-900 leading-relaxed"
             >
-              {{ t('当前为手动证书模式。手动证书请直接替换 /etc/clashgate/certs/ 下的 fullchain.pem 与 privkey.pem 文件。') }}
+              {{ t('当前为手动证书模式，证书不会自动续期。换新证书时，把新文件放进 /etc/clashgate/certs/，再在下方点「重新校验证书」。') }}
             </div>
 
             <!-- 证书信息字段网格 -->
@@ -306,16 +306,16 @@ const {
             </div>
           </section>
 
-          <!-- 切换到 Cloudflare DNS 续证模式 & 如何获取 API Token -->
+          <!-- 切换证书模式 & 右侧说明（Cloudflare API Token / 手动证书放置方法） -->
           <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             <!-- Left: 切换 Cloudflare DNS 模式表单 -->
             <section id="cert-dns-form-card" class="lg:col-span-6 cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
               <div>
                 <div class="flex items-center gap-2.5">
-                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('切换并重新生成证书') }}</h2>
+                  <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('切换证书模式') }}</h2>
                 </div>
                 <p class="text-xs text-slate-500 mt-1 leading-relaxed">
-                  {{ t('只有和当前模式不同时才能点击。切换后会立刻重新生成证书，Token 错误或 80 端口被占用会返回具体原因。') }}
+                  {{ t('自动证书（Cloudflare DNS / 端口模式）切换后会立刻重新申请，Token 错误或 80 端口被占用会返回具体原因。手动证书会先校验你放好的文件，通过后才切换。') }}
                 </p>
               </div>
 
@@ -332,6 +332,7 @@ const {
                   >
                     <option value="dns">{{ t('Cloudflare DNS（推荐，免 80 端口）') }}</option>
                     <option value="port">{{ t('端口模式') }}</option>
+                    <option value="manual">{{ t('手动证书（使用自己的证书文件）') }}</option>
                   </select>
                 </div>
 
@@ -356,19 +357,71 @@ const {
                   />
                 </div>
 
+                <div
+                  v-else-if="certModeForm.mode === 'manual'"
+                  id="cert-manual-hint"
+                  class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed"
+                >
+                  {{ t('先把证书和私钥放进 /etc/clashgate/certs/：证书 fullchain.pem（或 *.crt），私钥 privkey.pem（或 *.key）。放好后点下面的按钮。') }}
+                </div>
+
                 <button
                   id="cert-mode-submit"
                   type="submit"
                   :disabled="certRegenDisabled"
                   class="cg-btn-primary w-full h-10 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed text-sm font-semibold cursor-pointer"
                 >
-                  {{ certRegenLock || busyKey === '/action/cert-mode' ? t('正在重新生成证书…') : t('切换并重新生成证书') }}
+                  {{
+                    certModeForm.mode === 'manual'
+                      ? certRegenLock || busyKey === '/action/cert-mode'
+                        ? t('正在校验证书…')
+                        : certModeValue === 'manual'
+                          ? t('重新校验证书')
+                          : t('校验并切换')
+                      : certRegenLock || busyKey === '/action/cert-mode'
+                        ? t('正在重新生成证书…')
+                        : t('切换并重新生成证书')
+                  }}
                 </button>
               </form>
             </section>
 
+            <!-- Right: 手动证书放置说明卡（选择手动证书时显示） -->
+            <section
+              v-if="certModeForm.mode === 'manual'"
+              id="cert-manual-guide-card"
+              class="lg:col-span-6 cg-surface rounded-2xl p-5 sm:p-6 space-y-3.5"
+            >
+              <div class="flex items-center gap-2.5">
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('如何使用自己的证书') }}</h2>
+              </div>
+              <p class="text-xs text-slate-500">
+                {{ t('适合已经在别处申请好证书的情况（例如云服务商或其他服务器上的证书）：') }}
+              </p>
+
+              <ol class="space-y-2.5 text-xs text-slate-700 leading-relaxed list-decimal list-inside">
+                <li>
+                  {{ t('准备证书文件（完整证书链）和对应的私钥，证书要包含当前域名 {domain}（泛域名证书也可以）。', { domain: certDomainDisplay }) }}
+                </li>
+                <li>
+                  {{ t('用 SFTP 或 scp 把文件上传到服务器的 /etc/clashgate/certs/ 目录。文件名用 fullchain.pem 和 privkey.pem，或者直接用 .crt 和 .key 文件，面板会自动识别最新放入的那一份。') }}
+                </li>
+                <li>
+                  {{ t('回到左侧点按钮。面板会检查证书是否过期、域名是否一致、私钥是否配对，通过后自动启用新证书。') }}
+                </li>
+              </ol>
+
+              <div class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
+                {{ t('手动证书不会自动续期。证书到期前请换上新文件，再点一次「重新校验证书」。') }}
+              </div>
+            </section>
+
             <!-- Right: 如何获取 Cloudflare API Token 说明卡 -->
-            <section id="cf-token-guide-card" class="lg:col-span-6 cg-surface rounded-2xl p-5 sm:p-6 space-y-3.5">
+            <section
+              v-else
+              id="cf-token-guide-card"
+              class="lg:col-span-6 cg-surface rounded-2xl p-5 sm:p-6 space-y-3.5"
+            >
               <div class="flex items-center gap-2.5">
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('如何获取 Cloudflare API Token') }}</h2>
               </div>

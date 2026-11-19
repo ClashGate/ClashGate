@@ -11,6 +11,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -594,6 +595,198 @@ class ClusterTest(unittest.TestCase):
         for bad in ("", "http://a.com", "https://user:pw@a.com", "ftp://a.com", "https://"):
             with self.assertRaises(P.ClusterError, msg=bad):
                 P.normalize_panel_url(bad)
+
+
+class ManualCertTest(unittest.TestCase):
+    """1.20: switch to a manual certificate from the panel (self-signed test certs only)."""
+    DOMAIN = "ex.sslip.io"
+
+    @staticmethod
+    def _ossl(*args, cwd=None):
+        subprocess.run(["openssl", *args], check=True, capture_output=True, cwd=cwd)
+
+    @classmethod
+    def make(cls, d, name, sans, cn=None, expired=False):
+        """Self-signed EC cert + key in d: name.crt / name.key."""
+        key, crt = os.path.join(d, name + ".key"), os.path.join(d, name + ".crt")
+        subj = "/CN=" + (cn or sans.split(",")[0].split(":", 1)[1])
+        if not expired:
+            cls._ossl("req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes", "-days", "30",
+                      "-subj", subj, "-addext", "subjectAltName=" + sans, "-keyout", key, "-out", crt)
+            return crt, key
+        work = tempfile.mkdtemp(dir=d)
+        cls._ossl("req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes", "-subj", subj,
+                  "-addext", "subjectAltName=" + sans, "-keyout", key, "-out", work + "/r.csr")
+        open(work + "/index.txt", "w").close()
+        with open(work + "/serial", "w") as f:
+            f.write("01\n")
+        with open(work + "/ca.cnf", "w") as f:
+            f.write("[ca]\ndefault_ca=c\n[c]\ndatabase=index.txt\nnew_certs_dir=.\nserial=serial\n"
+                    "default_md=sha256\npolicy=p\ncopy_extensions=copy\n[p]\ncommonName=supplied\n")
+        cls._ossl("ca", "-batch", "-config", "ca.cnf", "-selfsign", "-keyfile", key, "-in", "r.csr",
+                  "-startdate", "20200101000000Z", "-enddate", "20200102000000Z", "-notext", "-out", crt, cwd=work)
+        shutil.rmtree(work)
+        return crt, key
+
+    def setUp(self):
+        self.store = tempfile.mkdtemp(prefix="cg-mcert-src-")
+        self.dir = tempfile.mkdtemp(prefix="cg-mcert-")
+
+    def tearDown(self):
+        shutil.rmtree(self.store, ignore_errors=True)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def put(self, src, name, age=0):
+        dst = os.path.join(self.dir, name)
+        shutil.copyfile(src, dst)
+        t = time.time() - age
+        os.utime(dst, (t, t))
+        return dst
+
+    def err(self, domain=None):
+        with self.assertRaises(P.ManualCertError) as cm:
+            P.check_manual_cert(self.dir, domain or self.DOMAIN)
+        return str(cm.exception)
+
+    def test_valid_pair_installed_names(self):
+        crt, key = self.make(self.store, "ok", "DNS:ex.sslip.io", cn="My Test CA")
+        self.put(crt, "fullchain.pem")
+        self.put(key, "privkey.pem")
+        info = P.check_manual_cert(self.dir, self.DOMAIN)
+        self.assertEqual(os.path.basename(info["crt"]), "fullchain.pem")
+        self.assertEqual(os.path.basename(info["key"]), "privkey.pem")
+        self.assertEqual(info["issuer"], "My Test CA")
+        self.assertIn(info["days"], (28, 29, 30))
+        self.assertFalse(P.install_manual_cert(self.dir, info["crt"], info["key"]))
+        self.assertEqual(os.stat(os.path.join(self.dir, "privkey.pem")).st_mode & 0o777, 0o640)
+
+    def test_newest_crt_and_key_win_and_get_installed(self):
+        old_c, old_k = self.make(self.store, "old", "DNS:ex.sslip.io")
+        new_c, new_k = self.make(self.store, "new", "DNS:ex.sslip.io,DNS:www.ex.sslip.io")
+        self.put(old_c, "fullchain.pem", age=600)
+        self.put(old_k, "privkey.pem", age=600)
+        self.put(new_c, "my-site.crt")
+        self.put(new_k, "my-site.key")
+        info = P.check_manual_cert(self.dir, self.DOMAIN)
+        self.assertEqual(os.path.basename(info["crt"]), "my-site.crt")
+        self.assertEqual(os.path.basename(info["key"]), "my-site.key")
+        self.assertTrue(P.install_manual_cert(self.dir, info["crt"], info["key"]))
+        self.assertEqual(read(os.path.join(self.dir, "fullchain.pem")), read(new_c))
+        self.assertEqual(read(os.path.join(self.dir, "privkey.pem")), read(new_k))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "fullchain.pem.new")))
+        # Checking again picks the installed copy and changes nothing.
+        info2 = P.check_manual_cert(self.dir, self.DOMAIN)
+        self.assertFalse(P.install_manual_cert(self.dir, info2["crt"], info2["key"]))
+
+    def test_wildcard(self):
+        crt, key = self.make(self.store, "wild", "DNS:*.ex.sslip.io,DNS:ex.sslip.io")
+        self.put(crt, "fullchain.pem")
+        self.put(key, "privkey.pem")
+        self.assertTrue(P.check_manual_cert(self.dir, "*.ex.sslip.io")["crt"].endswith("fullchain.pem"))
+
+    def test_missing_files(self):
+        self.assertIn("未找到证书文件", self.err())
+        crt, key = self.make(self.store, "c", "DNS:ex.sslip.io")
+        self.put(crt, "fullchain.pem")
+        self.assertIn("未找到私钥文件", self.err())
+        self.assertIn("/etc/clashgate/certs/", self.err())
+        with self.assertRaises(P.ManualCertError) as cm:
+            P.check_manual_cert(self.dir + "/nope", self.DOMAIN)
+        self.assertIn("未找到证书文件", str(cm.exception))
+
+    def test_mismatched_key(self):
+        crt, _ = self.make(self.store, "a", "DNS:ex.sslip.io")
+        _, other = self.make(self.store, "b", "DNS:ex.sslip.io")
+        self.put(crt, "fullchain.pem")
+        self.put(other, "privkey.pem")
+        self.assertIn("证书与私钥不匹配", self.err())
+
+    def test_expired(self):
+        crt, key = self.make(self.store, "exp", "DNS:ex.sslip.io", expired=True)
+        self.put(crt, "fullchain.pem")
+        self.put(key, "privkey.pem")
+        msg = self.err()
+        self.assertIn("证书已过期", msg)
+        self.assertIn("2020-01-0", msg)
+
+    def test_wrong_domain(self):
+        crt, key = self.make(self.store, "other", "DNS:other.example.com")
+        self.put(crt, "fullchain.pem")
+        self.put(key, "privkey.pem")
+        msg = self.err()
+        self.assertIn("证书域名不匹配", msg)
+        self.assertIn("ex.sslip.io", msg)
+        with self.assertRaises(P.ManualCertError) as cm:
+            P.check_manual_cert(self.dir, "")
+        self.assertIn("未设置域名", str(cm.exception))
+
+    def test_installer_temporary_cert_is_not_a_manual_cert(self):
+        crt, key = self.make(self.store, "tmp", "DNS:ex.sslip.io", cn="clashgate temporary certificate")
+        self.put(crt, "fullchain.pem")
+        self.put(key, "privkey.pem")
+        self.assertIn("未找到证书文件", self.err())
+
+    def test_encrypted_key(self):
+        crt, key = self.make(self.store, "enc", "DNS:ex.sslip.io")
+        enc = os.path.join(self.store, "enc-locked.key")
+        self._ossl("pkey", "-in", key, "-aes256", "-passout", "pass:secret", "-out", enc)
+        self.put(crt, "fullchain.pem")
+        self.put(enc, "privkey.pem")
+        self.assertIn("私钥带有密码", self.err())
+
+    def test_messages_translate(self):
+        import i18n_en
+        for zh in ("证书已过期（到期时间：2020-01-02 08:00），请换成有效的证书",
+                   "证书域名不匹配：证书里没有 ex.sslip.io，请换成这个域名或 *.泛域名的证书",
+                   "已切换为手动证书（颁发者：R11，到期：2027-01-01 00:00，剩余 40 天）"):
+            for lang in ("en", "ru", "fa"):
+                self.assertNotRegex(i18n_en.tr(zh, lang), r"[\u4e00-\u9fff]", f"{lang}: {zh}")
+
+    def test_handler_switch_and_revalidate(self):
+        """POST /action/cert-mode cert_mode=manual: rejects bad files without touching CERT_MODE,
+        switches on good files, and re-checks when already manual."""
+        certs = P.CS_ROOT + "/certs"
+        saved = {n: read(os.path.join(certs, n)) for n in ("fullchain.pem", "privkey.pem")}
+        env_before = read(P.ENV_FILE)
+        calls = []
+        h = object.__new__(P.Panel)
+        h.respond_mutation = lambda s, msg, ok=True: (ok, msg)
+        g = P.Panel.do_cert_manual.__globals__
+        real_run = g["run"]
+
+        def fake_run(cmd, **kw):
+            if cmd and cmd[0] == P.SYSTEMCTL:
+                calls.append(cmd[1:])
+                return 0, ""
+            return real_run(cmd, **kw)
+
+        try:
+            with mock.patch.dict(g, {"run": fake_run}):
+                ok, msg = h.do_cert_mode({}, {"cert_mode": "manual"})   # placeholder files from module setup
+                self.assertFalse(ok)
+                self.assertIn("未找到证书文件", msg)
+                self.assertNotIn("CERT_MODE", read(P.ENV_FILE))
+                crt, key = self.make(self.store, "h", "DNS:ex.sslip.io", cn="Handler CA")
+                shutil.copyfile(crt, certs + "/site.crt")
+                shutil.copyfile(key, certs + "/site.key")
+                ok, msg = h.do_cert_mode({}, {"cert_mode": "manual"})
+                self.assertTrue(ok, msg)
+                self.assertIn("已切换为手动证书（颁发者：Handler CA", msg)
+                self.assertEqual(P.read_env().get("CERT_MODE"), "manual")
+                self.assertEqual(read(certs + "/fullchain.pem"), read(crt))
+                self.assertIn(["disable", "--now", "clashgate-cert.timer"], calls)
+                ok, msg = h.do_cert_mode({}, {"cert_mode": "manual"})
+                self.assertTrue(ok, msg)
+                self.assertIn("手动证书校验通过", msg)
+        finally:
+            for n, txt in saved.items():
+                with open(os.path.join(certs, n), "w") as f:
+                    f.write(txt)
+            for n in ("site.crt", "site.key"):
+                if os.path.exists(os.path.join(certs, n)):
+                    os.remove(os.path.join(certs, n))
+            with open(P.ENV_FILE, "w") as f:
+                f.write(env_before)
 
 
 class SecurityTest(unittest.TestCase):

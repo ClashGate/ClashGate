@@ -261,6 +261,58 @@ def wait_for(fn, secs=8.0):
     return fn()
 
 
+def manual_cert_e2e(pki, panel_dir):
+    """1.20: the HTTPS 证书 page switches a running panel to a manual certificate (test CA only)."""
+    print("[manual certificate switch]")
+    HOSTS["M"], PORTS["M"], PW["M"] = "127.0.0.8", 28408, "pw-M-" + os.urandom(6).hex()
+    dom = "m.cg-e2e.test"
+
+    def leaf(name, sans):
+        sh("openssl", "req", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes", "-subj", f"/CN={name}",
+           "-keyout", f"{pki}/{name}.key", "-out", f"{pki}/{name}.csr")
+        with open(f"{pki}/{name}.ext", "w") as f:
+            f.write(f"subjectAltName={sans}\nbasicConstraints=CA:FALSE\nextendedKeyUsage=serverAuth\n")
+        sh("openssl", "x509", "-req", "-in", f"{pki}/{name}.csr", "-CA", pki + "/ca.pem", "-CAkey", pki + "/ca.key",
+           "-CAcreateserial", "-days", "2", "-extfile", f"{pki}/{name}.ext", "-out", f"{pki}/{name}.pem")
+
+    def served_der():
+        ctx = ssl.create_default_context(cafile=pki + "/ca.pem")
+        with socket.create_connection((HOSTS["M"], PORTS["M"]), timeout=10) as raw:
+            with ctx.wrap_socket(raw, server_hostname=HOSTS["M"]) as tls:
+                return tls.getpeercert(binary_form=True)
+
+    def env_mode():
+        m = re.search(r'^CERT_MODE="([^"]*)"', read(cs + "/clashgate.env"), re.M)
+        return m.group(1) if m else ""
+
+    leaf("M", f"IP:{HOSTS['M']}")
+    root = setup_panel("M", panel_dir, pki)
+    cs = root + "/etc/clashgate"
+    with open(cs + "/clashgate.env", "a") as f:
+        f.write(f'DOMAIN="{dom}"\nCERT_MODE="port"\n')
+    m = Client("M")
+    r = m.post("/action/cert-mode", cert_mode="manual")
+    check(not r["ok"] and "域名不匹配" in r["msg"] and env_mode() == "port",
+          f"current cert without the domain is refused, mode kept: {r['msg']}")
+    leaf("M2", f"DNS:{dom},IP:{HOSTS['M']}")
+    shutil.copy(f"{pki}/M2.pem", cs + "/certs/site.crt")
+    shutil.copy(f"{pki}/A.key", cs + "/certs/site.key")
+    r = m.post("/action/cert-mode", cert_mode="manual")
+    check(not r["ok"] and "证书与私钥不匹配" in r["msg"] and env_mode() == "port", f"wrong key is refused: {r['msg']}")
+    shutil.copy(f"{pki}/M2.key", cs + "/certs/site.key")
+    r = m.post("/action/cert-mode", cert_mode="manual")
+    check(r["ok"] and "已切换为手动证书（颁发者：cg-e2e-ca" in r["msg"], f"switch to manual: {r['msg']}")
+    check(env_mode() == "manual" and r["state"]["cert_mode"] == "manual", "CERT_MODE=manual saved and reported")
+    check(read(cs + "/certs/fullchain.pem") == read(f"{pki}/M2.pem"), "new certificate installed as fullchain.pem")
+    want = ssl.PEM_cert_to_DER_cert(read(f"{pki}/M2.pem"))
+    check(wait_for(lambda: served_der() == want, 5), "panel serves the new certificate without a restart")
+    r = m.post("/action/cert-mode", cert_mode="manual")
+    check(r["ok"] and "手动证书校验通过" in r["msg"], f"re-check while already manual: {r['msg']}")
+    m.op.addheaders = [("Accept-Language", "en")]
+    r = m.post("/action/cert-mode", cert_mode="manual")
+    check(r["ok"] and not re.search(r"[\u4e00-\u9fff]", r["msg"]), f"English message: {r['msg']}")
+
+
 def main():
     if not os.path.isfile(MIHOMO):
         sys.exit(f"core not found: {MIHOMO}")
@@ -469,6 +521,8 @@ def main():
     check(not member_names(c) and member_names(a) == ["B-Node"] and member_names(b) == ["A-Node"], "C gone everywhere")
     mesh_ok(["A", "B"])
 
+    manual_cert_e2e(pki, panel_dir)
+
     print("[mihomo -t on final configs]")
     for who in ("A", "B", "C", "D"):
         check(mihomo_t(cs[who] + "/config.yaml")[0] == 0, f"{who} config passes mihomo -t")
@@ -485,7 +539,7 @@ if __name__ == "__main__":
     finally:
         for p in PROCS:
             p.terminate()
-        for who in ("A", "B", "C", "D"):
+        for who in ("A", "B", "C", "D", "M"):
             env = panel_env(f"{TMP}/{who}")
             subprocess.run([TMP + "/bin/systemctl", "stop", "mihomo"], env=env)
         if rc == 0:

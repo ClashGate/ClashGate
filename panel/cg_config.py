@@ -1564,6 +1564,8 @@ def cert_failure_message(out: str, mode: str) -> str:
     if ("80 端口被占用" in text or "address already in use" in low or "bind: permission denied" in low
             or "couldn't bind" in low or "port 80" in low and ("occup" in low or "busy" in low or "in use" in low)):
         return "重新生成证书失败：80 端口被占用。端口模式需要临时使用 80 端口，请释放该端口，或改用 Cloudflare DNS。"
+    if "socat" in low:
+        return "重新生成证书失败：端口模式需要 socat，请先在服务器上安装 socat，或改用 Cloudflare DNS。"
     token_bad = mode == "dns" and (
         "api token" in low or "invalid api" in low or "authentication error" in low
         or "unauthorized" in low or "error code" in low and "token" in low
@@ -1577,6 +1579,63 @@ def cert_failure_message(out: str, mode: str) -> str:
     if not tail:
         tail = "请检查域名解析、Token 权限或 80 端口是否被占用"
     return f"重新生成证书失败：{tail}"
+
+
+CERT_LOCK_FILE = ROOT + "/run/clashgate-cert.lock"   # shared with scripts/certctl.sh (flock)
+
+
+def cert_task_lock(wait: float = 30.0):
+    """Take certctl's flock so a manual switch never races the renew timer.
+    Returns an fd to close, None if the lock file cannot be opened (local test tree),
+    or False if another certificate job holds it for longer than `wait` seconds."""
+    try:
+        import fcntl
+        fd = os.open(CERT_LOCK_FILE, os.O_WRONLY | os.O_CREAT, 0o600)
+    except (ImportError, OSError):
+        return None
+    deadline = time.time() + wait
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except OSError:
+            if time.time() >= deadline:
+                os.close(fd)
+                return False
+            time.sleep(0.5)
+
+
+def restart_mihomo_for_cert():
+    """Like certctl restart_mihomo: restart only a running core whose config uses the certs."""
+    rc, active = run([SYSTEMCTL, "is-active", "mihomo"])
+    if rc != 0 or (active or "").strip().splitlines()[-1:] != ["active"]:
+        return False
+    try:
+        with open(CONF) as f:
+            if not re.search(r"(/etc/clashgate/certs/|certs/)", f.read()):
+                return False
+    except OSError:
+        return False
+    rc, _ = run([SYSTEMCTL, "restart", "mihomo"], timeout=60)
+    return rc == 0
+
+
+def enable_cert_renew_timer():
+    """After leaving manual mode: install and start the hourly renew timer (manual installs never
+    got one)."""
+    unit_dir = ROOT + "/etc/systemd/system"
+    for name in ("clashgate-cert.service", "clashgate-cert.timer"):
+        src = resolve_template_path("scripts/init/" + name)
+        dst = os.path.join(unit_dir, name)
+        if os.path.isfile(src) and not os.path.isfile(dst):
+            try:
+                os.makedirs(unit_dir, exist_ok=True)
+                shutil.copyfile(src, dst)
+                os.chmod(dst, 0o644)
+            except OSError:
+                pass
+    run([SYSTEMCTL, "daemon-reload"], timeout=30)
+    run([SYSTEMCTL, "enable", "--now", "clashgate-cert.timer"], timeout=30)
 
 
 def validate_config(path=CONF, bin_path: str = ""):

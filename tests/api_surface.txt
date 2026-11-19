@@ -2,6 +2,7 @@ ANYTLS_FP_POOL
 BaseHTTPRequestHandler
 CERT
 CERTCTL
+CERT_LOCK_FILE
 CERT_TYPES
 CLASHGATE_BIN
 CLIENT_DIR
@@ -43,6 +44,7 @@ MASQUE_JSON
 MASQUE_NAME
 MIHOMO_DIR
 MIHOMO_REPO_API
+ManualCertError
 NODES_TSV
 NODE_NAME_MAX
 NODE_NAME_PEER_MAX
@@ -173,8 +175,10 @@ build_inbound
 build_proxy_provider
 can_reset_inbound_password
 cert_failure_message
+cert_task_lock
 certs_present
 check_core_update
+check_manual_cert
 check_panel_update
 clear_pending_reload
 cluster_call
@@ -202,6 +206,7 @@ discard_pending_reload
 dump_yaml_map
 dump_yaml_providers
 dump_yaml_proxies
+enable_cert_renew_timer
 ensure_unified_root
 extract_top_level_yaml_section
 extract_yaml_secret
@@ -219,6 +224,7 @@ get_mihomo_version_num
 get_routing
 get_traffic_stats
 hash_password
+install_manual_cert
 is_custom_config_mode
 listener_to_inbound
 live_nodes_and_inbounds
@@ -286,6 +292,7 @@ resolve_sni
 resolve_template_path
 resolve_update_channel
 resolve_update_target
+restart_mihomo_for_cert
 revoke_other_sessions
 rewrite_cert_paths_in_yaml
 rotate_inbound_credentials

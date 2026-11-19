@@ -327,6 +327,21 @@ TABLE = [
     ("对方面板没能创建集群节点（HTTP {}）", "The other panel could not create the cluster node (HTTP {})"),
     ("成员之间互联失败：{}", "Linking the members failed: {}"),
     ("成员之间互联失败（HTTP {}）", "Linking the members failed (HTTP {})"),
+    ("未设置域名，无法使用手动证书", "No domain is set, so a manual certificate cannot be used"),
+    ("未找到证书文件：请把证书（fullchain.pem 或 *.crt）放入 /etc/clashgate/certs/ 后再试", "Certificate file not found: put the certificate (fullchain.pem or *.crt) in /etc/clashgate/certs/ and try again"),
+    ("未找到私钥文件：请把私钥（privkey.pem 或 *.key）放入 /etc/clashgate/certs/ 后再试", "Private key file not found: put the private key (privkey.pem or *.key) in /etc/clashgate/certs/ and try again"),
+    ("证书文件无法识别：{}", "The certificate file cannot be read: {}"),
+    ("证书已过期（到期时间：{}），请换成有效的证书", "The certificate has expired (expiry: {}); use a valid certificate"),
+    ("证书域名不匹配：证书里没有 {}，请换成这个域名或 *.泛域名的证书", "Domain mismatch: the certificate does not cover {}; use a certificate for this domain or a *. wildcard"),
+    ("私钥带有密码，请换成不带密码的私钥", "The private key is password-protected; use a key without a password"),
+    ("证书与私钥不匹配：请确认私钥和证书是同一次申请得到的", "The certificate and private key do not match: make sure they come from the same request"),
+    ("写入证书失败：{}", "Failed to write the certificate: {}"),
+    ("无法读取证书文件", "cannot read the certificate files"),
+    ("Mihomo 无法读取私钥，请检查 /etc/clashgate/certs/ 的文件权限", "Mihomo cannot read the private key; check the file permissions in /etc/clashgate/certs/"),
+    ("另一个证书任务正在运行，请稍后再试", "Another certificate job is running; try again later"),
+    ("已切换为手动证书（颁发者：{}，到期：{}，剩余 {} 天）", "Switched to the manual certificate (issuer: {}, expires: {}, {} days left)"),
+    ("手动证书校验通过，已重新加载（颁发者：{}，到期：{}，剩余 {} 天）", "Manual certificate checked and reloaded (issuer: {}, expires: {}, {} days left)"),
+    ("重新生成证书失败：端口模式需要 socat，请先在服务器上安装 socat，或改用 Cloudflare DNS。", "Failed to regenerate the certificate: Port mode needs socat. Install socat on the server first, or use Cloudflare DNS."),
 ]
 
 _COMPILED = []

@@ -711,7 +711,7 @@ export function usePanel() {
 
   // HTTPS Certificate management state
   const certModeForm = reactive({
-    mode: state.cert_mode === 'dns' ? 'dns' : 'port',
+    mode: state.cert_mode === 'dns' || state.cert_mode === 'manual' ? state.cert_mode : 'port',
     cf_token: state.cf_token || '',
   })
   const certRegenLock = ref(false)
@@ -736,6 +736,8 @@ export function usePanel() {
   const certIsTemp = computed(() => /clashgate temporary/i.test(certIssuerDisplay.value))
   const certBaselineMode = computed(() => (certModeValue.value === 'dns' ? 'dns' : 'port'))
   const certModeDirty = computed(() => {
+    // Manual: always clickable, so replaced files can be re-checked and loaded.
+    if (certModeForm.mode === 'manual') return true
     if (certModeValue.value === 'manual') return certModeForm.mode === 'dns' || certModeForm.mode === 'port'
     if (certModeForm.mode !== certBaselineMode.value) return true
     if (certModeForm.mode === 'dns' && (certModeForm.cf_token || '') !== (state.cf_token || '')) return true

@@ -1304,8 +1304,10 @@ class Panel(BaseHTTPRequestHandler):
 
     def do_cert_mode(self, s, form):
         mode = (form.get("cert_mode") or "dns").strip()
-        if mode not in ("dns", "port"):
+        if mode not in ("dns", "port", "manual"):
             return self.respond_mutation(s, "不支持的证书模式", False)
+        if mode == "manual":
+            return self.do_cert_manual(s)
         raw_token = (form.get("cf_token") if "cf_token" in form else form.get("token", "")).strip()
         if mode == "dns":
             if not raw_token:
@@ -1331,7 +1333,40 @@ class Panel(BaseHTTPRequestHandler):
                 if prev_mode == "dns" and prev_token:
                     write_env_var("CF_TOKEN", prev_token)
                 return self.respond_mutation(s, cert_failure_message(out, mode), False)
+            if prev_mode == "manual":
+                enable_cert_renew_timer()
         return self.respond_mutation(s, "已切换并重新生成证书。", True)
+
+    def do_cert_manual(self, s):
+        """Switch to (or re-check) the manual certificate placed in /etc/clashgate/certs/."""
+        cert_dir = CS_ROOT + "/certs"
+        with LOCK:
+            env = read_env()
+            prev_mode = (env.get("CERT_MODE") or "port").strip()
+            lock_fd = cert_task_lock()
+            if lock_fd is False:
+                return self.respond_mutation(s, "另一个证书任务正在运行，请稍后再试", False)
+            try:
+                try:
+                    info = check_manual_cert(cert_dir, env.get("DOMAIN", ""))
+                    install_manual_cert(cert_dir, info["crt"], info["key"])
+                except ManualCertError as e:
+                    return self.respond_mutation(s, str(e), False)
+                if prev_mode != "manual":
+                    write_env_var("CERT_MODE", "manual")
+                    # Manual certificates are never renewed by acme.sh; stop the hourly job.
+                    run([SYSTEMCTL, "disable", "--now", "clashgate-cert.timer"], timeout=30)
+            finally:
+                if lock_fd is not None:
+                    os.close(lock_fd)
+            # The panel reloads its certificate when the files change; Mihomo needs a restart.
+            restart_mihomo_for_cert()
+        days = info["days"] if info["days"] is not None else "—"
+        if prev_mode == "manual":
+            msg = "手动证书校验通过，已重新加载（颁发者：{}，到期：{}，剩余 {} 天）"
+        else:
+            msg = "已切换为手动证书（颁发者：{}，到期：{}，剩余 {} 天）"
+        return self.respond_mutation(s, msg.format(info["issuer"], info["expires"], days), True)
 
     def do_update_core(self, s, form=None):
         if form and form.get("async") == "1" and self.is_ajax():
