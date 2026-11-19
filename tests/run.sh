@@ -51,6 +51,7 @@ fi
 
 step "i18n parity"
 python3 tests/check_i18n.py
+python3 tests/check_shell_i18n.py
 
 if [[ $BUILD == 1 ]]; then
   step "frontend build (committed panel/dist must match)"

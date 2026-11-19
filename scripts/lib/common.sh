@@ -2,11 +2,11 @@
 # clashgate 公共函数：常量、日志、交互、环境持久化、下载与安装文件
 
 # shellcheck source=/dev/null
-. "$(dirname "${BASH_SOURCE[0]}")/i18n.sh"   # CLASHGATE_LANG=en|zh；默认中文
+. "$(dirname "${BASH_SOURCE[0]}")/i18n.sh"   # CLASHGATE_LANG=zh|en|ru
 
-# Compared as integer tuples by installed panels (1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09): never use 1.1 / 1.2, the next is 1.22.
-CS_VERSION=1.21
-CS_SOURCE_SHA=20261119-v1.21
+# Compared as integer tuples by installed panels (1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09): never use 1.1 / 1.2, the next is 1.26.
+CS_VERSION=1.25
+CS_SOURCE_SHA=20261119-v1.25
 REPO_OWNER=${REPO_OWNER:-ClashGate}
 REPO_NAME=${REPO_NAME:-ClashGate}
 REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
@@ -95,6 +95,23 @@ ask() { # ask "提示" 默认值  -> 读取 /dev/tty（curl|bash 时 stdin 是�
   read -r ans </dev/tty || true
   printf '%s' "${ans:-$2}"
 }
+
+pick_lang() { # 语言选择（三种语言同时显示，因为此时还不知道用户的语言）；输出 zh|en|ru，$1 为回车默认值
+  local n c
+  case ${1:-zh} in en) n=2 ;; ru) n=3 ;; *) n=1 ;; esac
+  builtin printf '\n\033[1mLanguage / 语言 / Язык\033[0m\n  1) 中文\n  2) English\n  3) Русский\n' >/dev/tty
+  while :; do
+    builtin printf '[1/2/3] (Enter = %s): ' "$n" >/dev/tty
+    c=""; read -r c </dev/tty || true
+    case ${c:-$n} in
+      1) builtin echo zh; return 0 ;;
+      2) builtin echo en; return 0 ;;
+      3) builtin echo ru; return 0 ;;
+    esac
+  done
+}
+
+lang_name() { case $1 in en) builtin printf 'English' ;; ru) builtin printf 'Русский' ;; *) builtin printf '中文' ;; esac; }
 
 # 管理面板需要 Python 3.9+（str.removeprefix、内置泛型注解等）。输出可用的解释器路径；没有则返回 1。
 py_bin() {
@@ -239,7 +256,19 @@ EOF
   if [[ -n ${CS_ACME_INSECURE:-} ]]; then printf 'CS_ACME_INSECURE="%s"\n' "$CS_ACME_INSECURE" >> "$ENV_FILE"; fi
   if [[ -n ${CS_DNS_HOOK:-} ]]; then printf 'CS_DNS_HOOK="%s"\n' "$CS_DNS_HOOK" >> "$ENV_FILE"; fi
   if [[ -n ${CS_DNSSLEEP:-} ]]; then printf 'CS_DNSSLEEP="%s"\n' "$CS_DNSSLEEP" >> "$ENV_FILE"; fi
+  # 命令行语言（安装时的语言选择 / clashgate lang）；也是面板在浏览器未选过语言时的默认语言
+  if [[ -n ${CS_LANG_SAVED:-} ]]; then printf 'CLASHGATE_LANG="%s"\n' "$CS_LANG_SAVED" >> "$ENV_FILE"; fi
   chmod 600 "$ENV_FILE"
+}
+
+save_cli_lang() { # $1 = zh|en|ru -> CLASHGATE_LANG in $ENV_FILE (other settings untouched)
+  CS_LANG_SAVED=$1
+  [[ -f $ENV_FILE ]] || return 0
+  local tmp
+  tmp=$(mktemp "$ENV_FILE.XXXXXX")
+  grep -v '^CLASHGATE_LANG=' "$ENV_FILE" > "$tmp" || true
+  printf 'CLASHGATE_LANG="%s"\n' "$1" >> "$tmp"
+  chmod 600 "$tmp"; mv -f "$tmp" "$ENV_FILE"
 }
 
 svc_state() {

@@ -215,19 +215,19 @@ const {
                   {{ t('端口') }} <bdi dir="ltr">{{ state.controller_port }}</bdi> {{ state.controller_listening ? t('运行中') : t('未运行') }}
                 </span>
               </div>
-              <div class="flex items-center gap-2 flex-wrap">
+              <div class="cg-btn-row">
                 <a
                   :href="state.zb_url || '#'"
                   target="_blank"
                   rel="noopener"
-                  class="cg-btn-primary px-3.5 py-1.5 rounded-xl text-xs font-semibold"
+                  class="cg-btn-primary cg-btn-sm"
                 >
                   {{ t('打开 Zashboard') }}
                 </a>
                 <button
                   type="button"
                   @click="copyRaw(state.zb_url, 'zb-url')"
-                  class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
+                  class="cg-btn-sm cg-btn-secondary"
                 >
                   {{ copiedKey === 'zb-url' ? t('已复制地址') : t('复制地址') }}
                 </button>
@@ -235,7 +235,7 @@ const {
                   href="/config/server.yaml"
                   target="_blank"
                   rel="noopener"
-                  class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition"
+                  class="cg-btn-sm cg-btn-secondary"
                 >
                   {{ t('查看 Mihomo 服务端配置') }}
                 </a>
@@ -285,7 +285,7 @@ const {
                   v-if="state.mihomo_secret"
                   type="button"
                   @click="copyRaw(state.mihomo_secret, 'zb-secret')"
-                  class="px-2.5 py-1 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition cursor-pointer"
+                  class="cg-btn-sm cg-btn-secondary"
                 >
                   {{ copiedKey === 'zb-secret' ? t('已复制') : t('复制密钥') }}
                 </button>
@@ -293,7 +293,7 @@ const {
                   type="button"
                   :disabled="busyKey === 'reset-secret'"
                   @click="resetZbSecret"
-                  class="px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
+                  class="cg-btn-sm cg-btn-secondary"
                 >
                   {{ busyKey === 'reset-secret' ? t('重置中…') : t('重置 API 密钥') }}
                 </button>
@@ -370,12 +370,12 @@ const {
                 <button
                   type="submit"
                   :disabled="busyKey === 'add-proxies'"
-                  class="cg-btn-primary px-4 py-2 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer"
+                  class="cg-btn-primary cg-btn-sm"
                 >
                   {{ busyKey === 'add-proxies' ? t('添加中…') : t('添加服务端出站') }}
                 </button>
                 <label
-                  class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200/80 text-slate-700 text-xs font-medium transition cursor-pointer"
+                  class="cg-btn-sm cg-btn-secondary"
                 >
                   {{ t('从文件载入') }}
                   <input

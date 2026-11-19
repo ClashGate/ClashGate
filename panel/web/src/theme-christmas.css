@@ -82,13 +82,10 @@ html[data-theme="christmas"] .cg-feature {
     linear-gradient(135deg, rgba(217, 57, 58, 0.07), transparent 46%),
     linear-gradient(#ffffff, #ffffff);
 }
-html[data-theme="christmas"] #stat-card-status { box-shadow: inset 3px 0 0 var(--cgx-red); }
-html[data-theme="christmas"] [dir="rtl"] #stat-card-status { box-shadow: inset -3px 0 0 var(--cgx-red); }
 html[data-theme="christmas"] .cg-rail .cg-stat-mode { background: #e6f5ec; color: var(--cgx-green-hover); }
-html[data-theme="christmas"] .cg-live.is-ok {
-  background: var(--cgx-green);
-  box-shadow: 0 0 0 3px rgba(var(--cgx-green-rgb), 0.18);
-}
+html[data-theme="christmas"] .cg-live.is-ok { background: var(--cgx-green); }
+html[data-theme="christmas"] .cg-rail-cell.is-pending .cg-pending-count { background: var(--cgx-green); }
+html[data-theme="christmas"] .cg-rail-cell.is-action:focus-visible { outline-color: var(--cgx-green); }
 html[data-theme="christmas"] .cg-input:focus,
 html[data-theme="christmas"] select.cg-input:focus,
 html[data-theme="christmas"] textarea.cg-input:focus {

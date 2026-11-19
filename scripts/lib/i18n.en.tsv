@@ -226,7 +226,6 @@ mihomo 用户无法读取证书私钥	The mihomo user cannot read the private ke
 \033[1;31m失败\033[0m（%s，clashgate log 查看原因）	\033[1;31mfailed\033[0m (%s; see clashgate log)
 端口 %s / %s 已被占用，请先停止占用程序：	Ports %s / %s are already in use; stop the occupying program first:
 80 端口已被其他程序占用（端口模式申请证书需要临时占用 80 端口），请先停止占用程序或改用「DNS API 模式」/「手动证书模式」：	Port 80 is in use by another program (port mode needs port 80 temporarily); stop it or switch to "DNS API mode" / "Manual certificate mode":
-%s 安装：%s	%s install: %s
 确定卸载 ClashGate？会先退出集群，然后删除所有节点、证书和配置 [y/N]：	Uninstall ClashGate? This server leaves its cluster first, then all nodes, certificates and config are deleted [y/N]: 
 没能退出集群（找不到 Python 3.9+），请到其他成员的面板里手动删除这台服务器	Could not leave the cluster (Python 3.9+ not found); remove this server from the other members' panels by hand
 正在退出集群（通知 %s 个成员）	Leaving the cluster (notifying %s members)
@@ -240,3 +239,37 @@ acme.sh v%s 下载或安装失败（请确认服务器可以访问 GitHub）	Fai
 系统自带的 Python 版本过低（%s），正在安装新版 Python	The system Python is too old (%s); installing a newer Python
 已安装 %s	Installed %s
 管理面板需要 Python 3.9 或更高版本（当前：%s）。请换用较新的系统（Debian 11+ / Ubuntu 20.04+ / Rocky 或 Alma 8+ / Fedora），或手动安装 Python 3.9+ 后重试	The admin panel needs Python 3.9 or newer (current: %s). Use a newer system (Debian 11+ / Ubuntu 20.04+ / Rocky or Alma 8+ / Fedora), or install Python 3.9+ yourself and try again
+语言 / Language	Language
+未知语言：%s（可选 zh|en|ru）	Unknown language: %s (choose zh|en|ru)
+当前命令行语言：%s。切换：clashgate lang zh|en|ru\n	Current CLI language: %s. Switch: clashgate lang zh|en|ru\n
+当前终端设置了 CLASHGATE_LANG=%s，本终端里仍以它为准；unset CLASHGATE_LANG 后使用新语言	CLASHGATE_LANG=%s is set in this terminal and still wins here; run unset CLASHGATE_LANG to use the new language
+正在从 GitHub (%s @ %s) 下载安装文件……\n	Downloading install files from GitHub (%s @ %s)...\n
+  Mihomo：%s  %s\n	  Mihomo: %s  %s\n
+Mihomo：%s\n	Mihomo: %s\n
+缺少配置文件 %s	Missing config file %s
+未设置 DOMAIN	DOMAIN is not set
+第 %s 行执行失败：%s	Line %s failed: %s
+已重启 Mihomo 以加载新证书	Restarted Mihomo to load the new certificate
+重启 Mihomo 失败	Failed to restart Mihomo
+证书文件为空：%s	Certificate file is empty: %s
+证书已过期或无法解析：%s	Certificate expired or unreadable: %s
+证书不包含域名 %s：%s	Certificate does not cover domain %s: %s
+证书与私钥不匹配：%s	Certificate and private key do not match: %s
+证书已更新 -> %s（到期：%s）	Certificate updated -> %s (expires: %s)
+%s 中没有证书	No certificate in %s
+用法：certctl.sh issue|renew|reissue|deploy|selfsign	Usage: certctl.sh issue|renew|reissue|deploy|selfsign
+另一个证书任务仍在运行	Another certificate job is still running
+手动证书校验正常：%s（到期：%s）	Manual certificate OK: %s (expires: %s)
+未找到 acme.sh，正在安装 v%s	acme.sh not found; installing v%s
+未找到 %s，自动安装失败（可执行 clashgate update 后重试）	%s not found and the automatic install failed (run clashgate update, then retry)
+已移除旧域名的证书记录：%s	Removed the certificate record of an old domain: %s
+续期失败；当前证书仍可用到 %s	Renewal failed; the current certificate stays valid until %s
+DNS API 模式缺少 Cloudflare API Token	DNS API mode is missing the Cloudflare API Token
+80 端口被占用，无法申请证书（端口模式需要临时使用 80 端口）：	Port 80 is in use, cannot request the certificate (port mode needs port 80 temporarily):
+按面板请求重新签发证书	Reissuing the certificate as requested by the panel
+已有证书来自其他 CA（%s），重新签发	The existing certificate is from another CA (%s); reissuing
+证书申请方式已更改（%s -> %s），重新签发	The certificate method changed (%s -> %s); reissuing
+向 %s 申请 %s 的证书（%s）	Requesting from %s a certificate for %s (%s)
+证书申请失败（请检查 Cloudflare API Token 是否具备 %s 的 DNS 编辑权限）	Certificate request failed (check that the Cloudflare API Token has DNS edit permission for %s)
+证书申请失败（请检查域名 A/AAAA 记录是否指向本机、云防火墙是否放行 TCP 80）	Certificate request failed (check that the domain A/AAAA records point to this server and the cloud firewall allows TCP 80)
+证书已签发但未能部署到 %s	The certificate was issued but could not be deployed to %s

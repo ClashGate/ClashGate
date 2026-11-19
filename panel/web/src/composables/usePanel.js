@@ -45,7 +45,6 @@ export function usePanel() {
     cert_mode: 'port',
     domain: '',
     cf_token: '',
-    cluster_min_version: '',
     cert_issuer: '',
     cert_expires: '',
     cert_days: null,
@@ -105,7 +104,6 @@ export function usePanel() {
     cert_mode: boot.cert_mode || (boot.status && boot.status.cert_mode) || 'port',
     domain: boot.domain || (boot.status && boot.status.domain) || '',
     cf_token: boot.cf_token || '',
-    cluster_min_version: boot.cluster_min_version || '',
     cert_issuer: boot.cert_issuer || (boot.status && boot.status.cert_issuer) || '',
     cert_expires: boot.cert_expires || (boot.status && boot.status.cert_expires) || '',
     cert_days: boot.cert_days !== undefined ? boot.cert_days : (boot.status ? boot.status.cert_days : null),
@@ -1023,7 +1021,6 @@ export function usePanel() {
     if (newState.mode !== undefined) state.mode = newState.mode
     if (newState.cert_mode !== undefined) state.cert_mode = newState.cert_mode
     if (newState.domain !== undefined) state.domain = newState.domain
-    if (newState.cluster_min_version) state.cluster_min_version = newState.cluster_min_version
     if (newState.cf_token !== undefined) {
       if (newState.cf_token !== state.cf_token) cfTokenRevealed.value = false
       state.cf_token = newState.cf_token

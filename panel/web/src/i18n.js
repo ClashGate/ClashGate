@@ -297,7 +297,6 @@ export const EN = {
   "切换到正式通道": "Switch to stable channel",
   "切换到正式通道并立即更新到正式版最新版本，确定切换？": "This switches to the stable channel and immediately updates to the latest stable version. Switch?",
   "测试版可能不稳定，可能出现功能异常或兼容性问题。切换后将立即更新到测试通道最新版本，确定切换？": "Test builds may be unstable and could have broken features or compatibility issues. Switching will immediately update to the latest test version. Switch?",
-  "（测试）": " (Test)",
   "已切换通道，正在更新到该通道最新版本……": "Channel switched. Updating to that channel's latest version…",
   "面板正在重启，请稍候……": "The panel is restarting, please wait…",
   "升级成功！当前版本 {v}，即将刷新页面": "Upgrade succeeded! Now on {v}, refreshing the page…",
@@ -310,7 +309,7 @@ export const EN = {
  "请勿重复加入": "Already added. Don't add it again.",
  "语言": "Language",
  "流量": "Traffic",
- "有修改，点开查看": "Changes waiting — open to review",
+ "有修改，点开查看": "Review changes",
  "+ 添加节点「{name}」（端口 {port}）": "+ Add node “{name}” (port {port})",
  "- 删除节点「{name}」": "- Delete node “{name}”",
  "~ 重置密码「{name}」": "~ Reset password “{name}”",
@@ -373,7 +372,6 @@ export const EN = {
   "本机名称最多 {n} 个字符": "The node name can be at most {n} characters",
   "检查": "Check",
   "添加到集群": "Add to cluster",
-  "添加后立即生效，不需要点「应用配置」。": "It takes effect right away; no need to click “Apply config”.",
   "移除": "Remove",
   "移除中…": "Removing…",
   "请填写对方面板地址": "Enter the other panel's address",
@@ -385,7 +383,6 @@ export const EN = {
   "填写另一台 VPS 上 ClashGate 面板的地址和密码。两边会互相生成 VLESS 后量子加密节点，并写入各自的服务端出站，名称就是对方的本机名称。": "Enter the address and password of a ClashGate panel on another VPS. Both sides create a VLESS node with post-quantum encryption for each other and add it as a server outbound named after the other side's node name.",
   "密码只用这一次，不会保存在任何一台面板上。": "The password is used once and is not stored on either panel.",
   "对方会通过这个地址连回本机，并校验 HTTPS 证书。": "The other panel connects back to this address and verifies its HTTPS certificate.",
-  "已经在集群里的面板会自动和新面板互联，不需要再输入密码。": "Panels already in the cluster link with the new panel automatically; no more passwords needed.",
   "本机没有可用的面板地址（域名或服务器 IP），其他面板无法连回本机": "This server has no usable panel address (domain or server IP), so other panels cannot connect back",
   "本机还没有加入集群": "This server is not in a cluster yet",
   "本机面板地址": "This panel's address",
@@ -400,7 +397,6 @@ export const EN = {
   "等待互联": "Not linked yet",
   "联系不上": "Unreachable",
   "还没和「{names}」互联，点「检查」重试": "Not linked with “{names}” yet. Click “Check” to retry",
-  "这些出站不会出现在节点列表和客户端订阅里，可以在 Zashboard 的分流策略组里选择它们作为出口。": "These outbounds do not appear in the node list or client subscriptions. Pick them as the exit in a routing group in Zashboard.",
   "退出集群": "Leave cluster",
   "集群成员": "Cluster members",
   "集群里每两台面板之间都有一条双向的 VLESS 后量子加密连接。": "Every two panels in the cluster share a two-way VLESS connection with post-quantum encryption.",
@@ -423,7 +419,6 @@ export const EN = {
  "切换到手动证书": "Switch to a manual certificate",
  "在云服务商的防火墙 / 安全组放行 TCP 80，并确保本机 80 端口没有被其他程序占用。": "Open TCP 80 in your cloud provider's firewall / security group, and make sure no other program on this server is using port 80.",
  "域名 {domain} 的 A 记录指向本服务器的公网 IP；如果有 AAAA 记录，也要指向本机，否则请删掉。": "The A record of {domain} points to this server's public IP. If there is an AAAA record, it must point here too; otherwise delete it.",
- "对方面板需要 ClashGate {v} 或更高版本，并使用有效的 HTTPS 证书。": "The other panel needs ClashGate {v} or later and a valid HTTPS certificate.",
  "将下载最新的 Mihomo 内核并重启。重启时所有连接会中断几秒钟，客户端会自动重连。": "This downloads the latest Mihomo core and restarts it. All connections drop for a few seconds during the restart; clients reconnect automatically.",
  "将检查 /etc/clashgate/certs/ 里的证书和私钥，通过后启用，内核会重启几秒钟。检查不通过时保持原来的证书不变。": "The certificate and private key in /etc/clashgate/certs/ will be checked and, if they pass, put into use; the core restarts for a few seconds. If the check fails, the current certificate stays as it is.",
  "将马上向 Let's Encrypt 申请证书（证书还有效且不急着续期时会直接跳过）。同一域名每周最多签发 5 张，请不要反复点击。": "This asks Let's Encrypt for a certificate right away (skipped if the current one is still valid and not due for renewal). Let's Encrypt issues at most 5 certificates per domain per week, so please don't click repeatedly.",
@@ -440,7 +435,11 @@ export const EN = {
  "端口模式由 Let's Encrypt 通过 80 端口验证域名，申请前请确认：": "In port mode Let's Encrypt checks your domain over port 80. Before requesting, make sure:",
  "端口模式需要准备什么": "What port mode needs",
  "证书到期前 30 天会自动续期，续期时同样需要 80 端口。不方便开放 80 端口时，可以改用 Cloudflare DNS。": "The certificate renews automatically 30 days before it expires; renewal needs port 80 too. If you can't open port 80, use Cloudflare DNS instead.",
- "详情": "Details"
+ "详情": "Details",
+ "内核": "Core",
+ "版本": "Version",
+ "自定义": "Custom",
+ "默认模板": "Default"
 }
 
 export const LANGS = ['zh', 'en', 'ru', 'fa']
@@ -455,6 +454,11 @@ function detect() {
   if (!LANGS.includes(v)) {
     const m = document.cookie.match(/(?:^|;\s*)clashgate_lang=(zh|en|ru|fa)/)
     v = m ? m[1] : ''
+  }
+  if (!LANGS.includes(v)) {
+    // Language chosen in the installer / `clashgate lang` (only until this browser picks one).
+    const d = (window.__CS_BOOT__ || {}).default_lang
+    if (LANGS.includes(d)) v = d
   }
   if (!LANGS.includes(v)) {
     const nav = (navigator.language || '').toLowerCase()
