@@ -246,3 +246,30 @@ acme.sh v%s 下载或安装失败（请确认服务器可以访问 GitHub）	Fai
 正在从 GitHub (%s @ %s) 下载安装文件……\n	Downloading install files from GitHub (%s @ %s)...\n
   Mihomo：%s  %s\n	  Mihomo: %s  %s\n
 Mihomo：%s\n	Mihomo: %s\n
+缺少配置文件 %s	Missing config file %s
+未设置 DOMAIN	DOMAIN is not set
+第 %s 行执行失败：%s	Line %s failed: %s
+已重启 Mihomo 以加载新证书	Restarted Mihomo to load the new certificate
+重启 Mihomo 失败	Failed to restart Mihomo
+证书文件为空：%s	Certificate file is empty: %s
+证书已过期或无法解析：%s	Certificate expired or unreadable: %s
+证书不包含域名 %s：%s	Certificate does not cover domain %s: %s
+证书与私钥不匹配：%s	Certificate and private key do not match: %s
+证书已更新 -> %s（到期：%s）	Certificate updated -> %s (expires: %s)
+%s 中没有证书	No certificate in %s
+用法：certctl.sh issue|renew|reissue|deploy|selfsign	Usage: certctl.sh issue|renew|reissue|deploy|selfsign
+另一个证书任务仍在运行	Another certificate job is still running
+手动证书校验正常：%s（到期：%s）	Manual certificate OK: %s (expires: %s)
+未找到 acme.sh，正在安装 v%s	acme.sh not found; installing v%s
+未找到 %s，自动安装失败（可执行 clashgate update 后重试）	%s not found and the automatic install failed (run clashgate update, then retry)
+已移除旧域名的证书记录：%s	Removed the certificate record of an old domain: %s
+续期失败；当前证书仍可用到 %s	Renewal failed; the current certificate stays valid until %s
+DNS API 模式缺少 Cloudflare API Token	DNS API mode is missing the Cloudflare API Token
+80 端口被占用，无法申请证书（端口模式需要临时使用 80 端口）：	Port 80 is in use, cannot request the certificate (port mode needs port 80 temporarily):
+按面板请求重新签发证书	Reissuing the certificate as requested by the panel
+已有证书来自其他 CA（%s），重新签发	The existing certificate is from another CA (%s); reissuing
+证书申请方式已更改（%s -> %s），重新签发	The certificate method changed (%s -> %s); reissuing
+向 %s 申请 %s 的证书（%s）	Requesting from %s a certificate for %s (%s)
+证书申请失败（请检查 Cloudflare API Token 是否具备 %s 的 DNS 编辑权限）	Certificate request failed (check that the Cloudflare API Token has DNS edit permission for %s)
+证书申请失败（请检查域名 A/AAAA 记录是否指向本机、云防火墙是否放行 TCP 80）	Certificate request failed (check that the domain A/AAAA records point to this server and the cloud firewall allows TCP 80)
+证书已签发但未能部署到 %s	The certificate was issued but could not be deployed to %s

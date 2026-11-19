@@ -1562,7 +1562,7 @@ def cert_failure_message(out: str, mode: str) -> str:
     """One plain sentence for a failed certificate (re)issue; the raw certctl output goes to 「详情」."""
     text = out or ""
     low = text.lower()
-    if ("80 端口被占用" in text or "address already in use" in low or "bind: permission denied" in low
+    if ("80 端口被占用" in text or "порт 80 занят" in low or "address already in use" in low or "bind: permission denied" in low
             or "couldn't bind" in low or "port 80" in low and ("occup" in low or "busy" in low or "in use" in low)):
         return "重新生成证书失败：80 端口被占用。端口模式需要临时使用 80 端口，请释放该端口，或改用 Cloudflare DNS。"
     if "socat" in low:

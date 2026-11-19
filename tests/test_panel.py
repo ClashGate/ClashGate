@@ -78,7 +78,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -854,6 +854,19 @@ class V121Test(unittest.TestCase):
         self.assertTrue(fe("OSError: [Errno 98] Address already in use")[0].startswith("端口已被其他程序占用"))
         self.assertEqual(P.raw_detail("\x1b[31mred\x1b[0m " + "x" * 2000)[-5:], "xxxxx")
         self.assertNotIn("\x1b", P.raw_detail("\x1b[31mred\x1b[0m"))
+
+    def test_cert_failure_message_any_certctl_language(self):
+        """certctl prints in the CLI language; the panel pins zh, but every language is still recognised."""
+        for line in ("certctl: 80 端口被占用，无法申请证书（端口模式需要临时使用 80 端口）：",
+                     "certctl: Port 80 is in use, cannot request the certificate (port mode needs port 80 temporarily):",
+                     "certctl: Порт 80 занят, запросить сертификат нельзя (режиму порта нужен порт 80 на время выпуска):"):
+            self.assertIn("80 端口被占用", P.cert_failure_message(line, "port"), line)
+        for line in ("certctl: 证书申请失败（请检查 Cloudflare API Token 是否具备 example.com 的 DNS 编辑权限）",
+                     "certctl: Certificate request failed (check that the Cloudflare API Token has DNS edit permission for example.com)",
+                     "certctl: Запрос сертификата не удался (проверьте, что у Cloudflare API Token есть право на изменение DNS для example.com)"):
+            self.assertIn("Token 无效", P.cert_failure_message(line, "dns"), line)
+        env = P.Panel.do_cert_action.__globals__["certctl_env"]()
+        self.assertEqual(env["CLASHGATE_LANG"], "zh")
 
     def test_friendly_sentences_translate(self):
         import i18n_en

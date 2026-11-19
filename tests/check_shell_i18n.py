@@ -54,7 +54,7 @@ def _norm(s):
 
 
 _pats = [re.compile("^" + ".*".join(re.escape(p) for p in k.split("%s")) + "$", re.S) for k in en if "%s" in k]
-SCRIPTS = [os.path.join(REPO, "scripts", "cmd", "clashgate.sh")] + sorted(
+SCRIPTS = [os.path.join(REPO, "scripts", "cmd", "clashgate.sh"), os.path.join(REPO, "scripts", "certctl.sh")] + sorted(
     os.path.join(LIB, f) for f in os.listdir(LIB) if f.endswith(".sh") and f != "i18n.sh")
 for path in SCRIPTS:
     rel = os.path.relpath(path, REPO)
@@ -65,7 +65,7 @@ for path in SCRIPTS:
         for m in re.finditer(r"\b(?:printf|ask)\s+'([^']*)'", line):
             if CJK.search(m.group(1)) and m.group(1) not in en:
                 problems.append(f"{rel}:{n}: not in i18n.en.tsv: {m.group(1)!r}")
-        for m in re.finditer(r'\b(?:warn|die|info|log|echo|ask)\s+"((?:[^"\\]|\\.)*)"', line):
+        for m in re.finditer(r'\b(?:warn|die|info|log|echo|ask|say|err)\s+"((?:[^"\\]|\\.)*)"', line):
             msg = _norm(m.group(1))
             if CJK.search(msg) and msg not in en and not any(p.match(msg) for p in _pats):
                 problems.append(f"{rel}:{n}: not in i18n.en.tsv: {msg!r}")
@@ -147,6 +147,40 @@ with tempfile.TemporaryDirectory() as td:
                          capture_output=True, text=True, timeout=60).stdout
     if "Использование" not in out:
         problems.append("LANG=ru_RU.UTF-8 should default to Russian")
+
+# certctl.sh (run by clashgate cert, the renew timer and the panel) speaks the same language; the panel pins zh.
+with tempfile.TemporaryDirectory() as td:
+    etc = os.path.join(td, "etc", "clashgate")
+    os.makedirs(etc)
+    cc = os.path.join(REPO, "scripts", "certctl.sh")
+    base = {k: v for k, v in os.environ.items() if k not in ("CLASHGATE_LANG", "LANG", "LC_ALL", "CS_LANG_FILE")}
+
+    def certctl(action, **env):
+        p = subprocess.run(["bash", cc, action], env=dict(base, CLASHGATE_ROOT=td, **env),
+                           capture_output=True, text=True, timeout=60)
+        return p.returncode, p.stdout + p.stderr
+
+    rc, out = certctl("renew", CLASHGATE_LANG="en")   # no env file yet
+    if rc == 0 or "Missing config file" not in out:
+        problems.append(f"certctl en without env file: {out!r}")
+    with open(os.path.join(etc, "clashgate.env"), "w") as f:
+        f.write('DOMAIN="example.com"\nCERT_MODE="port"\nCLASHGATE_LANG="ru"\n')
+    runs = {
+        "zh": ("用法", {"CLASHGATE_LANG": "zh"}),
+        "en": ("Usage: certctl.sh", {"CLASHGATE_LANG": "en"}),
+        "ru": ("Использование", {}),   # saved language (the renew timer has no CLASHGATE_LANG)
+    }
+    for lang, (want, env) in runs.items():
+        for action in ("bogus", "deploy"):
+            rc, out = certctl(action, **env)
+            if rc == 0 or not out.startswith("certctl: "):
+                problems.append(f"certctl {lang}/{action}: unexpected {rc} {out!r}")
+            if lang != "zh" and CJK.search(out):
+                problems.append(f"certctl {lang}/{action}: Chinese leaked: {out!r}")
+            if lang == "zh" and not CJK.search(out):
+                problems.append(f"certctl zh/{action}: not Chinese: {out!r}")
+            if action == "bogus" and want not in out:
+                problems.append(f"certctl {lang}: expected {want!r} in {out!r}")
 
 for p in problems:
     print(" -", p)

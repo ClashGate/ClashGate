@@ -110,6 +110,11 @@ def render_spa_html(title: str, boot_data: dict, fallback_html: str = "") -> str
     )
 
 
+def certctl_env() -> dict:
+    """certctl follows the CLI language; panel runs pin Chinese so cert_failure_message can parse the output."""
+    return dict(os.environ, CLASHGATE_LANG="zh")
+
+
 def cli_default_lang(env=None) -> str:
     """CLI language chosen at install / `clashgate lang`: the panel's language until a browser picks one."""
     v = ((env if env is not None else read_env()).get("CLASHGATE_LANG") or "").strip().lower()
@@ -1348,7 +1353,7 @@ class Panel(BaseHTTPRequestHandler):
     def do_cert_action(self, s):
         with LOCK:
             env = read_env()
-            rc, out = run([resolve_certctl_path(), "renew"], timeout=180)
+            rc, out = run([resolve_certctl_path(), "renew"], timeout=180, env=certctl_env())
             tok = env.get("CF_TOKEN", "")
             if tok:
                 out = out.replace(tok, "***")
@@ -1379,7 +1384,7 @@ class Panel(BaseHTTPRequestHandler):
                 write_env_var("CF_TOKEN", raw_token)
             else:
                 write_env_var("CERT_MODE", "port")
-            rc, out = run([resolve_certctl_path(), "reissue"], timeout=180)
+            rc, out = run([resolve_certctl_path(), "reissue"], timeout=180, env=certctl_env())
             if raw_token:
                 out = out.replace(raw_token, "***")
             if rc != 0:

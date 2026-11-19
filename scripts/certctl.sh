@@ -29,10 +29,17 @@ TEMP_CN="clashgate temporary certificate"
 CA_LE=https://acme-v02.api.letsencrypt.org/directory
 CA_LE_TEST=https://acme-staging-v02.api.letsencrypt.org/directory
 
-[[ -r $ENV_FILE ]] || { echo "certctl: 缺少 $ENV_FILE" >&2; exit 1; }
+# 输出语言与 clashgate 命令行一致（CLASHGATE_LANG > 已保存的语言 > LANG）；面板调用时固定为中文，便于解析失败原因
+CS_LANG_FILE=${CS_LANG_FILE:-$ENV_FILE}
+# shellcheck source=lib/i18n.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/i18n.sh"
+say() { _tr_msg "$*"; builtin echo "certctl: $REPLY"; }
+err() { _tr_msg "$*"; builtin echo "certctl: $REPLY" >&2; }
+
+[[ -r $ENV_FILE ]] || { err "缺少配置文件 $ENV_FILE"; exit 1; }
 # shellcheck disable=SC1090
 . "$ENV_FILE"
-[[ -n "${DOMAIN:-}" ]] || { echo "certctl: 未设置 DOMAIN" >&2; exit 1; }
+[[ -n "${DOMAIN:-}" ]] || { err "未设置 DOMAIN"; exit 1; }
 if [[ ${REPO_NAME:-ClashGate} == ClashGateBeat ]]; then
   TLS=${TLS:-staging}
 else
@@ -47,8 +54,6 @@ if [[ $ACTION == reissue ]]; then
   FORCE_ISSUE=1
 fi
 
-say() { echo "certctl: $*"; }
-err() { echo "certctl: $*" >&2; }
 trap 'err "第 $LINENO 行执行失败：$BASH_COMMAND"' ERR
 
 # 只有 Mihomo 配置里引用了证书才需要重启；面板按文件变化自动换证书，不需要重启。
@@ -80,7 +85,8 @@ deploy() { # deploy <crt> <key> -> 有变化返回 0，未变化 / 无效返回 
   install -m 640 -o root -g mihomo "$key" "$DEST/privkey.pem.new"
   mv -f "$DEST/privkey.pem.new" "$DEST/privkey.pem"
   mv -f "$DEST/fullchain.pem.new" "$DEST/fullchain.pem"
-  say "证书已更新 -> $DEST（到期：$(openssl x509 -noout -enddate -in "$DEST/fullchain.pem" | cut -d= -f2)）"
+  local end; end=$(openssl x509 -noout -enddate -in "$DEST/fullchain.pem" | cut -d= -f2)
+  say "证书已更新 -> $DEST（到期：$end）"
 }
 
 deploy_live() { # acme.sh 输出 -> /etc/clashgate/certs；重复调用无副作用
@@ -123,7 +129,8 @@ if [[ $CERT_MODE == manual ]]; then
   valid_pair "$DEST/fullchain.pem" "$DEST/privkey.pem" || exit 1
   chown root:mihomo "$DEST/fullchain.pem" "$DEST/privkey.pem" 2>/dev/null || true
   chmod 640 "$DEST/fullchain.pem" "$DEST/privkey.pem"
-  say "手动证书校验正常：$DEST（到期：$(openssl x509 -noout -enddate -in "$DEST/fullchain.pem" | cut -d= -f2)）"
+  end=$(openssl x509 -noout -enddate -in "$DEST/fullchain.pem" | cut -d= -f2)
+  say "手动证书校验正常：$DEST（到期：$end）"
   exit 0
 fi
 
@@ -202,8 +209,8 @@ else
   # 端口模式：standalone 需要临时占用 80 端口
   busy=$(ss -Hltnp 'sport = :80' 2>/dev/null || true)
   if [[ -n $busy ]]; then
-    err "80 端口被占用，无法申请证书（端口模式需要临时使用 80 端口）：
-$busy"
+    err "80 端口被占用，无法申请证书（端口模式需要临时使用 80 端口）："
+    builtin echo "$busy" >&2
     exit 1
   fi
   mode_args=(--standalone)
