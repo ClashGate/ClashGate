@@ -138,22 +138,14 @@ fi
 
 ACME=$ACME_HOME/acme.sh
 # 手动证书模式安装的机器没有 acme.sh：从面板切换到自动证书时按固定版本补装（同 lib/cert.sh install_acme）
+# shellcheck source=lib/acme.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/acme.sh"
 ensure_acme() {
-  local ver tmp opts=()
+  local ver
   ver=$(sed -n 's/^ACMESH_VERSION=\([0-9.]*\).*/\1/p' "$CS_ROOT/scripts/lib/common.sh" 2>/dev/null | head -n1)
   ver=${ver:-3.1.6}
   say "未找到 acme.sh，正在安装 v$ver"
-  tmp=$(mktemp -d)
-  if ! curl -fsSL --retry 3 "https://github.com/acmesh-official/acme.sh/archive/refs/tags/$ver.tar.gz" \
-      | tar -xz -C "$tmp" --strip-components=1; then
-    rm -rf "$tmp"; return 1
-  fi
-  [[ -n ${EMAIL:-} ]] && opts+=(--accountemail "$EMAIL")
-  install -d -m 700 "$ACME_HOME"
-  ( cd "$tmp" && ./acme.sh --install --home "$ACME_HOME" --no-cron --no-profile "${opts[@]}" >/dev/null 2>&1 ) || { rm -rf "$tmp"; return 1; }
-  rm -rf "$tmp"
-  chmod 700 "$ACME_HOME"
-  [[ -x $ACME ]]
+  acme_fetch_install "$ACME_HOME" "$ver" "${EMAIL:-}"
 }
 [[ -x $ACME ]] || ensure_acme || { err "未找到 $ACME，自动安装失败（可执行 clashgate update 后重试）"; exit 1; }
 if [[ $CERT_MODE == dns && -n ${CF_TOKEN:-} ]]; then

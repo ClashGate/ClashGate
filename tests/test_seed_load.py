@@ -23,7 +23,7 @@ def core_sh_seed_snippet():
     with open(CORE_SH, encoding="utf-8") as f:
         text = f.read()
     m = re.search(
-        r"python3 -c\s+\\\s*\n\s*'([^']+)'\s+\\",
+        r"(?:python3|\"\$\(py_bin \|\| echo python3\)\") -c\s+\\\s*\n\s*'([^']+)'\s+\\",
         text,
     )
     if not m:

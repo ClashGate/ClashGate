@@ -137,15 +137,8 @@ install_acme() { # 证书申请工具 acme.sh（固定版本，装到 /etc/clash
   if [[ -x $ACME_HOME/acme.sh ]] && "$ACME_HOME/acme.sh" --home "$ACME_HOME" --version 2>/dev/null | grep -q "v$ACMESH_VERSION"; then
     info "已存在 acme.sh v$ACMESH_VERSION"; return 0
   fi
-  local url tmp opts=()
-  url="https://github.com/acmesh-official/acme.sh/archive/refs/tags/$ACMESH_VERSION.tar.gz"
-  tmp=$(mktemp -d)
-  curl -fsSL --retry 3 "$url" | tar -xz -C "$tmp" --strip-components=1 || { rm -rf "$tmp"; die "下载 acme.sh 失败：$url"; }
-  [[ -n $EMAIL ]] && opts+=(--accountemail "$EMAIL")
-  ( cd "$tmp" && ./acme.sh --install --home "$ACME_HOME" --no-cron --no-profile "${opts[@]}" >/dev/null 2>&1 ) \
-    || { rm -rf "$tmp"; die "acme.sh 安装失败"; }
-  rm -rf "$tmp"
-  chmod 700 "$ACME_HOME"
+  acme_fetch_install "$ACME_HOME" "$ACMESH_VERSION" "${EMAIL:-}" \
+    || die "acme.sh v$ACMESH_VERSION 下载或安装失败（请确认服务器可以访问 GitHub）"
   info "已安装 acme.sh v$ACMESH_VERSION -> $ACME_HOME（续期由 clashgate-cert.timer 负责）"
 }
 

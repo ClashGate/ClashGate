@@ -5,11 +5,11 @@ set -Eeuo pipefail
 
 ORIG_ARGS=("$@")
 CS_HOME=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)
-for _lib in common core cert panel; do
+for _lib in common acme core cert panel; do
   # shellcheck source=/dev/null
   . "$CS_HOME/scripts/lib/$_lib.sh"
 done
-trap 'die "第 $LINENO 行执行失败：$BASH_COMMAND"' ERR
+trap 'die "执行中断：脚本第 $LINENO 行的命令没有成功（$BASH_COMMAND）。多数是网络或软件源暂时不可用，可以稍后重新运行；仍然失败时请带上以上输出到 GitHub Issues 反馈"' ERR
 if [[ -n ${CS_BOOTSTRAP_TMP:-} ]]; then trap 'rm -rf "$CS_BOOTSTRAP_TMP"' EXIT; fi
 
 usage() {
@@ -135,7 +135,7 @@ interactive_setup() {
 check_existing() {
   [[ -f $STATE ]] || return 0
   if has_tty; then
-    [[ $(ask '检测到已安装 ClashGate，是否卸载后重新安装？节点和密钥都会重新生成 [y/N]：' n) == [yY]* ]] \
+    [[ $(ask '检测到已安装 ClashGate，是否卸载后重新安装？节点和密钥都会重新生成（已加入集群时会先退出集群） [y/N]：' n) == [yY]* ]] \
       || { printf '已取消。查看现有节点：clashgate info\n'; exit 0; }
   else
     die "已安装（存在 $STATE）。查看节点：clashgate info；如需重装请在终端中运行 clashgate install"
@@ -200,7 +200,7 @@ print_summary() {
     printf '\n\033[1m客户端配置目录\033[0m：%s\n' "$CLIENT_DIR"
     printf '  - mihomo-client.yaml（完整 mihomo 客户端配置）\n  - proxies.yaml（仅节点片段）\n'
   fi
-  printf '\n管理：运行 \033[1mclashgate\033[0m 打开中文管理菜单（clashgate help 查看全部子命令）\n'
+  printf '\n管理：运行 \033[1mclashgate\033[0m 打开管理菜单（clashgate help 查看全部子命令）\n'
   if ((${#WARNINGS[@]})); then
     printf '\n\033[1;33m需要注意：\033[0m\n'; printf '  - %s\n' "${WARNINGS[@]}"
   fi
@@ -221,6 +221,7 @@ do_install() {
     TOTAL=$([[ ${CERT_MODE:-port} == manual ]] && echo 10 || echo 11)
   fi
   install_deps
+  if [[ $MODE == auto-cert ]]; then ensure_python; fi
   [[ $MODE == auto-cert ]] && preflight_cert
   detect_ip
   if [[ $MODE == auto-cert ]]; then check_dns; fi   # 尽早检查，解析不对可在装任何东西前退出
@@ -249,6 +250,7 @@ do_update() {
   local what=${UPDATE_WHAT:-all}
   STEP=0; TOTAL=$([[ $what == all ]] && echo 4 || echo 3)
   install_deps
+  if [[ $MODE == auto-cert ]]; then ensure_python; fi
   [[ $what == self ]] || install_core
   [[ $what == core ]] || update_self
   log "重启服务"
@@ -270,7 +272,7 @@ update_self() {
   rm -rf "$tmp"
   install -m 644 "$LIB_DIR/scripts/init/mihomo.service" "$UNIT"
   if [[ $MODE == auto-cert ]]; then
-    install -m 644 "$LIB_DIR/scripts/init/clashgate.service" /etc/systemd/system/
+    install_panel_unit
     if [[ ${CERT_MODE:-port} != manual ]]; then
       install -m 644 "$LIB_DIR/scripts/init/clashgate-cert.service" \
         "$LIB_DIR/scripts/init/clashgate-cert.timer" /etc/systemd/system/
@@ -406,7 +408,7 @@ do_passwd() {
     elif ((${#p1} < 8)); then printf '密码太短，至少 8 位\n'
     else break; fi
   done
-  PANEL_HASH=$(printf '%s\n' "$p1" | python3 "$LIB_DIR/panel/panel.py" hash-password)
+  PANEL_HASH=$(printf '%s\n' "$p1" | "$(py_bin || echo python3)" "$LIB_DIR/panel/panel.py" hash-password)
   SUB_TOKEN=$(panel_cfg_get sub_token)
   write_panel_cfg
   rm -f "$PANEL_SESSIONS"   # sign out every browser that used the old password
@@ -459,7 +461,7 @@ do_menu() {
     items+=(sub reset-sub passwd reset-password reset-secret cert)
     labels+=("查看订阅链接" "更换订阅链接" "修改面板密码（自定义）" "重置面板密码（随机）" "重置 Zashboard 密钥（随机）" "立即申请 / 续期 / 校验证书")
   fi
-  items+=(restart log update uninstall); labels+=("重启 Mihomo" "查看日志" "更新（内核 + 脚本）" "卸载")
+  items+=(restart log update uninstall); labels+=("重启内核" "查看日志" "更新内核 + 脚本与面板" "卸载")
   while :; do
     printf '\n\033[1mClashGate v%s 管理菜单\033[0m（%s' "$CS_VERSION" "$([[ $MODE == auto-cert ]] && echo "$(mode_label) · $DOMAIN" || echo '无证书模式')"
     printf '）  Mihomo：%s\n' "$(svc_state mihomo)"
@@ -478,11 +480,36 @@ do_menu() {
   done
 }
 
+cluster_link_count() { jq -r '(.links // []) | length' "$CS_ROOT/cluster.json" 2>/dev/null || echo 0; }
+
+# 卸载 / 重装前先退出集群，让其他成员删掉指向这台服务器的连接；失败只提示，不影响卸载。
+leave_cluster() {
+  local n out missed py
+  n=$(cluster_link_count); [[ $n =~ ^[0-9]+$ ]] && ((n > 0)) || return 0
+  py=$(py_bin) || { warn "没能退出集群（找不到 Python 3.9+），请到其他成员的面板里手动删除这台服务器"; return 0; }
+  info "正在退出集群（通知 $n 个成员）"
+  if ! out=$(PYTHONPATH="$LIB_DIR/panel${PYTHONPATH:+:$PYTHONPATH}" timeout 180 "$py" "$LIB_DIR/panel/panel.py" cluster-leave 2>/dev/null); then
+    warn "没能退出集群，请到其他成员的面板里手动删除这台服务器"
+    return 0
+  fi
+  missed=${out#*$'\t'}
+  if [[ -n $missed ]]; then warn "以下集群成员没收到退出通知，请到它们的面板里手动删除这台服务器：${missed//,/、}"; fi
+  return 0
+}
+
 do_uninstall() {
   load_env
+  local in_cluster=0
+  [[ $(cluster_link_count) =~ ^[1-9] ]] && in_cluster=1
   if [[ ${CS_IN_REINSTALL:-0} != 1 ]] && has_tty; then
-    [[ $(ask '确定卸载 ClashGate？所有节点、证书和配置都会被删除 [y/N]：' n) == [yY]* ]] || { echo "已取消"; return 0; }
+    if ((in_cluster)); then
+      [[ $(ask '确定卸载 ClashGate？会先退出集群，然后删除所有节点、证书和配置 [y/N]：' n) == [yY]* ]] || { echo "已取消"; return 0; }
+    else
+      [[ $(ask '确定卸载 ClashGate？所有节点、证书和配置都会被删除 [y/N]：' n) == [yY]* ]] || { echo "已取消"; return 0; }
+    fi
   fi
+  ((in_cluster)) && leave_cluster
+  close_firewall
   systemctl disable --now clashgate clashgate-cert.timer clashgate-cert.service 2>/dev/null || true
   rm -f /etc/systemd/system/clashgate.service /etc/systemd/system/clashgate-cert.{service,timer}
   systemctl disable --now mihomo 2>/dev/null || true
