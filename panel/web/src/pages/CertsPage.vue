@@ -1,6 +1,7 @@
 <script setup>
 import { t } from '../i18n.js'
 import { usePanel } from '../composables/usePanel.js'
+import CgIcon from '../CgIcon.vue'
 
 const {
   boot,
@@ -188,6 +189,7 @@ const {
   masqueYamlNamed,
   addMasqueOutbound,
   retryMasque,
+  confirmCertRenew,
 } = usePanel()
 </script>
 
@@ -231,6 +233,17 @@ const {
                   }}
                 </span>
               </div>
+              <button
+                v-if="state.mode !== 'no-cert' && certModeValue !== 'manual'"
+                id="cert-renew"
+                type="button"
+                :disabled="!!busyKey || certRegenLock"
+                @click="confirmCertRenew"
+                class="cg-tool shrink-0 self-start sm:self-auto px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border-slate-200 text-slate-800"
+              >
+                <CgIcon name="refresh" :size="14" />
+                <span>{{ busyKey === '/action/cert' ? t('正在申请证书…') : t('立即申请 / 续期') }}</span>
+              </button>
             </div>
 
             <!-- 无证书空态说明 -->
@@ -246,7 +259,7 @@ const {
             <div
               v-else-if="certModeValue === 'manual'"
               id="cert-manual-notice"
-              class="rounded-xl bg-[#f1f6fe] border border-emerald-200/80 px-4 py-3 text-xs text-emerald-900 leading-relaxed"
+              class="rounded-xl bg-emerald-50 border border-emerald-200/80 px-4 py-3 text-xs text-emerald-900 leading-relaxed"
             >
               {{ t('当前为手动证书模式，证书不会自动续期。换新证书时，把新文件放进 /etc/clashgate/certs/，再在下方点「重新校验证书」。') }}
             </div>
@@ -307,7 +320,7 @@ const {
           </section>
 
           <!-- 切换证书模式 & 右侧说明（Cloudflare API Token / 手动证书放置方法） -->
-          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <!-- Left: 切换 Cloudflare DNS 模式表单 -->
             <section id="cert-dns-form-card" class="lg:col-span-6 cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
               <div>
@@ -340,27 +353,38 @@ const {
                   <label for="cf-token" class="block text-xs font-semibold text-slate-700 mb-1.5">
                     {{ t('Cloudflare API Token') }}
                   </label>
-                  <input
-                    id="cf-token"
-                    ref="cfTokenEl"
-                    v-model="certModeForm.cf_token"
-                    name="cf_token"
-                    :type="cfTokenRevealed ? 'text' : 'password'"
-                    autocomplete="off"
-                    spellcheck="false"
-                    dir="ltr"
-                    :placeholder="t('请输入或粘贴具备 Zone.DNS 编辑权限的 Cloudflare API Token')"
-                    @click="revealCfToken"
-                    @blur="cfTokenRevealed = false"
-                    class="cg-input w-full h-10 px-3.5 rounded-xl border border-emerald-100 bg-[#f5f8fd] hover:bg-emerald-50/50 focus:bg-white font-mono text-xs transition"
-                    :class="cfTokenRevealed ? 'text-slate-800' : 'text-slate-600 tracking-widest'"
-                  />
+                  <div id="cf-token-wrap" class="relative">
+                    <input
+                      id="cf-token"
+                      ref="cfTokenEl"
+                      v-model="certModeForm.cf_token"
+                      name="cf_token"
+                      :type="cfTokenRevealed ? 'text' : 'password'"
+                      autocomplete="off"
+                      spellcheck="false"
+                      dir="ltr"
+                      :placeholder="t('请输入或粘贴具备 Zone.DNS 编辑权限的 Cloudflare API Token')"
+                      class="cg-input w-full h-10 ps-3.5 pe-10 rounded-xl border border-emerald-100 bg-emerald-50/60 hover:bg-emerald-50 focus:bg-white font-mono text-xs transition"
+                      :class="cfTokenRevealed ? 'text-slate-800' : 'text-slate-600 tracking-widest'"
+                    />
+                    <button
+                      id="cf-token-eye"
+                      type="button"
+                      class="absolute inset-y-0 end-0 w-10 flex items-center justify-center rounded-e-xl text-slate-500 hover:text-slate-800 cursor-pointer"
+                      :aria-label="cfTokenRevealed ? t('隐藏 Token') : t('显示 Token')"
+                      :title="cfTokenRevealed ? t('隐藏 Token') : t('显示 Token')"
+                      :aria-pressed="cfTokenRevealed ? 'true' : 'false'"
+                      @click="cfTokenRevealed = !cfTokenRevealed"
+                    >
+                      <CgIcon :name="cfTokenRevealed ? 'eyeOff' : 'eye'" :size="16" />
+                    </button>
+                  </div>
                 </div>
 
                 <div
                   v-else-if="certModeForm.mode === 'manual'"
                   id="cert-manual-hint"
-                  class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed"
+                  class="rounded-xl bg-emerald-50 border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed"
                 >
                   {{ t('先把证书和私钥放进 /etc/clashgate/certs/：证书 fullchain.pem（或 *.crt），私钥 privkey.pem（或 *.key）。放好后点下面的按钮。') }}
                 </div>
@@ -411,8 +435,30 @@ const {
                 </li>
               </ol>
 
-              <div class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
+              <div class="rounded-xl bg-emerald-50 border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
                 {{ t('手动证书不会自动续期。证书到期前请换上新文件，再点一次「重新校验证书」。') }}
+              </div>
+            </section>
+
+            <!-- Right: 端口模式要求（选择端口模式时显示） -->
+            <section
+              v-else-if="certModeForm.mode === 'port'"
+              id="cert-port-guide-card"
+              class="lg:col-span-6 cg-surface rounded-2xl p-5 sm:p-6 space-y-3.5"
+            >
+              <div class="flex items-center gap-2.5">
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('端口模式需要准备什么') }}</h2>
+              </div>
+              <p class="text-xs text-slate-500">
+                {{ t("端口模式由 Let's Encrypt 通过 80 端口验证域名，申请前请确认：") }}
+              </p>
+              <ol class="space-y-2.5 text-xs text-slate-700 leading-relaxed list-decimal list-inside">
+                <li>{{ t('域名 {domain} 的 A 记录指向本服务器的公网 IP；如果有 AAAA 记录，也要指向本机，否则请删掉。', { domain: certDomainDisplay }) }}</li>
+                <li>{{ t('使用 Cloudflare 时，把这条记录设为灰云（DNS only），不要开启橙云代理。') }}</li>
+                <li>{{ t('在云服务商的防火墙 / 安全组放行 TCP 80，并确保本机 80 端口没有被其他程序占用。') }}</li>
+              </ol>
+              <div class="rounded-xl bg-emerald-50 border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
+                {{ t('证书到期前 30 天会自动续期，续期时同样需要 80 端口。不方便开放 80 端口时，可以改用 Cloudflare DNS。') }}
               </div>
             </section>
 
@@ -461,8 +507,8 @@ const {
                 </li>
               </ol>
 
-              <div class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
-                {{ t('DNS 模式不需要占用 80 端口，也不要求灰云（可开启橙云代理）；Token 仅保存在本机') }}
+              <div class="rounded-xl bg-emerald-50 border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
+                {{ t('DNS 模式申请证书不需要 80 端口，也不受 Cloudflare 橙云影响；但管理面板和订阅链接用的是随机端口，这条域名记录仍要设为灰云（DNS only）才能访问。Token 仅保存在本机') }}
                 <code class="font-mono font-semibold">/etc/clashgate/clashgate.env</code>。
               </div>
             </section>

@@ -165,7 +165,7 @@ def vless_mlkem768_pair() -> tuple:
     dec = re.search(r'\[Server\]\s*decryption:\s*"([^"]+)"', out)
     enc = re.search(r'\[Client\]\s*encryption:\s*"([^"]+)"', out)
     if rc != 0 or not dec or not enc or not dec.group(1).startswith("mlkem768x25519plus."):
-        raise RuntimeError("当前内核不支持 VLESS 后量子加密（vless-mlkem768），请先点顶部「更新内核」")
+        raise RuntimeError("当前内核不支持 VLESS 后量子加密（vless-mlkem768），请先到「设置」页点「更新内核」")
     return dec.group(1), enc.group(1)
 
 

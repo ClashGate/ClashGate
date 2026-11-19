@@ -2,6 +2,7 @@
 import { t } from '../i18n.js'
 import { theme, setTheme } from '../theme.js'
 import { usePanel } from '../composables/usePanel.js'
+import CgIcon from '../CgIcon.vue'
 
 const {
   boot,
@@ -189,12 +190,13 @@ const {
   masqueYamlNamed,
   addMasqueOutbound,
   retryMasque,
+  confirmUpdateCore,
 } = usePanel()
 </script>
 
 <template>
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-          <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4">
+<div id="settings-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
             <div class="flex items-center justify-between gap-4">
               <div>
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('自定义服务端') }}</h2>
@@ -216,7 +218,7 @@ const {
             </div>
           </section>
 
-          <section class="cg-surface rounded-2xl p-5 sm:p-6">
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
             <div class="flex items-center justify-between gap-4">
               <div>
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('自动更新') }}</h2>
@@ -238,7 +240,7 @@ const {
             </div>
           </section>
 
-          <section class="cg-surface rounded-2xl p-5 sm:p-6">
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
             <div class="flex items-center justify-between gap-4">
               <div class="min-w-0">
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('更新通道') }}</h2>
@@ -250,14 +252,14 @@ const {
                 <button
                   type="button"
                   class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
-                  :class="state.update_channel === 'stable' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  :class="state.update_channel === 'stable' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
                   :disabled="busyKey === '/action/settings'"
                   @click="setUpdateChannel('stable')"
                 >{{ t('正式') }}</button>
                 <button
                   type="button"
                   class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
-                  :class="state.update_channel === 'test' ? 'bg-amber-500 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  :class="state.update_channel === 'test' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
                   :disabled="busyKey === '/action/settings'"
                   @click="setUpdateChannel('test')"
                 >{{ t('测试') }}</button>
@@ -265,18 +267,47 @@ const {
             </div>
           </section>
 
-          <section class="cg-surface rounded-2xl">
+          <section id="settings-core-card" class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
+            <div class="flex items-center justify-between gap-4">
+              <div class="min-w-0">
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('内核版本') }}</h2>
+                <p class="text-xs mt-1 leading-relaxed" :class="coreHasUpdate ? 'text-emerald-700' : 'text-slate-500'">
+                  {{ t('Mihomo 内核') }} <bdi dir="ltr">{{ versionLabel(state.mihomo_version) || '—' }}</bdi>
+                  · {{ coreHasUpdate ? updateHint(coreUpdate.latest) : t('更新时连接会短暂中断。') }}
+                </p>
+              </div>
+              <button
+                id="settings-update-core"
+                type="button"
+                :disabled="busyKey === '/action/update-core'"
+                @click="confirmUpdateCore"
+                class="cg-tool shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border-slate-200 text-slate-800"
+                :class="{ 'is-update': coreHasUpdate }"
+              >
+                <CgIcon name="refresh" :size="14" />
+                <span>{{ busyKey === '/action/update-core' ? t('更新内核中…') : t('更新内核') }}</span>
+              </button>
+            </div>
+          </section>
+
+          <section id="settings-password-card" class="cg-surface rounded-2xl flex">
             <button
               type="button"
-              class="w-full p-5 sm:p-6 text-start rounded-2xl hover:bg-[#f7f9fc] transition cursor-pointer"
+              class="w-full p-5 sm:p-6 text-start rounded-2xl hover:bg-[#f7f9fc] transition cursor-pointer flex items-center justify-between gap-4"
               @click="openPasswordModal"
             >
-              <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('修改面板密码') }}</h2>
-              <p class="text-xs text-slate-500 mt-1 leading-relaxed">{{ t('更新当前登录密码。') }}</p>
+              <span class="min-w-0 block">
+                <span class="block text-base font-bold text-slate-900 tracking-tight">{{ t('修改面板密码') }}</span>
+                <span class="block text-xs text-slate-500 mt-1 leading-relaxed">{{ t('更新当前登录密码。') }}</span>
+              </span>
+              <span class="cg-tool shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border bg-white border-slate-200 text-slate-800 inline-flex items-center gap-1">
+                <span>{{ t('修改') }}</span>
+                <CgIcon name="chevron" :size="14" class="rtl:rotate-180" />
+              </span>
             </button>
           </section>
 
-          <section class="cg-surface rounded-2xl p-5 sm:p-6">
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
             <div class="flex items-center justify-between gap-4">
               <div class="min-w-0">
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('皮肤') }}</h2>
@@ -288,7 +319,7 @@ const {
                   role="radio"
                   :aria-checked="theme === 'default' ? 'true' : 'false'"
                   class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
-                  :class="theme === 'default' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  :class="theme === 'default' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
                   @click="setTheme('default')"
                 >{{ t('默认') }}</button>
                 <button

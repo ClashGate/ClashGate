@@ -79,6 +79,8 @@ const {
   langMenuStyle,
   toast,
   toastTimer,
+  toggleToastDetail,
+  closeToast,
   toggleLangMenu,
   pickLang,
   showToast,
@@ -295,22 +297,46 @@ const {
     >
       <div
         v-if="toast.show"
+        id="cg-toast"
         role="status"
         aria-live="polite"
-        class="fixed top-18 inset-x-4 sm:inset-x-auto sm:end-6 z-[60] sm:max-w-md rounded-2xl px-4 py-3 shadow-[0_10px_30px_-8px_rgba(15,23,42,0.14)] border flex items-center gap-2.5 text-sm font-medium bg-white/95 backdrop-blur-md"
+        class="fixed top-18 inset-x-4 sm:inset-x-auto sm:end-6 z-[60] sm:max-w-md rounded-2xl px-4 py-3 shadow-[0_10px_30px_-8px_rgba(15,23,42,0.14)] border text-sm font-medium bg-white/95 backdrop-blur-md"
         :class="
           toast.ok
             ? 'border-emerald-200/90 text-emerald-950'
             : 'border-rose-200/90 text-rose-950'
         "
       >
-        <span
-          class="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-          :class="toast.ok ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'"
-        >
-          {{ toast.ok ? '✓' : '!' }}
-        </span>
-        <span class="cg-wrap leading-snug">{{ toast.msg }}</span>
+        <div class="flex items-center gap-2.5">
+          <span
+            class="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+            :class="toast.ok ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'"
+          >
+            {{ toast.ok ? '✓' : '!' }}
+          </span>
+          <span class="cg-wrap leading-snug flex-1 min-w-0">{{ toast.msg }}</span>
+          <button
+            v-if="toast.detail"
+            id="cg-toast-detail-toggle"
+            type="button"
+            class="shrink-0 px-2 py-0.5 rounded-md text-xs font-semibold border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 cursor-pointer"
+            :aria-expanded="toast.open ? 'true' : 'false'"
+            @click="toggleToastDetail"
+          >{{ toast.open ? t('收起') : t('详情') }}</button>
+          <button
+            v-if="toast.detail"
+            type="button"
+            class="shrink-0 w-6 h-6 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+            :aria-label="t('关闭')"
+            @click="closeToast"
+          >✕</button>
+        </div>
+        <pre
+          v-if="toast.detail && toast.open"
+          id="cg-toast-detail"
+          dir="ltr"
+          class="mt-2.5 max-h-48 overflow-auto rounded-lg bg-slate-50 border border-slate-200/80 px-3 py-2 text-[11px] leading-relaxed text-slate-700 font-mono whitespace-pre-wrap break-all text-start"
+        >{{ toast.detail }}</pre>
       </div>
     </transition>
 
@@ -581,18 +607,6 @@ const {
         </div>
 
         <div class="cg-actions justify-end">
-          <button
-            type="button"
-            :disabled="busyKey === '/action/update-core'"
-            @click="updateCoreDirect"
-            class="cg-tool px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border-slate-200 text-slate-800"
-            :class="{ 'is-update': coreHasUpdate }"
-            :title="coreHasUpdate ? updateHint(coreUpdate.latest) : undefined"
-          >
-            <CgIcon name="refresh" :size="14" />
-            <span>{{ busyKey === '/action/update-core' ? t('更新内核中…') : t('更新内核') }}</span>
-            <CgIcon v-if="coreHasUpdate" name="up" :size="13" />
-          </button>
           <button
             type="button"
             :disabled="busyKey === '/action/reload'"

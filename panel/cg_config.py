@@ -1008,7 +1008,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
 
     elif kind == "snell":
         if not mihomo_supports_snell_v6():
-            raise ValueError(f"Snell V6 需要 Mihomo 内核 v{SNELL_V6_MIN_CORE} 或更高版本，请先点击顶部「更新内核」")
+            raise ValueError(f"Snell V6 需要 Mihomo 内核 v{SNELL_V6_MIN_CORE} 或更高版本，请先到「设置」页点「更新内核」")
         # Snell v6 (Mihomo v1.19.34+): PSK-derived traffic shaping replaces simple-obfs,
         # so no obfs-opts; mode omitted = "default" on both sides.
         psk = new_snell_psk()
@@ -1559,6 +1559,7 @@ def save_panel_settings(updates: dict):
 
 
 def cert_failure_message(out: str, mode: str) -> str:
+    """One plain sentence for a failed certificate (re)issue; the raw certctl output goes to 「详情」."""
     text = out or ""
     low = text.lower()
     if ("80 端口被占用" in text or "address already in use" in low or "bind: permission denied" in low
@@ -1572,13 +1573,79 @@ def cert_failure_message(out: str, mode: str) -> str:
         or "dns 编辑权限" in text or "API Token" in text
     )
     if token_bad:
-        tail = " | ".join(line.strip() for line in text.splitlines() if line.strip())[-360:]
-        extra = f"（{tail}）" if tail else ""
-        return "重新生成证书失败：Cloudflare API Token 无效，或没有该域名的 DNS 编辑权限。" + extra
-    tail = " | ".join(line.strip() for line in text.splitlines() if line.strip())[-420:]
-    if not tail:
-        tail = "请检查域名解析、Token 权限或 80 端口是否被占用"
-    return f"重新生成证书失败：{tail}"
+        return "重新生成证书失败：Cloudflare API Token 无效，或没有该域名的 DNS 编辑权限。"
+    if mode == "dns":
+        return "重新生成证书失败：请检查 Cloudflare API Token 是否有该域名的 DNS 编辑权限，稍后再试。"
+    return "重新生成证书失败：请确认域名已解析到本机（Cloudflare 需设为灰云）、云防火墙已放行 TCP 80，稍后再试。"
+
+
+def raw_detail(out: str, limit: int = 1200) -> str:
+    """Raw command output for the collapsed 「详情」 block: ANSI codes stripped, tail kept."""
+    text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", out or "").strip()
+    return text[-limit:]
+
+
+# Plain one-sentence reasons for common raw errors (the raw text is shown under 「详情」).
+FRIENDLY_REASONS = (
+    (re.compile(r"timed out|timeout|time-out", re.I),
+     "连接超时：对方没有及时响应。请检查地址、端口和云防火墙后再试。"),
+    (re.compile(r"connection refused|errno 111|econnrefused", re.I),
+     "连接被拒绝：目标端口上没有程序在监听，或被防火墙拦住了。"),
+    (re.compile(r"address already in use|errno 98|eaddrinuse", re.I),
+     "端口已被其他程序占用：换一个端口，或先停掉占用它的程序。"),
+    (re.compile(r"\[ssl|sslerror|ssl:|certificate verify failed|certificate_verify_failed|wrong version number|tlsv1 alert|handshake", re.I),
+     "HTTPS 加密连接失败：请确认地址填写正确，对方使用的是有效的 HTTPS 证书。"),
+    (re.compile(r"name or service not known|getaddrinfo|nodename nor servname|temporary failure in name resolution|no address associated", re.I),
+     "找不到这个域名：请检查地址是否填写正确、域名解析是否已生效。"),
+    (re.compile(r"network is unreachable|no route to host|errno 101|errno 113", re.I),
+     "网络不通：服务器无法连到对方，请检查地址和网络。"),
+)
+FRIENDLY_PREFIXES = (
+    (("配置校验未通过", "配置校验失败"), "新配置没有通过内核校验，已保留原来的配置。请检查最近的改动。"),
+    (("证书申请 / 续期失败：",), "证书申请 / 续期失败：请确认域名已解析到本机、端口模式下云防火墙已放行 TCP 80，DNS 模式下 Token 有效。"),
+    (("应用配置失败：", "重启失败：", "重载 Mihomo 失败："), "内核没能加载新配置，已恢复原来的配置。"),
+    (("集群操作失败：",), "集群操作出错了，请稍后再试。"),
+)
+
+
+def _looks_raw(rest: str) -> bool:
+    """True when the text after a known prefix is program output (or nothing) rather than plain Chinese."""
+    rest = rest.strip()
+    if not rest or "\n" in rest:
+        return True
+    cjk = len(re.findall(r"[\u4e00-\u9fff]", rest))
+    letters = len(re.findall(r"[A-Za-z]", rest))
+    return cjk * 3 < letters
+
+
+def friendly_error(msg: str):
+    """Split a failure message into (plain sentence, raw detail).
+
+    Messages that already read as plain words are returned unchanged with an empty detail; only
+    messages carrying raw program output (English error text, `mihomo -t` output, certctl tails)
+    are replaced by one plain sentence, with the original kept as the detail."""
+    text = str(msg or "")
+    for prefixes, plain in FRIENDLY_PREFIXES:
+        if text.startswith(prefixes):
+            rest = text[max(len(p) for p in prefixes if text.startswith(p)):]
+            if not _looks_raw(rest):
+                return text, ""
+            for rx, reason in FRIENDLY_REASONS:
+                if rx.search(text):
+                    return reason, text
+            return plain, text
+    for rx, reason in FRIENDLY_REASONS:
+        m = rx.search(text)
+        if not m:
+            continue
+        # Keep a plain Chinese lead-in ("对方面板无法通过 … 连回发起方：") and replace only the raw tail.
+        head = text[:m.start()]
+        cut = max(head.rfind("："), head.rfind("（"))
+        lead = head[:cut] if cut >= 0 else ""
+        if lead and not _looks_raw(lead):
+            return (lead + "：" + reason if head[cut] == "：" else lead), text
+        return reason, text
+    return text, ""
 
 
 CERT_LOCK_FILE = ROOT + "/run/clashgate-cert.lock"   # shared with scripts/certctl.sh (flock)
@@ -1710,8 +1777,24 @@ def collect_ufw_specs(nodes: list, inbounds: list) -> set:
     return specs
 
 
+def record_firewall_port(spec: str, opened: bool):
+    """Keep FIREWALL_RECORD = the ports ClashGate opened itself, so uninstall closes only those."""
+    try:
+        with open(FIREWALL_RECORD) as f:
+            cur = {l.strip() for l in f if l.strip()}
+    except OSError:
+        cur = set()
+    new = (cur | {spec}) if opened else (cur - {spec})
+    if new != cur:
+        try:
+            atomic_write(FIREWALL_RECORD, "".join(x + "\n" for x in sorted(new)), 0o600)
+        except OSError as e:
+            sys.stderr.write(f"firewall record warning: {e}\n")
+
+
 def sync_ufw(old_specs: set, new_specs: set):
-    """When ufw or firewalld is active, allow newly added node ports and delete removed node ports (including UDP)."""
+    """When ufw or firewalld is active, allow newly added node ports and delete removed node ports (including UDP).
+    Ports opened here are recorded (unless the user had already allowed them) so uninstall can close them."""
     env = read_env()
     cport = get_controller_port(env)
     protected = {"80/tcp", f"{env.get('PANEL_PORT') or 0}/tcp", f"{cport}/tcp"}
@@ -1720,18 +1803,26 @@ def sync_ufw(old_specs: set, new_specs: set):
     rc, out = run([UFW_BIN, "status"])
     if rc == 0 and "Status: active" in out:
         for spec in sorted(new_specs - old_specs):
-            run([UFW_BIN, "allow", spec])
+            had = re.search(rf"^{re.escape(spec)}\s+ALLOW\b", out, re.M)
+            rc_a, _ = run([UFW_BIN, "allow", spec])
+            if rc_a == 0 and not had:
+                record_firewall_port(spec, True)
         for spec in sorted((old_specs - new_specs) - protected):
             run([UFW_BIN, "delete", "allow", spec])
+            record_firewall_port(spec, False)
         return
     rc, _ = run([FIREWALL_CMD_BIN, "--state"])
     if rc == 0:
         changed = False
         for spec in sorted(new_specs - old_specs):
-            run([FIREWALL_CMD_BIN, "--permanent", f"--add-port={spec}"])
+            had, _ = run([FIREWALL_CMD_BIN, "--permanent", f"--query-port={spec}"])
+            rc_a, _ = run([FIREWALL_CMD_BIN, "--permanent", f"--add-port={spec}"])
+            if rc_a == 0 and had != 0:
+                record_firewall_port(spec, True)
             changed = True
         for spec in sorted((old_specs - new_specs) - protected):
             run([FIREWALL_CMD_BIN, "--permanent", f"--remove-port={spec}"])
+            record_firewall_port(spec, False)
             changed = True
         if changed:
             run([FIREWALL_CMD_BIN, "--reload"])
@@ -2419,7 +2510,7 @@ def render_subscription(env: dict, live: bool = True) -> str:
             elif key == "@@PROXY_NAMES@@":
                 out.append(n_lines + "\n")
             else:
-                out.append(sanitize_doh_url_line(line))
+                out.append(sanitize_doh_url_line(line.replace("@@VERSION@@", VERSION)))
     return "".join(out)
 
 

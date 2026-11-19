@@ -22,6 +22,7 @@ ClusterRemoteError
 DEFAULT_NODE_NAMES
 ENV_FILE
 FIREWALL_CMD_BIN
+FIREWALL_RECORD
 FRAG_CLUSTER_LISTENERS
 FRAG_CLUSTER_PROXIES
 FRAG_CONTROLLER
@@ -32,6 +33,8 @@ FRAG_PROXY_GROUPS
 FRAG_REALITY
 FRAG_RULES
 FRAG_RULE_PROVIDERS
+FRIENDLY_PREFIXES
+FRIENDLY_REASONS
 HERE_DIR
 INBOUNDS
 KEY
@@ -217,6 +220,7 @@ fetch_mihomo_connections_totals
 forget_session
 format_traffic_detail
 format_traffic_gb
+friendly_error
 get_controller_port
 get_local_mihomo_version
 get_mihomo_secret
@@ -265,11 +269,13 @@ public_update_check
 qr_png_data_url
 quote
 random_anytls_padding
+raw_detail
 read_env
 read_nodes
 reality_client
 reality_keypair
 record_core_check
+record_firewall_port
 record_panel_check
 record_pending_reload
 refresh_update_check_for_version

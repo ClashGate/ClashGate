@@ -26,6 +26,8 @@ import sys
 import tempfile
 import threading
 import time
+import gzip
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -155,6 +157,17 @@ class Client:
     def get(self, path):
         with self.op.open(urllib.request.Request(self.base + path, headers={"Accept": "application/json"}), timeout=60) as r:
             return json.loads(r.read())
+
+    def raw(self, path, data=None, headers=None):
+        """(status, headers, body bytes) without following errors or decoding gzip."""
+        h = {"X-Requested-With": "fetch", **(headers or {})}
+        if data is not None:
+            data = urllib.parse.urlencode({"csrf": self.state["csrf"], **data}).encode()
+        try:
+            with self.op.open(urllib.request.Request(self.base + path, data=data, headers=h), timeout=60) as r:
+                return r.status, r.headers, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers, e.read()
 
     def post(self, path, **form):
         data = urllib.parse.urlencode({"csrf": self.state["csrf"], **form}).encode()
@@ -363,6 +376,26 @@ def main():
     check(r["ok"] and r["state"]["cluster"]["node_name"] == "A-Node", "saves node name A-Node")
     check(a.state["cluster"]["self_url"] == url["A"], f"A announces {a.state['cluster']['self_url']}")
 
+    print("[1.21 http: gzip, removed routes, noscript, state]")
+    st, hd, body = a.raw("/", headers={"Accept-Encoding": "gzip, deflate"})
+    check(st == 200 and hd.get("Content-Encoding") == "gzip" and "Accept-Encoding" in (hd.get("Vary") or ""),
+          f"dashboard is gzipped when asked ({hd.get('Content-Encoding')})")
+    page = gzip.decompress(body).decode()
+    check("<noscript>" in page and "管理面板需要浏览器开启 JavaScript" in page and "<form" not in page.split("<noscript>")[1].split("</noscript>")[0],
+          "noscript fallback is a short notice")
+    st, hd, body2 = a.raw("/", headers={"Accept-Encoding": "identity"})
+    check(st == 200 and not hd.get("Content-Encoding") and body2.decode() == page, "plain dashboard without Accept-Encoding: gzip")
+    st, hd, body = a.raw("/", headers={"Accept-Encoding": "gzip;q=0"})
+    check(not hd.get("Content-Encoding"), "gzip;q=0 is honoured")
+    st, hd, body = a.raw("/assets/app.js", headers={"Accept-Encoding": "gzip"})
+    st2, hd2, body2 = a.raw("/assets/app.js", headers={"Accept-Encoding": "gzip"})
+    check(st == 200 and hd.get("Content-Encoding") == "gzip" and body == body2 and len(gzip.decompress(body)) > len(body),
+          "static assets are gzipped (cached bytes)")
+    for path in ("/action/restart", "/action/cert-dns", "/routing/update"):
+        st, _, _ = a.raw(path, data={})
+        check(st == 404, f"removed route {path} -> {st}")
+    check(a.state.get("cluster_min_version") == "1.15", f"state carries cluster_min_version {a.state.get('cluster_min_version')}")
+
     print("[error paths]")
     r = a.post("/cluster/add", url="http://" + HOSTS["B"], password="x")
     check(not r["ok"] and "https://" in r["msg"], f"plain http refused: {r['msg']}")
@@ -520,6 +553,15 @@ def main():
     check(r["ok"] and "退出集群" in r["msg"], f"C leaves: {r['msg']}")
     check(not member_names(c) and member_names(a) == ["B-Node"] and member_names(b) == ["A-Node"], "C gone everywhere")
     mesh_ok(["A", "B"])
+
+    print("[clashgate uninstall: panel.py cluster-leave]")
+    out = subprocess.run([sys.executable, panel_dir + "/panel.py", "cluster-leave"], capture_output=True, text=True,
+                         env=dict(panel_env(roots["B"]), PYTHONPATH=panel_dir), timeout=180)
+    check(out.returncode == 0 and out.stdout.strip() == "1", f"B leaves from the CLI: {out.stdout!r} {out.stderr[-300:]!r}")
+    check(not member_names(b) and not member_names(a), "A dropped B after B's CLI leave")
+    out = subprocess.run([sys.executable, panel_dir + "/panel.py", "cluster-leave"], capture_output=True, text=True,
+                         env=dict(panel_env(roots["B"]), PYTHONPATH=panel_dir), timeout=60)
+    check(out.returncode == 0 and out.stdout.strip() == "0", f"cluster-leave with no links is a no-op: {out.stdout!r}")
 
     manual_cert_e2e(pki, panel_dir)
 

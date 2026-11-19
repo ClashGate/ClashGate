@@ -32,6 +32,43 @@ def bind():
 bind()
 
 
+# gzip for the SPA page, its assets and JSON/YAML responses (the page inlines ~450 kB of JS/CSS).
+# Static files are compressed once and cached by (path, mtime); per-request pages are compressed
+# on the fly (about 10 ms at level 6).
+_GZIP_TYPES = ("text/", "application/javascript", "application/json", "image/svg+xml", "text/yaml")
+_GZIP_MIN = 1024
+_GZ_CACHE = {}
+_GZ_CACHE_LOCK = threading.Lock()
+
+
+def _compressible(ctype: str, data: bytes) -> bool:
+    return len(data) >= _GZIP_MIN and ctype.startswith(_GZIP_TYPES)
+
+
+def _gzip_bytes(data: bytes, cache_key=None) -> bytes:
+    import gzip
+    if cache_key is None:
+        return gzip.compress(data, 6)
+    with _GZ_CACHE_LOCK:
+        hit = _GZ_CACHE.get(cache_key)
+    if hit is not None:
+        return hit
+    out = gzip.compress(data, 9)
+    with _GZ_CACHE_LOCK:
+        if len(_GZ_CACHE) > 64:
+            _GZ_CACHE.clear()
+        _GZ_CACHE[cache_key] = out
+    return out
+
+
+def _read_or_none(path: str):
+    try:
+        with open(path) as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
+
+
 def resolve_dist_file(rel: str) -> str:
     for base in (os.path.join(HERE_DIR, "dist"), os.path.join(CS_ROOT, "panel", "dist")):
         p = os.path.join(base, rel)
@@ -151,16 +188,32 @@ class Panel(BaseHTTPRequestHandler):
     def tr(self, msg):
         return _tr_msg(msg, self.lang())
 
-    def send(self, code, body, ctype="text/html; charset=utf-8", headers=None):
+    def accepts_gzip(self) -> bool:
+        if self.command == "HEAD":
+            return False
+        for part in (self.headers.get("Accept-Encoding") or "").split(","):
+            enc, _, q = part.strip().partition(";")
+            if enc.strip().lower() == "gzip":
+                return q.strip().replace(" ", "") not in ("q=0", "q=0.0", "q=0.00", "q=0.000")
+        return False
+
+    def send(self, code, body, ctype="text/html; charset=utf-8", headers=None, cache_key=None):
         if ctype.startswith("application/json") and isinstance(body, str) and self.lang() in ("en", "ru", "fa"):
             try:
                 obj = json.loads(body)
                 if isinstance(obj, dict) and isinstance(obj.get("msg"), str):
                     obj["msg"] = _tr_msg(obj["msg"], self.lang())
+                    if obj.get("detail") and isinstance(obj["detail"], str):
+                        obj["detail"] = _tr_msg(obj["detail"], self.lang())
                     body = json.dumps(obj, ensure_ascii=False)
             except ValueError:
                 pass
         data = body.encode() if isinstance(body, str) else body
+        headers = dict(headers or {})
+        if self.accepts_gzip() and _compressible(ctype, data):
+            data = _gzip_bytes(data, cache_key)
+            headers["Content-Encoding"] = "gzip"
+            headers["Vary"] = "Accept-Encoding"
         try:
             self.send_response(code)
             self.send_header("Content-Type", ctype)
@@ -169,8 +222,9 @@ class Panel(BaseHTTPRequestHandler):
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Cache-Control", "no-store")
-            for k, v in (headers or {}).items():
+            if "Cache-Control" not in headers:
+                self.send_header("Cache-Control", "no-store")
+            for k, v in headers.items():
                 self.send_header(k, v)
             self.end_headers()
             self.wfile.write(data)
@@ -327,6 +381,7 @@ class Panel(BaseHTTPRequestHandler):
             "cert_mode": cert_mode,
             "domain": domain,
             "cf_token": cf_token,
+            "cluster_min_version": CLUSTER_MIN_VERSION,
             "cert_issuer": cert_issuer,
             "cert_expires": cert_expires,
             "cert_days": cert_days,
@@ -377,7 +432,9 @@ class Panel(BaseHTTPRequestHandler):
             ), req_lang),
         }
 
-    def respond_mutation(self, s, msg: str, ok: bool = True):
+    def respond_mutation(self, s, msg: str, ok: bool = True, detail: str = ""):
+        if not ok and not detail:
+            msg, detail = friendly_error(msg)
         if not self.is_ajax():
             return self.flash(msg, ok)
         env = read_env()
@@ -386,6 +443,7 @@ class Panel(BaseHTTPRequestHandler):
         payload = {
             "ok": ok,
             "msg": msg,
+            "detail": detail,
             "state": state,
             "zb_url": state["zb_url"],
             "sub_url": state["sub_url"],
@@ -450,14 +508,14 @@ class Panel(BaseHTTPRequestHandler):
                                     "font/woff" if fp.endswith(".woff") else "application/octet-stream")))
                     )
                     with open(fp, "rb") as f:
-                        return self.send(200, f.read(), ctype)
+                        return self.send(200, f.read(), ctype, cache_key=(fp, os.path.getmtime(fp)))
             return self.send(404, "not found", "text/plain")
         if path in ("/favicon.ico", "/favicon.png", "/logo.png"):
             fp = resolve_dist_file("favicon.ico" if path == "/favicon.ico" else ("assets/logo.png" if path == "/logo.png" else "favicon.png"))
             if os.path.isfile(fp):
                 with open(fp, "rb") as f:
                     return self.send(200, f.read(), "image/x-icon" if fp.endswith(".ico") else "image/png",
-                                     {"Cache-Control": "public, max-age=86400"})
+                                     {"Cache-Control": "public, max-age=86400"}, cache_key=(fp, os.path.getmtime(fp)))
             return self.send(404, "not found", "text/plain")
         if path == "/login":
             return self.send(200, self.login_page())
@@ -574,8 +632,8 @@ class Panel(BaseHTTPRequestHandler):
         if path == "/logout":
             forget_session(tok)
             return self.redirect("/login", "cs_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict")
-        if path in ("/action/restart", "/action/reload"):
-            return self.do_action(s, path.rsplit("/", 1)[1])
+        if path == "/action/reload":
+            return self.do_action(s, "reload")
         if path == "/action/discard-pending":
             return self.do_discard_pending(s)
         if path == "/action/change-password":
@@ -592,7 +650,7 @@ class Panel(BaseHTTPRequestHandler):
             return self.do_upgrade_self(s)
         if path == "/action/cert":
             return self.do_cert_action(s)
-        if path in ("/action/cert-mode", "/action/cert-dns"):
+        if path == "/action/cert-mode":
             return self.do_cert_mode(s, form)
         if path == "/action/reset-secret":
             return self.do_reset_secret(s)
@@ -630,8 +688,6 @@ class Panel(BaseHTTPRequestHandler):
             return self.do_routing_provider(s, form, add=True)
         if path == "/routing/provider/delete":
             return self.do_routing_provider(s, form, add=False)
-        if path == "/routing/update":
-            return self.do_routing_update(s, form)
         if path == "/routing/rules":
             return self.do_routing_rules(s, form)
         if path == "/config/custom":
@@ -1163,33 +1219,30 @@ class Panel(BaseHTTPRequestHandler):
     def do_action(self, s, action):
         # This baseline lives on the panel module; other save_* functions rebind it there.
         mod = sys.modules.get("panel") or sys.modules["__main__"]
-        zh = {"restart": "重启", "reload": "应用配置"}[action]
+        zh = {"reload": "应用配置"}[action]
         with LOCK:
             pending_st = load_pending_reload()
-            if pending_st.get("mihomo_secret"):
-                new_secret = pending_st["mihomo_secret"]
-                write_env_var("MIHOMO_SECRET", new_secret)
-                env = read_env()
-                atomic_write(FRAG_CONTROLLER, render_controller_fragment(env), 0o640)
-                if is_custom_config_mode():
-                    try:
-                        with open(CUSTOM_CONF) as f:
-                            raw_c = f.read()
-                        updated_c = re.sub(r'^(\s*secret\s*:\s*).*$', f'\\1"{new_secret}"', raw_c, flags=re.M)
-                        atomic_write(CUSTOM_CONF, updated_c, 0o640)
-                    except FileNotFoundError:
-                        pass
-            if pending_st.get("sub_token"):
-                new_token = pending_st["sub_token"]
-                self.cfg["sub_token"] = new_token
-                if self.cfg_path:
-                    try:
-                        with open(self.cfg_path) as f:
-                            disk_cfg = json.load(f)
-                    except Exception:
-                        disk_cfg = dict(self.cfg)
-                    disk_cfg["sub_token"] = new_token
-                    atomic_write(self.cfg_path, json.dumps(disk_cfg, indent=2, ensure_ascii=False) + "\n", 0o600)
+            # A pending new API secret / subscription token only becomes real after the new config
+            # passed `mihomo -t` and the core accepted it; until then clashgate.env and panel.json keep
+            # the old values, so a failed apply leaves everything as it was (the change stays pending).
+            new_secret = pending_st.get("mihomo_secret") or ""
+            new_token = pending_st.get("sub_token") or ""
+            conf_backup = _read_or_none(CONF)
+            custom_backup = _read_or_none(CUSTOM_CONF) if is_custom_config_mode() else None
+
+            def restore():
+                if conf_backup is not None:
+                    atomic_write(CONF, conf_backup, 0o640)
+                if custom_backup is not None:
+                    atomic_write(CUSTOM_CONF, custom_backup, 0o640)
+
+            if new_secret:
+                env_draft = dict(read_env())
+                env_draft["MIHOMO_SECRET"] = new_secret
+                atomic_write(FRAG_CONTROLLER, render_controller_fragment(env_draft), 0o640)
+                if custom_backup is not None:
+                    updated_c = re.sub(r'^(\s*secret\s*:\s*).*$', f'\\1"{new_secret}"', custom_backup, flags=re.M)
+                    atomic_write(CUSTOM_CONF, updated_c, 0o640)
             cur_nodes = read_nodes()
             cur_inbs = load_inbounds()
             cur_proxies = load_server_proxies()
@@ -1202,31 +1255,16 @@ class Panel(BaseHTTPRequestHandler):
                 _sync_custom_conf_listeners(cur_nodes, cur_inbs)
                 _sync_custom_conf_proxies(cur_proxies)
                 _sync_custom_conf_providers(cur_providers)
-            conf_backup = None
-            custom_backup = None
-            try:
-                with open(CONF) as f:
-                    conf_backup = f.read()
-            except FileNotFoundError:
-                conf_backup = None
-            if is_custom_config_mode():
-                try:
-                    with open(CUSTOM_CONF) as f:
-                        custom_backup = f.read()
-                except FileNotFoundError:
-                    custom_backup = None
             try:
                 get_routing().ensure_seeded()
                 get_routing().regenerate_frags()
             except Exception as e:
+                restore()
                 return self.respond_mutation(s, f"分流配置组装失败：{e}", False)
             atomic_write(CONF, assemble_config(), 0o640)
             rc, out = validate_config()
             if rc != 0:
-                if conf_backup is not None:
-                    atomic_write(CONF, conf_backup, 0o640)
-                if custom_backup is not None:
-                    atomic_write(CUSTOM_CONF, custom_backup, 0o640)
+                restore()
                 return self.respond_mutation(s, f"配置校验未通过，未执行{zh}：" + out[-300:], False)
             new_specs = collect_ufw_specs(cur_nodes, cur_inbs)
             old_specs = mod._PENDING_UFW_BASELINE if mod._PENDING_UFW_BASELINE is not None else new_specs
@@ -1239,12 +1277,13 @@ class Panel(BaseHTTPRequestHandler):
                 if st_now["listening"] and not expected_ports.issubset(set(st_now["listening"])):
                     rc, out = run([SYSTEMCTL, "restart", "mihomo"])
             if rc != 0:
-                if conf_backup is not None:
-                    atomic_write(CONF, conf_backup, 0o640)
-                if custom_backup is not None:
-                    atomic_write(CUSTOM_CONF, custom_backup, 0o640)
+                restore()
                 run([SYSTEMCTL, "restart", "mihomo"])
             if rc == 0:
+                if new_secret:
+                    write_env_var("MIHOMO_SECRET", new_secret)
+                if new_token:
+                    self._commit_sub_token(new_token)
                 clear_pending_reload()
                 sync_client_files()
                 wait_mihomo_ports()
@@ -1255,6 +1294,17 @@ class Panel(BaseHTTPRequestHandler):
         if rc == 0:
             return self.respond_mutation(s, f"{zh}成功，服务端配置与客户端订阅已同步生效（Mihomo 当前状态：{state}）", active.strip() == "active")
         return self.respond_mutation(s, f"{zh}失败：{out[-300:]}（Mihomo 当前状态：{state}）", False)
+
+    def _commit_sub_token(self, new_token):
+        self.cfg["sub_token"] = new_token
+        if self.cfg_path:
+            try:
+                with open(self.cfg_path) as f:
+                    disk_cfg = json.load(f)
+            except Exception:
+                disk_cfg = dict(self.cfg)
+            disk_cfg["sub_token"] = new_token
+            atomic_write(self.cfg_path, json.dumps(disk_cfg, indent=2, ensure_ascii=False) + "\n", 0o600)
 
     def do_reset_sub(self, s):
         new_token = secrets.token_hex(24)
@@ -1299,8 +1349,7 @@ class Panel(BaseHTTPRequestHandler):
                 out = out.replace(tok, "***")
         if rc == 0:
             return self.respond_mutation(s, "证书检查 / 续期完成。", True)
-        tail = " | ".join(l for l in out.splitlines() if l.strip())[-300:]
-        return self.respond_mutation(s, f"证书申请 / 续期失败：{tail}", False)
+        return self.respond_mutation(s, friendly_error("证书申请 / 续期失败：")[0], False, detail=raw_detail(out))
 
     def do_cert_mode(self, s, form):
         mode = (form.get("cert_mode") or "dns").strip()
@@ -1332,7 +1381,7 @@ class Panel(BaseHTTPRequestHandler):
                 write_env_var("CERT_MODE", prev_mode or "port")
                 if prev_mode == "dns" and prev_token:
                     write_env_var("CF_TOKEN", prev_token)
-                return self.respond_mutation(s, cert_failure_message(out, mode), False)
+                return self.respond_mutation(s, cert_failure_message(out, mode), False, detail=raw_detail(out))
             if prev_mode == "manual":
                 enable_cert_renew_timer()
         return self.respond_mutation(s, "已切换并重新生成证书。", True)
@@ -1830,47 +1879,6 @@ class Panel(BaseHTTPRequestHandler):
                 return self.respond_mutation(s, f"更新分流规则失败：{e}", False)
         return self.respond_mutation(s, f"已更新分流组「{name}」规则，请点顶部「应用配置」生效", True)
 
-    def do_routing_update(self, s, form):
-        gid = (form.get("id") or "").strip()
-        yaml_raw = form.get("yaml_raw", "")
-        with LOCK:
-            try:
-                if is_custom_config_mode():
-                    # Custom mode: rewrite sections in CUSTOM_CONF from provided group yaml
-                    _ensure_pending_baseline()
-                    with open(CUSTOM_CONF) as f:
-                        raw = f.read()
-                    # Merge: update one group's yaml inside synthetic list then rewrite
-                    st = get_routing().public_state(raw, custom_mode=True)
-                    if not st.get("ok"):
-                        raise ValueError(st.get("error") or "自定义分流无法解析")
-                    groups = st.get("groups") or []
-                    found = False
-                    for g in groups:
-                        if g.get("id") == gid:
-                            g["yaml"] = yaml_raw
-                            found = True
-                            break
-                    if not found:
-                        raise ValueError("分流组不存在")
-                    updated = get_routing().apply_custom_routing_edit(
-                        raw, groups, rule_providers_yaml=st.get("rule_providers_yaml") or ""
-                    )
-                    atomic_write(CUSTOM_CONF, updated, 0o640)
-                    name = next((g.get("name") for g in groups if g.get("id") == gid), gid)
-                else:
-                    _ensure_pending_baseline()
-                    name = get_routing().update_group_yaml(gid, yaml_raw)
-                record_pending_reload(
-                    op="update-routing",
-                    kind="routing",
-                    name=name,
-                    detail=f"~ 更新分流组「{name}」",
-                )
-            except Exception as e:
-                return self.respond_mutation(s, f"更新分流组失败：{e}", False)
-        return self.respond_mutation(s, f"已更新分流组「{name}」，请点顶部「应用配置」生效", True)
-
     def do_save_custom_config(self, s, form):
         if not load_panel_settings().get("custom_server_enabled"):
             return self.respond_mutation(s, "高级功能请到设置页开启", False)
@@ -1903,19 +1911,16 @@ class Panel(BaseHTTPRequestHandler):
 
     # -- views
     def login_page(self, err=""):
-        e = html.escape
         err = self.tr(err)
         mver = get_mihomo_version_num()
         boot = {"page": "login", "version": VERSION, "mihomo_version": mver, "login_error": err}
-        err_html = f"<div class=err>{e(err)}</div>" if err else ""
-        fallback = (
-            f"<div><h1>ClashGate <span>v{VERSION}</span></h1>{err_html}"
-            f"<form method=post action=/login>"
-            f"<input id=u name=username value=admin required>"
-            f"<input id=p name=password type=password required>"
-            f"<button type=submit>{e(self.tr('登 录'))}</button></form></div>"
-        )
-        return render_spa_html(self.tr("登录 · ClashGate"), boot, fallback)
+        return render_spa_html(self.tr("登录 · ClashGate"), boot, self.noscript_notice())
+
+    def noscript_notice(self) -> str:
+        """Shown only when the browser has JavaScript turned off (the panel is a Vue app)."""
+        return ("<div style='max-width:28rem;margin:4rem auto;padding:1.5rem;font:14px/1.6 system-ui,sans-serif;"
+                "color:#1a2330;background:#fff;border:1px solid #dbe3ee;border-radius:1rem'>"
+                f"<b>ClashGate</b><p>{html.escape(self.tr('管理面板需要浏览器开启 JavaScript，请开启后刷新页面。'))}</p></div>")
 
     def dashboard(self, s, initial_tab="inbounds"):
         q = parse_qs(urlparse(self.path).query)
@@ -1933,63 +1938,7 @@ class Panel(BaseHTTPRequestHandler):
             "flash_ok": ok,
             **state,
         }
-        e = html.escape
-        hid = f"<input type=hidden name=csrf value='{e(s['csrf'])}'>"
-        opts = "".join(f"<option value={k}>{e(KIND_ZH.get(k, k))}</option>" for k in TYPES)
-        inb_rows = "".join(
-            f"<div><span>{e(it['name'])}</span><span>{e(it['kind_label'])}</span>"
-            f"<span>:{it['port']}</span>"
-            f"<button type=button>复制配置</button>"
-            + (f"<form method=post action='{e(it['reset_url'])}'>{hid}<button type=submit>重置密码</button></form>" if it.get("can_reset_password") else "")
-            + "</div>"
-            for it in state["inbounds"]
-        )
-        zb_sec = (
-            f"<section id=zashboard-card><h2>Zashboard 控制面板</h2>"
-            f"<div id=zb-url>••••••••••••••••••••••••</div>"
-            f"<div id=zb-secret>••••••••••••</div>"
-            f"<a href='{e(state['zb_url'] or '#')}' target=_blank rel=noopener>打开 Zashboard</a>"
-            f"<button type=button>复制地址</button>"
-            f"<form method=post action=/action/reset-secret>{hid}<button type=submit>重置 API 密钥</button></form></section>"
-        )
-        sub_sec = (
-            f"<section id=sub-card><h2>客户端订阅链接</h2>"
-            f"<div id=sub-url>••••••••••••••••••••••••</div>"
-            f"<button type=button>复制订阅链接</button>"
-            f"<button type=button>二维码</button>"
-            f"<form method=post action=/action/reset-sub>{hid}<button type=submit>更换订阅链接</button></form></section>"
-            if state["sub_url"] else ""
-        )
-        cert_sec = (
-            f"<section id=certs-card><h2>HTTPS 证书</h2>"
-            f"<div><span>{e(state.get('domain') or '—')}</span>"
-            f"<span>{e(state.get('cert_mode') or 'port')}</span>"
-            f"<span>{e(state.get('cert_issuer') or '—')}</span>"
-            f"<span>{e(state.get('cert_expires') or '—')}</span></div>"
-            f"<form method=post action=/action/cert-mode>{hid}"
-            f"<input type=hidden name=cert_mode value=dns>"
-            f"<input id=cf-token name=cf_token type=password placeholder='Cloudflare API Token'>"
-            f"<button type=submit>切换并重新生成证书</button></form>"
-            f"<a href='https://dash.cloudflare.com/profile/api-tokens' target=_blank rel=noopener>https://dash.cloudflare.com/profile/api-tokens</a>"
-            f"</section>"
-        )
-        mver = state.get("mihomo_version", "")
-        ver_label = f"v{VERSION} · mihomo {mver}" if mver else f"v{VERSION}"
-        fallback = (
-            f"<header><span>ClashGate</span><span>{e(ver_label)}</span></header>"
-            f"<main>{zb_sec}{sub_sec}"
-            f"<section><h2>入站节点</h2>{inb_rows}</section>"
-            f"<section><h2>添加节点</h2><form method=post action=/inbounds/add>{hid}"
-            f"<select id=kind name=kind>{opts}</select>"
-            f"<p>{e(PROTOCOL_DESCRIPTIONS['vless-reality'])}</p>"
-            f"<input id=nm name=name value=VlessReality placeholder='默认 VlessReality'>"
-            f"<input id=port name=port placeholder='留空随机端口'>"
-            f"<button type=submit>添加入站节点</button></form></section>"
-            f"<section><h2>自定义 Mihomo 服务端配置</h2>"
-            f"<form method=post action=/config/reset-template>{hid}<button type=submit>恢复默认服务端模板</button></form></section>"
-            f"{cert_sec}</main>"
-        )
-        return render_spa_html("ClashGate", boot, fallback)
+        return render_spa_html("ClashGate", boot, self.noscript_notice())
 
 
 class TLSServer(ThreadingHTTPServer):
@@ -2075,6 +2024,7 @@ def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("hash-password")
+    sub.add_parser("cluster-leave")
     sp = sub.add_parser("serve")
     sp.add_argument("--config", required=True)
     a = ap.parse_args()
@@ -2083,6 +2033,15 @@ def main():
         if len(pw) < 8:
             sys.exit("密码太短（至少 8 位）")
         print(hash_password(pw))
+    elif a.cmd == "cluster-leave":
+        # Used by `clashgate uninstall` / reinstall: leave the cluster first so the other members drop
+        # their links to this server. Prints "<links>\t<unreachable names, comma separated>".
+        if not load_cluster()["links"]:
+            print("0\t")
+            return
+        with _CLUSTER_OP_LOCK:
+            n, missed = cluster_leave_all()
+        print(f"{n}\t{','.join(missed)}")
     else:
         serve(a.config)
 

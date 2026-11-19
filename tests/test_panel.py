@@ -78,7 +78,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -750,7 +750,7 @@ class ManualCertTest(unittest.TestCase):
         env_before = read(P.ENV_FILE)
         calls = []
         h = object.__new__(P.Panel)
-        h.respond_mutation = lambda s, msg, ok=True: (ok, msg)
+        h.respond_mutation = lambda s, msg, ok=True, detail="": (ok, msg)
         g = P.Panel.do_cert_manual.__globals__
         real_run = g["run"]
 
@@ -831,6 +831,138 @@ class SecurityTest(unittest.TestCase):
         os.chmod(P.CS_ROOT, 0o775)
         P.ensure_unified_root()
         self.assertTrue(os.stat(P.CS_ROOT).st_mode & 0o1000)
+
+
+class V121Test(unittest.TestCase):
+    """1.21: friendly errors, gzip, deferred secret/token commit, firewall record, client header."""
+
+    def test_friendly_error(self):
+        fe = P.friendly_error
+        self.assertEqual(fe("节点名称不能为空"), ("节点名称不能为空", ""))
+        self.assertEqual(fe("集群操作失败：对方面板版本太低"), ("集群操作失败：对方面板版本太低", ""))
+        plain, detail = fe("集群操作失败：<urlopen error [Errno 111] Connection refused>")
+        self.assertTrue(plain.startswith("连接被拒绝"))
+        self.assertIn("Errno 111", detail)
+        plain, detail = fe("配置校验未通过，未执行应用配置：level=fatal msg=\"parse config error: yaml: line 3\"")
+        self.assertEqual(plain, "新配置没有通过内核校验，已保留原来的配置。请检查最近的改动。")
+        self.assertIn("yaml: line 3", detail)
+        plain, _ = fe("对方面板无法通过 https://h:1 连回发起方：timed out")
+        self.assertTrue(plain.startswith("对方面板无法通过 https://h:1 连回发起方：连接超时"), plain)
+        plain, _ = fe("对方面板的 HTTPS 证书验证失败，请用对方证书上的域名访问（[SSL: CERTIFICATE_VERIFY_FAILED]）")
+        self.assertEqual(plain, "对方面板的 HTTPS 证书验证失败，请用对方证书上的域名访问")
+        self.assertTrue(fe("证书申请 / 续期失败：")[0].startswith("证书申请 / 续期失败：请确认"))
+        self.assertTrue(fe("OSError: [Errno 98] Address already in use")[0].startswith("端口已被其他程序占用"))
+        self.assertEqual(P.raw_detail("\x1b[31mred\x1b[0m " + "x" * 2000)[-5:], "xxxxx")
+        self.assertNotIn("\x1b", P.raw_detail("\x1b[31mred\x1b[0m"))
+
+    def test_friendly_sentences_translate(self):
+        import i18n_en
+        texts = [t for _, t in P.FRIENDLY_REASONS] + [t for _, t in P.FRIENDLY_PREFIXES]
+        texts += [P.cert_failure_message("boom", m) for m in ("port", "dns")]
+        texts += [P.cert_failure_message("Invalid API Token", "dns"), "管理面板需要浏览器开启 JavaScript，请开启后刷新页面。",
+                  "对方面板无法通过 https://h:1 连回发起方：" + P.FRIENDLY_REASONS[0][1]]
+        for zh in texts:
+            for lang in ("en", "ru", "fa"):
+                self.assertNotRegex(i18n_en.tr(zh, lang), r"[\u4e00-\u9fff]", f"{lang}: {zh}")
+
+    def _handler(self, accept="", command="GET"):
+        h = object.__new__(P.Panel)
+        h.command = command
+        h.headers = {"Accept-Encoding": accept}
+        return h
+
+    def test_accepts_gzip(self):
+        self.assertTrue(self._handler("gzip, deflate, br").accepts_gzip())
+        self.assertTrue(self._handler("br;q=1.0, gzip;q=0.8").accepts_gzip())
+        self.assertFalse(self._handler("gzip;q=0").accepts_gzip())
+        self.assertFalse(self._handler("deflate").accepts_gzip())
+        self.assertFalse(self._handler("").accepts_gzip())
+        self.assertFalse(self._handler("gzip", "HEAD").accepts_gzip())
+
+    def test_gzip_bytes_cached(self):
+        import gzip
+        g = P.Panel.send.__globals__
+        data = b"<html>" + b"hello " * 400 + b"</html>"
+        a = g["_gzip_bytes"](data, ("k", 1))
+        self.assertEqual(gzip.decompress(a), data)
+        self.assertIs(g["_gzip_bytes"](data, ("k", 1)), a)
+        self.assertTrue(g["_compressible"]("text/html; charset=utf-8", data))
+        self.assertFalse(g["_compressible"]("image/png", data))
+        self.assertFalse(g["_compressible"]("text/html", b"tiny"))
+
+    def test_reload_failure_keeps_old_secret_and_token(self):
+        env_before = read(P.ENV_FILE)
+        write_default_state()
+        P.clear_pending_reload()
+        P.record_pending_reload(op="reset-secret", kind="secret", name="secret", mihomo_secret="NEWSECRET123")
+        P.record_pending_reload(op="reset-sub", kind="sub", name="sub", sub_token="N" * 24)
+        h = object.__new__(P.Panel)
+        h.cfg, h.cfg_path = {"sub_token": "O" * 24}, None
+        got = {}
+
+        def respond(s, msg, ok=True, detail=""):
+            got.update(ok=ok, msg=msg)
+            return ok, msg
+        h.respond_mutation = respond
+        g = P.Panel.do_action.__globals__
+        try:
+            with mock.patch.dict(g, {"validate_config": lambda *a, **k: (1, "level=fatal msg=bad")}):
+                h.do_action({}, "reload")
+            self.assertFalse(got["ok"])
+            self.assertEqual(P.read_env().get("MIHOMO_SECRET"), "test-secret")
+            self.assertEqual(h.cfg["sub_token"], "O" * 24)
+            st = P.load_pending_reload()
+            self.assertEqual((st["mihomo_secret"], st["sub_token"]), ("NEWSECRET123", "N" * 24))
+        finally:
+            P.clear_pending_reload()
+            with open(P.ENV_FILE, "w") as f:
+                f.write(env_before)
+
+    def test_firewall_record(self):
+        try:
+            os.remove(P.FIREWALL_RECORD)
+        except FileNotFoundError:
+            pass
+        P.record_firewall_port("443/tcp", True)
+        P.record_firewall_port("8443/udp", True)
+        P.record_firewall_port("443/tcp", True)
+        self.assertEqual(read(P.FIREWALL_RECORD), "443/tcp\n8443/udp\n")
+        P.record_firewall_port("443/tcp", False)
+        self.assertEqual(read(P.FIREWALL_RECORD), "8443/udp\n")
+        os.remove(P.FIREWALL_RECORD)
+        sh = read(os.path.join(REPO, "scripts/lib/core.sh"))
+        self.assertIn("FIREWALL_RECORD=$CS_ROOT/firewall_ports.txt", sh)
+        self.assertTrue(P.FIREWALL_RECORD.endswith("/firewall_ports.txt"))
+        un = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))
+        body = un[un.index("do_uninstall() {"):]
+        self.assertLess(body.index("close_firewall"), body.index('rm -rf "$CS_ROOT"'))
+        self.assertLess(body.index("leave_cluster"), body.index("systemctl disable --now clashgate"))
+
+    def test_client_header_has_version(self):
+        out = P.render_subscription(P.read_env(), live=False)
+        self.assertTrue(out.startswith(f"# Generated by ClashGate v{P.VERSION}."), out[:80])
+        self.assertNotIn("@@VERSION@@", out)
+
+    def test_panel_unit_uses_detected_python(self):
+        sh = read(os.path.join(REPO, "scripts/lib/common.sh"))
+        self.assertIn("sys.version_info >= (3, 9)", sh)
+        for f in ("scripts/lib/panel.sh", "scripts/cmd/clashgate.sh"):
+            src = read(os.path.join(REPO, f))
+            self.assertNotIn("scripts/init/clashgate.service\" /etc/systemd", src)
+            self.assertNotIn("| python3 ", src)
+        self.assertIn("ExecStart=/usr/bin/python3 ", read(os.path.join(REPO, "scripts/init/clashgate.service")))
+
+    def test_frontend_1_21(self):
+        js = frontend_script_text()
+        app = read(os.path.join(REPO, "panel/web/src/App.vue"))
+        self.assertNotIn("confirmUpdateCore", app)   # the core update lives on the Settings page now
+        self.assertIn("settings-update-core", read(os.path.join(REPO, "panel/web/src/pages/SettingsPage.vue")))
+        certs = read(os.path.join(REPO, "panel/web/src/pages/CertsPage.vue"))
+        for needle in ('id="cert-renew"', 'id="cert-port-guide-card"', 'id="cf-token-eye"', "cfTokenRevealed ? 'text' : 'password'"):
+            self.assertIn(needle, certs)
+        self.assertIn("'/action/cert'", js)
+        for gone in ("/action/restart", "/action/cert-dns", "/routing/update"):
+            self.assertNotIn(gone, js)
 
 
 if __name__ == "__main__":

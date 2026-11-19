@@ -45,6 +45,7 @@ export function usePanel() {
     cert_mode: 'port',
     domain: '',
     cf_token: '',
+    cluster_min_version: '',
     cert_issuer: '',
     cert_expires: '',
     cert_days: null,
@@ -104,6 +105,7 @@ export function usePanel() {
     cert_mode: boot.cert_mode || (boot.status && boot.status.cert_mode) || 'port',
     domain: boot.domain || (boot.status && boot.status.domain) || '',
     cf_token: boot.cf_token || '',
+    cluster_min_version: boot.cluster_min_version || '',
     cert_issuer: boot.cert_issuer || (boot.status && boot.status.cert_issuer) || '',
     cert_expires: boot.cert_expires || (boot.status && boot.status.cert_expires) || '',
     cert_days: boot.cert_days !== undefined ? boot.cert_days : (boot.status ? boot.status.cert_days : null),
@@ -235,7 +237,7 @@ export function usePanel() {
     if (subUrlRevealed.value && subUrlEl.value && target && !subUrlEl.value.contains(target)) {
       subUrlRevealed.value = false
     }
-    if (cfTokenRevealed.value && cfTokenEl.value && target && !cfTokenEl.value.contains(target)) {
+    if (cfTokenRevealed.value && target && target.closest && !target.closest('#cf-token-wrap')) {
       cfTokenRevealed.value = false
     }
     if (langOpen.value && target && target.closest && !target.closest('.cg-lang, .cg-lang-menu')) {
@@ -537,7 +539,7 @@ export function usePanel() {
   const copiedKey = ref('')
   const langOpen = ref(false)
   const langMenuStyle = ref({})
-  const toast = reactive({ show: false, msg: '', ok: true })
+  const toast = reactive({ show: false, msg: '', ok: true, detail: '', open: false })
   let toastTimer = null
 
   function toggleLangMenu(ev) {
@@ -564,15 +566,33 @@ export function usePanel() {
     langOpen.value = false
   }
 
-  function showToast(msg, ok = true) {
+  // detail: raw program output for a failed action, shown folded under 「详情」. A toast with details
+  // stays longer, and stays open while the user reads them.
+  function showToast(msg, ok = true, detail = '') {
     if (!msg) return
     toast.msg = msg
     toast.ok = ok
+    toast.detail = ok ? '' : String(detail || '')
+    toast.open = false
     toast.show = true
+    armToastTimer(toast.detail ? 12000 : 4500)
+  }
+
+  function armToastTimer(ms) {
     if (toastTimer) clearTimeout(toastTimer)
     toastTimer = setTimeout(() => {
-      toast.show = false
-    }, 4500)
+      if (!toast.open) toast.show = false
+    }, ms)
+  }
+
+  function toggleToastDetail() {
+    toast.open = !toast.open
+    if (!toast.open) armToastTimer(4500)
+  }
+
+  function closeToast() {
+    toast.open = false
+    toast.show = false
   }
 
   const PROTOCOLS = [
@@ -745,7 +765,25 @@ export function usePanel() {
   })
   const certRegenDisabled = computed(() => !certModeDirty.value || certRegenLock.value || busyKey.value === '/action/cert-mode')
 
-  async function submitCertMode() {
+  function confirmCertRenew() {
+    if (busyKey.value || certRegenLock.value) return
+    openConfirmDialog({
+      title: t('立即申请 / 续期'),
+      message: t("将马上向 Let's Encrypt 申请证书（证书还有效且不急着续期时会直接跳过）。同一域名每周最多签发 5 张，请不要反复点击。"),
+      confirmText: t('立即申请'),
+      tone: 'amber',
+      onConfirm: async () => {
+        certRegenLock.value = true
+        try {
+          await postAction('/action/cert', {}, '/action/cert')
+        } finally {
+          certRegenLock.value = false
+        }
+      },
+    })
+  }
+
+  function submitCertMode() {
     if (busyKey.value || certRegenLock.value || !certModeDirty.value) return
     if (certModeForm.mode === 'dns') {
       const tok = certModeForm.cf_token
@@ -758,6 +796,27 @@ export function usePanel() {
         return
       }
     }
+    if (certModeForm.mode === 'manual') {
+      openConfirmDialog({
+        title: certModeValue.value === 'manual' ? t('重新校验证书') : t('切换到手动证书'),
+        message: t('将检查 /etc/clashgate/certs/ 里的证书和私钥，通过后启用，内核会重启几秒钟。检查不通过时保持原来的证书不变。'),
+        confirmText: t('开始校验'),
+        tone: 'amber',
+        onConfirm: () => doSubmitCertMode(),
+      })
+      return
+    }
+    openConfirmDialog({
+      title: t('切换并重新生成证书'),
+      message: t("将马上向 Let's Encrypt 重新申请证书。同一域名每周最多签发 5 张，失败几次后可能要等一周，请确认设置无误再继续。申请失败时保持原来的证书和模式不变。"),
+      confirmText: t('确认切换'),
+      tone: 'amber',
+      onConfirm: () => doSubmitCertMode(),
+    })
+  }
+
+  async function doSubmitCertMode() {
+    if (busyKey.value || certRegenLock.value || !certModeDirty.value) return
     certRegenLock.value = true
     maskAllSensitive()
     try {
@@ -786,6 +845,17 @@ export function usePanel() {
     const s = state.status || {}
     return s.traffic_detail || '↑ 0 B · ↓ 0 B'
   })
+
+  function confirmUpdateCore() {
+    if (busyKey.value) return
+    openConfirmDialog({
+      title: t('更新内核'),
+      message: t('将下载最新的 Mihomo 内核并重启。重启时所有连接会中断几秒钟，客户端会自动重连。'),
+      confirmText: t('确认更新'),
+      tone: 'amber',
+      onConfirm: () => updateCoreDirect(),
+    })
+  }
 
   async function updateCoreDirect() {
     if (busyKey.value) return
@@ -953,6 +1023,7 @@ export function usePanel() {
     if (newState.mode !== undefined) state.mode = newState.mode
     if (newState.cert_mode !== undefined) state.cert_mode = newState.cert_mode
     if (newState.domain !== undefined) state.domain = newState.domain
+    if (newState.cluster_min_version) state.cluster_min_version = newState.cluster_min_version
     if (newState.cf_token !== undefined) {
       if (newState.cf_token !== state.cf_token) cfTokenRevealed.value = false
       state.cf_token = newState.cf_token
@@ -1027,7 +1098,7 @@ export function usePanel() {
         if (data.zb_url) state.zb_url = data.zb_url
         if (data.sub_url) state.sub_url = data.sub_url
       }
-      if (!opts.silentToast) showToast(data.msg || (data.ok ? t('操作成功') : t('操作失败')), !!data.ok)
+      if (!opts.silentToast) showToast(data.msg || (data.ok ? t('操作成功') : t('操作失败')), !!data.ok, data.detail)
       if (url === '/action/upgrade-self' && data.ok) await reloadPanelAfterUpgrade(versionBefore)
       return data
     } catch (err) {
@@ -1046,7 +1117,7 @@ export function usePanel() {
         if (stRes.ok) {
           const stData = await stRes.json()
           applyServerState(stData)
-          if ((url === '/action/reload' || url === '/action/restart') && Number(stData.pending_reload_count || 0) === 0) {
+          if (url === '/action/reload' && Number(stData.pending_reload_count || 0) === 0) {
             showToast(t('已应用配置并更新客户端订阅'), true)
             return { ok: true, state: stData }
           }
@@ -1146,7 +1217,7 @@ export function usePanel() {
   function resetSubUrl() {
     openConfirmDialog({
       title: t('更换订阅链接'),
-      message: t('确定更换订阅链接？需点击顶部「应用配置」后新订阅链接才会生效（应用后旧链接失效）。'),
+      message: t('确定更换订阅链接？需点击顶部「应用配置」后新订阅链接才会生效（应用后旧链接失效）。在服务器上执行 clashgate reset-sub 则会立即更换。'),
       confirmText: t('确认更换'),
       tone: 'amber',
       onConfirm: async () => {
@@ -1963,6 +2034,10 @@ export function usePanel() {
     trafficDisplay,
     trafficDetail,
     updateCoreDirect,
+    confirmUpdateCore,
+    confirmCertRenew,
+    toggleToastDetail,
+    closeToast,
     toggleVersionPanel,
     checkUpdateAndPrompt,
     statePollTimer,

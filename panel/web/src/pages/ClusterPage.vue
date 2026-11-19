@@ -222,15 +222,9 @@ const {
                           :aria-label="t('本机名称')"
                           :aria-invalid="nodeNameOverLimit ? 'true' : undefined"
                           :aria-describedby="nodeNameHint ? 'node-name-help' : undefined"
-                          class="cg-input w-full h-10 ps-3 pe-16 rounded-xl border bg-white text-sm text-slate-900"
+                          class="cg-input w-full h-10 px-3 rounded-xl border bg-white text-sm text-slate-900"
                           :class="nodeNameOverLimit ? 'border-rose-300' : 'border-slate-200'"
                         />
-                        <span
-                          class="pointer-events-none absolute inset-y-0 end-3 flex items-center text-xs tabular-nums"
-                          :class="nodeNameOverLimit ? 'text-rose-500' : 'text-slate-400'"
-                          dir="ltr"
-                          aria-hidden="true"
-                        >{{ nodeNameLength }}/{{ CG_NODE_NAME_MAX }}</span>
                       </div>
                       <button
                         type="submit"
@@ -304,7 +298,7 @@ const {
                   </div>
                   <ul class="text-xs text-slate-500 leading-relaxed space-y-1 list-disc ps-4">
                     <li>{{ t('已经在集群里的面板会自动和新面板互联，不需要再输入密码。') }}</li>
-                    <li>{{ t('对方面板需要 ClashGate 1.14 或更高版本，并使用有效的 HTTPS 证书。') }}</li>
+                    <li>{{ t('对方面板需要 ClashGate {v} 或更高版本，并使用有效的 HTTPS 证书。', { v: state.cluster_min_version || '1.15' }) }}</li>
                     <li>{{ t('添加后立即生效，不需要点「应用配置」。') }}</li>
                     <li>{{ t('这些出站不会出现在节点列表和客户端订阅里，可以在 Zashboard 的分流策略组里选择它们作为出口。') }}</li>
                   </ul>
