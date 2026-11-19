@@ -190,8 +190,8 @@ seed_routing() {
     [[ -f $ROUTING_DIR/$base ]] || install -m 640 "$f" "$ROUTING_DIR/$base"
   done
   if [[ -f $LIB_DIR/panel/panel.py ]]; then
-    CS_ROOT="$CS_ROOT" PYTHONPATH="$LIB_DIR/panel${PYTHONPATH:+:$PYTHONPATH}" python3 -c \
-      'import os,importlib.util; p=os.path.join(os.environ["CS_ROOT"],"panel","panel.py"); spec=importlib.util.spec_from_file_location("cg_panel_seed", p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); m.get_routing().ensure_seeded(force=False)' \
+    CS_ROOT="$CS_ROOT" PYTHONPATH="$LIB_DIR/panel${PYTHONPATH:+:$PYTHONPATH}" "$(py_bin || echo python3)" -c \
+      'import os,importlib.util,sys; p=os.path.join(os.environ["CS_ROOT"],"panel","panel.py"); spec=importlib.util.spec_from_file_location("cg_panel_seed", p); m=importlib.util.module_from_spec(spec); sys.modules[spec.name]=m; sys.modules.setdefault("panel", m); spec.loader.exec_module(m); m.get_routing().ensure_seeded(force=False)' \
       || warn "分流默认模板生成失败（可稍后在面板「服务端分流」中恢复）"
   fi
   [[ -f $FRAG_RULE_PROVIDERS ]] || : > "$FRAG_RULE_PROVIDERS"
@@ -216,7 +216,8 @@ assemble_config() {
   seed_routing
   awk -v c="$FRAG_CONTROLLER" -v pv="$FRAG_PROVIDERS" -v p="$FRAG_PROXIES" \
       -v rp="$FRAG_RULE_PROVIDERS" -v pg="$FRAG_PROXY_GROUPS" -v ru="$FRAG_RULES" \
-      -v r="$FRAG_REALITY" -v e="$FRAG_EXTRA" '
+      -v r="$FRAG_REALITY" -v e="$FRAG_EXTRA" \
+      -v cp="$FRAG_CLUSTER_PROXIES" -v cl="$FRAG_CLUSTER_LISTENERS" '
     /^@@CONTROLLER@@$/ { while ((getline l < c) > 0) print l; next }
     /^@@PROXY_PROVIDERS@@$/ {
       has = 0
@@ -234,6 +235,11 @@ assemble_config() {
         if (!has) { print "proxies:"; has = 1 }
         print l
       }
+      while ((getline l < cp) > 0) {
+        if (l ~ /^[[:space:]]*$/) continue
+        if (!has) { print "proxies:"; has = 1 }
+        print l
+      }
       if (!has) print "proxies: []"
       next
     }
@@ -244,6 +250,7 @@ assemble_config() {
       buf = ""
       while ((getline l < r) > 0) buf = buf l "\n"
       while ((getline l < e) > 0) buf = buf l "\n"
+      while ((getline l < cl) > 0) buf = buf l "\n"
       if (buf ~ /[^[:space:]]/) { print "listeners:"; printf "%s", buf }
       else print "listeners: []"
       next
@@ -317,16 +324,18 @@ render_client() {
   install -d -m 700 "$CLIENT_DIR"
   p_arg="${proxies%$'\n'}"; [[ -n $p_arg ]] || p_arg="  []"
   n_arg="${names%$'\n'}";   [[ -n $n_arg ]] || n_arg='      - "DIRECT"'
-  P="$p_arg" N="$n_arg" awk \
-    '/^@@PROXIES@@$/{print ENVIRON["P"]; next} /^@@PROXY_NAMES@@$/{print ENVIRON["N"]; next} {gsub(/\/dns-query#[^"'\''[:space:]]*/, "/dns-query"); print}' \
+  P="$p_arg" N="$n_arg" V="$CS_VERSION" awk \
+    '/^@@PROXIES@@$/{print ENVIRON["P"]; next} /^@@PROXY_NAMES@@$/{print ENVIRON["N"]; next} {gsub(/@@VERSION@@/, ENVIRON["V"]); gsub(/\/dns-query#[^"'\''[:space:]]*/, "/dns-query"); print}' \
     "$LIB_DIR/resources/client.yaml.tpl" > "$CLIENT_DIR/mihomo-client.yaml"
   chmod 600 "$CLIENT_DIR/mihomo-client.yaml"
   { echo "proxies:"; printf '%s' "${proxies:-  []$'\n'}"; } > "$CLIENT_DIR/proxies.yaml"
   chmod 600 "$CLIENT_DIR/proxies.yaml"
 }
 
+FIREWALL_RECORD=$CS_ROOT/firewall_ports.txt   # 由 ClashGate 自己放行的端口（面板 sync_ufw 同样记录），卸载时只关闭这些
+
 open_firewall() { # 本机启用了 ufw 或 firewalld 时自动放行所需端口（云服务商安全组仍需自行放行）
-  local p ports=()
+  local p ports=() opened=()
   if [[ $MODE == auto-cert ]]; then
     [[ ${CERT_MODE:-port} == port ]] && ports+=(80/tcp)
     [[ $PANEL_PORT == 80 && ${CERT_MODE:-port} == port ]] || ports+=("$PANEL_PORT/tcp")
@@ -334,13 +343,41 @@ open_firewall() { # 本机启用了 ufw 或 firewalld 时自动放行所需端�
   fi
   while IFS=$'\t' read -r _ p _; do [[ -n $p ]] && ports+=("$p/tcp" "$p/udp"); done < "$STATE"
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
-    for p in "${ports[@]}"; do ufw allow "$p" >/dev/null 2>&1 || true; done
+    local st; st=$(ufw status 2>/dev/null || true)
+    for p in "${ports[@]}"; do
+      grep -qE "^${p}[[:space:]]+ALLOW" <<<"$st" && continue   # 用户自己早已放行的规则：不记录，卸载时也不动
+      ufw allow "$p" >/dev/null 2>&1 && opened+=("$p")
+    done
     info "检测到 ufw 已启用，已放行：${ports[*]}"
   elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-    for p in "${ports[@]}"; do firewall-cmd --permanent --add-port="$p" >/dev/null 2>&1 || true; done
+    for p in "${ports[@]}"; do
+      firewall-cmd --permanent --query-port="$p" >/dev/null 2>&1 && continue
+      firewall-cmd --permanent --add-port="$p" >/dev/null 2>&1 && opened+=("$p")
+    done
     firewall-cmd --reload >/dev/null 2>&1 || true
     info "检测到 firewalld 已启用，已放行：${ports[*]}"
   fi
+  if ((${#opened[@]})); then
+    { cat "$FIREWALL_RECORD" 2>/dev/null || true; printf '%s\n' "${opened[@]}"; } | sort -u > "$FIREWALL_RECORD.new"
+    chmod 600 "$FIREWALL_RECORD.new"; mv -f "$FIREWALL_RECORD.new" "$FIREWALL_RECORD"
+  fi
+  return 0
+}
+
+close_firewall() { # 卸载时关闭 ClashGate 自己放行过的端口（用户原本就放行的规则不动）
+  [[ -s $FIREWALL_RECORD ]] || return 0
+  local p ports=()
+  mapfile -t ports < <(grep -E '^[0-9]+/(tcp|udp)$' "$FIREWALL_RECORD" || true)
+  ((${#ports[@]})) || return 0
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+    for p in "${ports[@]}"; do ufw delete allow "$p" >/dev/null 2>&1 || true; done
+    info "已从 ufw 移除 ClashGate 放行的端口：${ports[*]}"
+  elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+    for p in "${ports[@]}"; do firewall-cmd --permanent --remove-port="$p" >/dev/null 2>&1 || true; done
+    firewall-cmd --reload >/dev/null 2>&1 || true
+    info "已从 firewalld 移除 ClashGate 放行的端口：${ports[*]}"
+  fi
+  rm -f "$FIREWALL_RECORD"
 }
 
 setup_service() {

@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.12" src="https://img.shields.io/badge/version-v1.12-14614d" />
+  <img alt="Version: v1.21" src="https://img.shields.io/badge/version-v1.21-1d6fe0" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -17,15 +17,26 @@ Simple and safe. The last mile of the Mihomo ecosystem.
 
 ## What it does
 
-- **One-command proxy server**: deploy a Mihomo server on a common Linux VPS with a single command, ready to use.
-- **Client subscription included**: get a config you can import straight into Mihomo / Clash clients—no hand-assembled YAML.
-- **Many protocols**: add VLESS Reality, Shadowsocks, Hysteria2, Snell v6, AnyTLS, TUIC, TrustTunnel, ShadowQUIC, Mieru, or Sudoku in one click.
-- **Server-side routing**: when you need custom outbound routing, replace the built-in template with your own Mihomo server config.
-- **Multi-language**: switch the admin panel between 中文, English, Русский and فارسی; the installer and command line speak Chinese and English.
+- **One command to a working server**: deploy a Mihomo server on a common Linux VPS; the installer prints a ready-to-use client config.
+- **Two install modes**:
+  - No-certificate mode: just a server; VLESS Reality nodes are generated for you. The quickest start.
+  - Auto-certificate mode: add a domain and get a Let's Encrypt certificate that renews itself, plus an HTTPS admin panel and a subscription link.
+- **Three ways to get the certificate**: port mode (validated over port 80), Cloudflare DNS (no port 80 needed), or upload your own. Switch any time in the panel.
+- **Many protocols**: VLESS Reality, Shadowsocks, Hysteria2, Snell v6, AnyTLS, TUIC, TrustTunnel, ShadowQUIC, Mieru and Sudoku, added in a few clicks.
+- **Subscription link**: import it into Mihomo / Clash clients; when nodes change, clients just refresh the subscription.
+- **Server-side routing**: send different sites through different exits with rules in the panel; advanced users can swap in their own server config.
+- **Cluster**: link several ClashGate servers so one subscription link carries the nodes of all of them.
+- **Low maintenance**: check for updates in one click or turn on auto-update; core updates and certificate renewals are handled for you, and a runtime dashboard (Zashboard) is included.
+- **Multi-language**: the admin panel speaks 中文, English, Русский and فارسی; the installer and command line speak Chinese and English.
+
+## System requirements
+
+- Linux (x86_64 / arm64 / armv7) with systemd, run as root.
+- Recommended: Debian 11+, Ubuntu 20.04+, Rocky / Alma 8+, Fedora.
+- Auto-certificate mode (with the admin panel) needs Python 3.9 or newer. On Rocky / Alma 8 a newer Python is installed automatically; older systems (such as CentOS 7) can only use no-certificate mode.
+- Auto-certificate mode also needs a domain pointing at the server. On Cloudflare, set that record to grey cloud (DNS only).
 
 ## Install
-
-systemd Linux (Ubuntu / Debian / Rocky / Alma / Fedora / CentOS), as root:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ClashGate/ClashGate/main/install.sh | CLASHGATE_LANG=en bash

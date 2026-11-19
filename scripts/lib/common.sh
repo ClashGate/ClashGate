@@ -4,9 +4,9 @@
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/i18n.sh"   # CLASHGATE_LANG=en|zh；默认中文
 
-# Compared as integer tuples by installed panels (1.12 > 1.11 > 1.10 > 1.09): never use 1.1 / 1.2, the next is 1.13.
-CS_VERSION=1.12
-CS_SOURCE_SHA=20261112-v1.12
+# Compared as integer tuples by installed panels (1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09): never use 1.1 / 1.2, the next is 1.22.
+CS_VERSION=1.21
+CS_SOURCE_SHA=20261119-v1.21
 REPO_OWNER=${REPO_OWNER:-ClashGate}
 REPO_NAME=${REPO_NAME:-ClashGate}
 REPO_SLUG=${REPO_SLUG:-$REPO_OWNER/$REPO_NAME}
@@ -18,6 +18,8 @@ REPO_BRANCH=${REPO_BRANCH:-main}
 REPO_TARBALL=${REPO_TARBALL:-https://github.com/$REPO_SLUG/archive/refs/heads/$REPO_BRANCH.tar.gz}
 INSTALL_RAW_URL=https://raw.githubusercontent.com/$REPO_SLUG/$REPO_BRANCH/install.sh
 CS_ROOT=/etc/clashgate
+# Top-level paths copied/replaced atomically by install_files (and the reinstall bootstrap).
+CS_TREE_PARTS=(install.sh uninstall.sh panel resources scripts)
 SELF_BIN=/usr/local/bin/clashgate
 BIN=$CS_ROOT/mihomo
 CONF_DIR=$CS_ROOT
@@ -28,6 +30,8 @@ FRAG_REALITY=$CONF_DIR/listeners.reality.yaml
 FRAG_EXTRA=$CONF_DIR/listeners.extra.yaml    # owned by the panel
 FRAG_PROXIES=$CONF_DIR/proxies.extra.yaml    # outbound proxies owned by the panel
 FRAG_PROVIDERS=$CONF_DIR/providers.extra.yaml # outbound proxy-providers owned by the panel
+FRAG_CLUSTER_PROXIES=$CONF_DIR/proxies.cluster.yaml      # cluster member outbounds (panel, 1.14)
+FRAG_CLUSTER_LISTENERS=$CONF_DIR/listeners.cluster.yaml # cluster peer inbounds (panel, 1.14)
 FRAG_RULE_PROVIDERS=$CONF_DIR/routing.rule-providers.yaml
 FRAG_PROXY_GROUPS=$CONF_DIR/routing.proxy-groups.yaml
 FRAG_RULES=$CONF_DIR/routing.rules.yaml
@@ -90,6 +94,40 @@ ask() { # ask "提示" 默认值  -> 读取 /dev/tty（curl|bash 时 stdin 是�
   printf '%s' "$1" >/dev/tty
   read -r ans </dev/tty || true
   printf '%s' "${ans:-$2}"
+}
+
+# 管理面板需要 Python 3.9+（str.removeprefix、内置泛型注解等）。输出可用的解释器路径；没有则返回 1。
+py_bin() {
+  local c p
+  for c in python3 python3.13 python3.12 python3.11 python3.10 python3.9; do
+    p=$(command -v "$c" 2>/dev/null) || continue
+    "$p" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null && { printf '%s' "$p"; return 0; }
+  done
+  return 1
+}
+
+# 证书模式（有管理面板）需要 Python 3.9+：系统自带版本过低时，dnf / yum 系统（如 Rocky / Alma / CentOS 8）
+# 尝试安装 python3.11 或 python39（与系统自带的 python3 并存，不改系统默认），装不上就明确报错。
+ensure_python() {
+  py_bin >/dev/null && return 0
+  local cur pkg
+  cur=$(python3 -V 2>&1 || echo "未安装")
+  if [[ $PKG_MGR == dnf || $PKG_MGR == yum ]]; then
+    info "系统自带的 Python 版本过低（$cur），正在安装新版 Python"
+    for pkg in python3.11 python39; do
+      "$PKG_MGR" install -y -q "$pkg" >/dev/null 2>&1 && py_bin >/dev/null && { info "已安装 $(py_bin)"; return 0; }
+    done
+  fi
+  die "管理面板需要 Python 3.9 或更高版本（当前：$cur）。请换用较新的系统（Debian 11+ / Ubuntu 20.04+ / Rocky 或 Alma 8+ / Fedora），或手动安装 Python 3.9+ 后重试"
+}
+
+# 安装管理面板的 systemd unit；ExecStart 用 py_bin 找到的解释器（系统 python3 太旧时用新装的 python3.x）
+install_panel_unit() {
+  local py
+  py=$(py_bin) || py=/usr/bin/python3
+  sed "s#^ExecStart=/usr/bin/python3 #ExecStart=$py #" "$LIB_DIR/scripts/init/clashgate.service" > /etc/systemd/system/clashgate.service.new
+  chmod 644 /etc/systemd/system/clashgate.service.new
+  mv -f /etc/systemd/system/clashgate.service.new /etc/systemd/system/clashgate.service
 }
 
 detect_pkg_mgr() {
@@ -283,10 +321,10 @@ install_files() { # 把源码树 $CS_HOME 安装到统一目录 /etc/clashgate�
   install -d -m 700 "$CLIENT_DIR"
   local stage=$CS_ROOT/.stage.$$ d
   rm -rf "$stage"; install -d -m 755 "$stage"
-  for d in install.sh uninstall.sh panel resources scripts; do cp -r "$CS_HOME/$d" "$stage/"; done
+  for d in "${CS_TREE_PARTS[@]}"; do cp -r "$CS_HOME/$d" "$stage/"; done
   rm -rf "$stage/panel/__pycache__" "$stage/panel/web/node_modules"
   chmod 755 "$stage/install.sh" "$stage/uninstall.sh" "$stage/scripts/cmd/clashgate.sh" "$stage/scripts/certctl.sh" "$stage/panel/panel.py"
-  for d in install.sh uninstall.sh panel resources scripts; do
+  for d in "${CS_TREE_PARTS[@]}"; do
     rm -rf "$CS_ROOT/$d.old"
     if [[ -e $CS_ROOT/$d ]]; then mv "$CS_ROOT/$d" "$CS_ROOT/$d.old"; fi
     mv "$stage/$d" "$CS_ROOT/$d"

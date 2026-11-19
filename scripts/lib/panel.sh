@@ -55,7 +55,7 @@ setup_panel() {
   [[ -f $CS_ETC/proxies.json ]]   || { echo '[]' > "$CS_ETC/proxies.json";   chmod 600 "$CS_ETC/proxies.json"; }
   [[ -f $CS_ETC/providers.json ]] || { echo '{}' > "$CS_ETC/providers.json"; chmod 600 "$CS_ETC/providers.json"; }
   set_panel_password
-  install -m 644 "$LIB_DIR/scripts/init/clashgate.service" /etc/systemd/system/clashgate.service
+  install_panel_unit
   systemctl daemon-reload
   systemctl enable clashgate >/dev/null 2>&1
   systemctl restart clashgate
@@ -84,7 +84,7 @@ write_panel_cfg() { # PANEL_HASH + SUB_TOKEN -> panel.json (0600, root only)
 
 set_panel_password() { # new random password; keeps an existing subscription token
   PANEL_PASS=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 20)
-  PANEL_HASH=$(printf '%s\n' "$PANEL_PASS" | python3 "$LIB_DIR/panel/panel.py" hash-password)
+  PANEL_HASH=$(printf '%s\n' "$PANEL_PASS" | "$(py_bin || echo python3)" "$LIB_DIR/panel/panel.py" hash-password)
   [[ -n $SUB_TOKEN ]] || SUB_TOKEN=$(panel_cfg_get sub_token)
   [[ -n $SUB_TOKEN ]] || SUB_TOKEN=$(new_sub_token)
   write_panel_cfg

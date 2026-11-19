@@ -1,4 +1,4 @@
-"""i18n parity: every zh UI string used by App.vue has en/ru/fa entries, no unused UI entries,
+"""i18n parity: every zh UI string used by the panel web UI has en/ru/fa entries, no unused UI entries,
 server message tables (panel/i18n_en.py, locales/*.json "server") cover the same keys, and
 {placeholders} match. Exit 1 on any problem."""
 import json
@@ -11,7 +11,15 @@ SRC = os.path.join(REPO, "panel", "web", "src")
 sys.path.insert(0, os.path.join(REPO, "panel"))
 import i18n_en  # noqa: E402
 
-app = open(os.path.join(SRC, "App.vue"), encoding="utf-8").read()
+# All UI modules (App.vue, composables, page components). Skip i18n tables and locale JSON.
+ui_src_parts = []
+for dirpath, _, files in os.walk(SRC):
+    if os.path.basename(dirpath) == "locales":
+        continue
+    for fn in files:
+        if fn.endswith((".js", ".vue")) and fn != "i18n.js":
+            ui_src_parts.append(open(os.path.join(dirpath, fn), encoding="utf-8").read())
+app = "\n".join(ui_src_parts)
 js = open(os.path.join(SRC, "i18n.js"), encoding="utf-8").read()
 EN = json.loads(re.search(r"export const EN = (\{.*?\n\})", js, re.S).group(1))
 loc = {l: json.load(open(os.path.join(SRC, "locales", f"{l}.json"), encoding="utf-8")) for l in ("ru", "fa")}

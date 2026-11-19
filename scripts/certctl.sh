@@ -8,6 +8,7 @@
 # 申请方式（CERT_MODE）：
 #   port  端口模式（默认）：申请/续期时临时使用 80 端口
 #   dns   DNS API 模式：使用 Cloudflare API Token（CF_Token），无需占用 80/443 端口，支持 *.泛域名
+#   manual 手动证书：用户自己把证书放进 /etc/clashgate/certs/；这里只校验，不申请、不续期
 # 证书来源（TLS）：
 #   production  Let's Encrypt 正式证书（默认）
 #   staging     Let's Encrypt 测试证书
@@ -136,7 +137,17 @@ if [[ $TLS == internal ]]; then   # 开发用：本机自签，不走 ACME
 fi
 
 ACME=$ACME_HOME/acme.sh
-[[ -x $ACME ]] || { err "未找到 $ACME（可执行 clashgate update 重新安装）"; exit 1; }
+# 手动证书模式安装的机器没有 acme.sh：从面板切换到自动证书时按固定版本补装（同 lib/cert.sh install_acme）
+# shellcheck source=lib/acme.sh
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/acme.sh"
+ensure_acme() {
+  local ver
+  ver=$(sed -n 's/^ACMESH_VERSION=\([0-9.]*\).*/\1/p' "$CS_ROOT/scripts/lib/common.sh" 2>/dev/null | head -n1)
+  ver=${ver:-3.1.6}
+  say "未找到 acme.sh，正在安装 v$ver"
+  acme_fetch_install "$ACME_HOME" "$ver" "${EMAIL:-}"
+}
+[[ -x $ACME ]] || ensure_acme || { err "未找到 $ACME，自动安装失败（可执行 clashgate update 后重试）"; exit 1; }
 if [[ $CERT_MODE == dns && -n ${CF_TOKEN:-} ]]; then
   export CF_Token=$CF_TOKEN
 fi

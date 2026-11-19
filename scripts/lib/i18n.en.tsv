@@ -1,4 +1,4 @@
-第 %s 行执行失败：%s	Line %s failed: %s
+执行中断：脚本第 %s 行的命令没有成功（%s）。多数是网络或软件源暂时不可用，可以稍后重新运行；仍然失败时请带上以上输出到 GitHub Issues 反馈	Stopped: the command on line %s of the script failed (%s). This is usually a temporary network or package-mirror problem; run it again later. If it keeps failing, open a GitHub issue with the output above
 请以 root 身份运行（可先执行 sudo -i 再运行安装命令）	Please run as root (e.g. run sudo -i first, then the install command)
 仅支持 Linux 系统（当前：%s）	Linux only (current: %s)
 无法识别操作系统（缺少 /etc/os-release）	Cannot identify the OS (missing /etc/os-release)
@@ -49,7 +49,7 @@ API Token 不能包含空格或引号\n	The API Token must not contain spaces or
 请输入域名（需已将 A 记录解析到本机）：	Enter the domain (its A record must already point to this host): 
 已分配管理面板随机空闲高端口：%s\n	Assigned a random free high port for the admin panel: %s\n
 已分配 Zashboard 控制接口随机空闲高端口：%s\n	Assigned a random free high port for the Zashboard controller: %s\n
-检测到已安装 ClashGate，是否卸载后重新安装？节点和密钥都会重新生成 [y/N]：	ClashGate is already installed. Uninstall and reinstall? Nodes and keys will be regenerated [y/N]: 
+检测到已安装 ClashGate，是否卸载后重新安装？节点和密钥都会重新生成（已加入集群时会先退出集群） [y/N]：	ClashGate is already installed. Uninstall and reinstall? Nodes and keys will be regenerated (this server leaves its cluster first, if any) [y/N]: 
 已取消。查看现有节点：clashgate info\n	Cancelled. View existing nodes: clashgate info\n
 已安装（存在 %s）。查看节点：clashgate info；如需重装请在终端中运行 clashgate install	Already installed (%s exists). View nodes: clashgate info; to reinstall, run clashgate install in a terminal
 正在卸载旧的安装……\n	Uninstalling the previous installation...\n
@@ -78,7 +78,7 @@ Zashboard：%s 正常	Zashboard: %s OK
 \n\033[1m客户端 proxies 片段\033[0m\n	\n\033[1mClient proxies snippet\033[0m\n
 \n\033[1m客户端配置目录\033[0m：%s\n	\n\033[1mClient config directory\033[0m: %s\n
   - mihomo-client.yaml（完整 mihomo 客户端配置）\n  - proxies.yaml（仅节点片段）\n	  - mihomo-client.yaml (full mihomo client config)\n  - proxies.yaml (node snippet only)\n
-\n管理：运行 \033[1mclashgate\033[0m 打开中文管理菜单（clashgate help 查看全部子命令）\n	\nManage: run \033[1mclashgate\033[0m to open the management menu (clashgate help lists all subcommands)\n
+\n管理：运行 \033[1mclashgate\033[0m 打开管理菜单（clashgate help 查看全部子命令）\n	\nManage: run \033[1mclashgate\033[0m to open the management menu (clashgate help lists all subcommands)\n
 \n\033[1;33m需要注意：\033[0m\n	\n\033[1;33mNotes:\033[0m\n
 安装 ClashGate 文件	Installing ClashGate files
 重启服务	Restarting services
@@ -139,9 +139,9 @@ Zashboard：%s\n新的 API 密钥（Secret）：%s\n	Zashboard: %s\nNew API secr
 重置面板密码（随机）	Reset panel password (random)
 重置 Zashboard 密钥（随机）	Reset Zashboard secret (random)
 立即申请 / 续期 / 校验证书	Request / renew / validate certificate now
-重启 Mihomo	Restart Mihomo
+重启内核	Restart the core
 查看日志	View logs
-更新（内核 + 脚本）	Update (core + scripts)
+更新内核 + 脚本与面板	Update core + scripts and panel
 卸载	Uninstall
 \n\033[1mClashGate v%s 管理菜单\033[0m（%s	\n\033[1mClashGate v%s menu\033[0m (%s
 ）  Mihomo：%s\n	)  Mihomo: %s\n
@@ -227,3 +227,16 @@ mihomo 用户无法读取证书私钥	The mihomo user cannot read the private ke
 端口 %s / %s 已被占用，请先停止占用程序：	Ports %s / %s are already in use; stop the occupying program first:
 80 端口已被其他程序占用（端口模式申请证书需要临时占用 80 端口），请先停止占用程序或改用「DNS API 模式」/「手动证书模式」：	Port 80 is in use by another program (port mode needs port 80 temporarily); stop it or switch to "DNS API mode" / "Manual certificate mode":
 %s 安装：%s	%s install: %s
+确定卸载 ClashGate？会先退出集群，然后删除所有节点、证书和配置 [y/N]：	Uninstall ClashGate? This server leaves its cluster first, then all nodes, certificates and config are deleted [y/N]: 
+没能退出集群（找不到 Python 3.9+），请到其他成员的面板里手动删除这台服务器	Could not leave the cluster (Python 3.9+ not found); remove this server from the other members' panels by hand
+正在退出集群（通知 %s 个成员）	Leaving the cluster (notifying %s members)
+没能退出集群，请到其他成员的面板里手动删除这台服务器	Could not leave the cluster; remove this server from the other members' panels by hand
+以下集群成员没收到退出通知，请到它们的面板里手动删除这台服务器：%s	These cluster members were not notified; remove this server from their panels by hand: %s
+已从 ufw 移除 ClashGate 放行的端口：%s	Removed the ports ClashGate opened from ufw: %s
+已从 firewalld 移除 ClashGate 放行的端口：%s	Removed the ports ClashGate opened from firewalld: %s
+分流默认模板生成失败（可稍后在面板「服务端分流」中恢复）	Could not generate the default routing template (you can restore it later in the panel under "Server routing")
+acme.sh v%s 下载或安装失败（请确认服务器可以访问 GitHub）	Failed to download or install acme.sh v%s (make sure the server can reach GitHub)
+未安装	not installed
+系统自带的 Python 版本过低（%s），正在安装新版 Python	The system Python is too old (%s); installing a newer Python
+已安装 %s	Installed %s
+管理面板需要 Python 3.9 或更高版本（当前：%s）。请换用较新的系统（Debian 11+ / Ubuntu 20.04+ / Rocky 或 Alma 8+ / Fedora），或手动安装 Python 3.9+ 后重试	The admin panel needs Python 3.9 or newer (current: %s). Use a newer system (Debian 11+ / Ubuntu 20.04+ / Rocky or Alma 8+ / Fedora), or install Python 3.9+ yourself and try again
