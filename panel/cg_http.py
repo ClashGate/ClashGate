@@ -381,7 +381,6 @@ class Panel(BaseHTTPRequestHandler):
             "cert_mode": cert_mode,
             "domain": domain,
             "cf_token": cf_token,
-            "cluster_min_version": CLUSTER_MIN_VERSION,
             "cert_issuer": cert_issuer,
             "cert_expires": cert_expires,
             "cert_days": cert_days,

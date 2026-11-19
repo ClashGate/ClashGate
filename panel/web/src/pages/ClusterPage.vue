@@ -296,12 +296,6 @@ const {
                     <div v-else class="text-xs text-amber-700">{{ t('本机没有可用的面板地址（域名或服务器 IP），其他面板无法连回本机') }}</div>
                     <p class="text-xs text-slate-500 leading-relaxed">{{ t('对方会通过这个地址连回本机，并校验 HTTPS 证书。') }}</p>
                   </div>
-                  <ul class="text-xs text-slate-500 leading-relaxed space-y-1 list-disc ps-4">
-                    <li>{{ t('已经在集群里的面板会自动和新面板互联，不需要再输入密码。') }}</li>
-                    <li>{{ t('对方面板需要 ClashGate {v} 或更高版本，并使用有效的 HTTPS 证书。', { v: state.cluster_min_version || '1.15' }) }}</li>
-                    <li>{{ t('添加后立即生效，不需要点「应用配置」。') }}</li>
-                    <li>{{ t('这些出站不会出现在节点列表和客户端订阅里，可以在 Zashboard 的分流策略组里选择它们作为出口。') }}</li>
-                  </ul>
                 </section>
               </div>
 

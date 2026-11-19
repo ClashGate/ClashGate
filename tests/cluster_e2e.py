@@ -394,7 +394,6 @@ def main():
     for path in ("/action/restart", "/action/cert-dns", "/routing/update"):
         st, _, _ = a.raw(path, data={})
         check(st == 404, f"removed route {path} -> {st}")
-    check(a.state.get("cluster_min_version") == "1.15", f"state carries cluster_min_version {a.state.get('cluster_min_version')}")
 
     print("[error paths]")
     r = a.post("/cluster/add", url="http://" + HOSTS["B"], password="x")
