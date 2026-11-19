@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.27" src="https://img.shields.io/badge/version-v1.27-1d6fe0" />
+  <img alt="Version: v1.28" src="https://img.shields.io/badge/version-v1.28-1d6fe0" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -67,8 +67,6 @@ curl -fsSL https://raw.githubusercontent.com/ClashGate/ClashGate/main/install.sh
 | 命令 | 说明 |
 | --- | --- |
 | `clashgate update` | 更新内核、脚本与面板 |
-| `clashgate update core` | 只更新内核 |
-| `clashgate update self` | 只更新脚本与面板 |
 | `clashgate lang zh\|en\|ru` | 切换命令行语言 |
 | `clashgate install` | 重新安装 |
 | `clashgate help` | 查看全部子命令 |
