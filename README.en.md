@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.28" src="https://img.shields.io/badge/version-v1.28-1d6fe0" />
+  <img alt="Version: v1.29" src="https://img.shields.io/badge/version-v1.29-1d6fe0" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -50,17 +50,9 @@ Run `clashgate` for the menu, or use a subcommand:
 | --- | --- |
 | `clashgate sub` | Show the subscription link |
 | `clashgate reset-sub` | New subscription link; old one stops at once |
-| `clashgate passwd` | Change the panel password |
 | `clashgate reset-password` | Reset the panel password (random) |
-| `clashgate reset-secret` | Reset the Zashboard secret (random) |
 
 Certificate modes only.
-
-### Certificate
-
-| Command | Description |
-| --- | --- |
-| `clashgate cert` | Request / renew / validate the certificate now |
 
 ### Update and maintenance
 
@@ -75,7 +67,7 @@ Certificate modes only.
 
 | Command | Description |
 | --- | --- |
-| `clashgate uninstall` | Uninstall (leaves the cluster, closes opened ports) |
+| `clashgate uninstall` | Uninstall |
 
 ## Layout
 

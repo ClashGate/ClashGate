@@ -78,7 +78,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -834,7 +834,7 @@ class SecurityTest(unittest.TestCase):
 
 
 class V121Test(unittest.TestCase):
-    """1.21: friendly errors, gzip, deferred secret/token commit, firewall record, client header."""
+    """1.21: friendly errors, gzip, deferred secret/token commit, uninstall order, client header."""
 
     def test_friendly_error(self):
         fe = P.friendly_error
@@ -931,24 +931,10 @@ class V121Test(unittest.TestCase):
             with open(P.ENV_FILE, "w") as f:
                 f.write(env_before)
 
-    def test_firewall_record(self):
-        try:
-            os.remove(P.FIREWALL_RECORD)
-        except FileNotFoundError:
-            pass
-        P.record_firewall_port("443/tcp", True)
-        P.record_firewall_port("8443/udp", True)
-        P.record_firewall_port("443/tcp", True)
-        self.assertEqual(read(P.FIREWALL_RECORD), "443/tcp\n8443/udp\n")
-        P.record_firewall_port("443/tcp", False)
-        self.assertEqual(read(P.FIREWALL_RECORD), "8443/udp\n")
-        os.remove(P.FIREWALL_RECORD)
-        sh = read(os.path.join(REPO, "scripts/lib/core.sh"))
-        self.assertIn("FIREWALL_RECORD=$CS_ROOT/firewall_ports.txt", sh)
-        self.assertTrue(P.FIREWALL_RECORD.endswith("/firewall_ports.txt"))
+    def test_uninstall_leaves_cluster_first(self):
         un = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))
         body = un[un.index("do_uninstall() {"):]
-        self.assertLess(body.index("close_firewall"), body.index('rm -rf "$CS_ROOT"'))
+        self.assertNotIn("close_firewall", body)   # 1.29: uninstall leaves firewall rules alone
         self.assertLess(body.index("leave_cluster"), body.index("systemctl disable --now clashgate"))
 
     def test_client_header_has_version(self):

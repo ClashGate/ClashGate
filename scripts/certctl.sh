@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # clashgate 证书管理（自动证书模式，acme.sh）
 #   certctl.sh issue    申请证书并部署到 /etc/clashgate/certs（安装时调用）
-#   certctl.sh renew    续期（acme.sh --cron）；首次申请未成功时重新申请（systemd timer / clashgate cert 调用）
+#   certctl.sh renew    续期（acme.sh --cron）；首次申请未成功时重新申请（systemd timer / 面板调用）
 #   certctl.sh deploy   acme.sh 签发 / 续期后的 reloadcmd：复制证书给 Mihomo 与面板，有变化时按需重启 Mihomo
 #   certctl.sh selfsign 写入临时自签证书（正式证书申请失败时兜底，让面板和 Mihomo 先跑起来）
 #
@@ -121,7 +121,7 @@ case $ACTION in
   *) err "用法：certctl.sh issue|renew|reissue|deploy|selfsign"; exit 1 ;;
 esac
 
-# 安装、定时续期和 clashgate cert 可能同时运行：串行化
+# 安装、定时续期和面板可能同时运行：串行化
 exec 9>"$LOCK_FILE"
 flock -w 600 9 || { err "另一个证书任务仍在运行"; exit 1; }
 

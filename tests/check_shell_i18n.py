@@ -148,7 +148,7 @@ with tempfile.TemporaryDirectory() as td:
     if "Использование" not in out:
         problems.append("LANG=ru_RU.UTF-8 should default to Russian")
 
-# certctl.sh (run by clashgate cert, the renew timer and the panel) speaks the same language; the panel pins zh.
+# certctl.sh (run by the installer, the renew timer and the panel) speaks the same language; the panel pins zh.
 with tempfile.TemporaryDirectory() as td:
     etc = os.path.join(td, "etc", "clashgate")
     os.makedirs(etc)

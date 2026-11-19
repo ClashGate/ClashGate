@@ -44,7 +44,7 @@ TABLE = [
     ("请输入有效的 HTTP/HTTPS 订阅链接", "Enter a valid HTTP/HTTPS subscription URL"),
     ("订阅源名称仅限 1-48 位字母、数字及 . _ -", "Provider name: 1-48 letters, digits and . _ - only"),
     ("未知的入站类型", "Unknown inbound type"),
-    ("{} 启用 TLS 需要域名证书，未找到 {}（请先在服务器执行 clashgate cert）", "{} with TLS needs a domain certificate, but {} was not found (run clashgate cert on the server first)"),
+    ("{} 启用 TLS 需要域名证书，未找到 {}（请先在「HTTPS 证书」页申请证书）", "{} with TLS needs a domain certificate, but {} was not found (request one on the HTTPS certificate page first)"),
     ("端口无效（1-65535）", "Invalid port (1-65535)"),
     ("端口 {} 已被占用", "Port {} is already in use"),
     ("名称仅限 1-48 位字母、数字及 . _ -", "Name: 1-48 letters, digits and . _ - only"),

@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.28" src="https://img.shields.io/badge/version-v1.28-1d6fe0" />
+  <img alt="Version: v1.29" src="https://img.shields.io/badge/version-v1.29-1d6fe0" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -50,17 +50,9 @@ curl -fsSL https://raw.githubusercontent.com/ClashGate/ClashGate/main/install.sh
 | --- | --- |
 | `clashgate sub` | 查看订阅链接 |
 | `clashgate reset-sub` | 更换订阅链接，旧链接立即失效 |
-| `clashgate passwd` | 修改面板密码 |
 | `clashgate reset-password` | 随机重置面板密码 |
-| `clashgate reset-secret` | 随机重置 Zashboard 密钥 |
 
 以上命令仅证书模式可用。
-
-### 证书
-
-| 命令 | 说明 |
-| --- | --- |
-| `clashgate cert` | 立即申请 / 续期 / 校验证书 |
 
 ### 更新与维护
 
@@ -75,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/ClashGate/ClashGate/main/install.sh
 
 | 命令 | 说明 |
 | --- | --- |
-| `clashgate uninstall` | 卸载（先退出集群并关闭放行的端口） |
+| `clashgate uninstall` | 卸载 |
 
 ## 目录
 

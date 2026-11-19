@@ -332,10 +332,8 @@ render_client() {
   chmod 600 "$CLIENT_DIR/proxies.yaml"
 }
 
-FIREWALL_RECORD=$CS_ROOT/firewall_ports.txt   # 由 ClashGate 自己放行的端口（面板 sync_ufw 同样记录），卸载时只关闭这些
-
 open_firewall() { # 本机启用了 ufw 或 firewalld 时自动放行所需端口（云服务商安全组仍需自行放行）
-  local p ports=() opened=()
+  local p ports=()
   if [[ $MODE == auto-cert ]]; then
     [[ ${CERT_MODE:-port} == port ]] && ports+=(80/tcp)
     [[ $PANEL_PORT == 80 && ${CERT_MODE:-port} == port ]] || ports+=("$PANEL_PORT/tcp")
@@ -345,39 +343,19 @@ open_firewall() { # 本机启用了 ufw 或 firewalld 时自动放行所需端�
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
     local st; st=$(ufw status 2>/dev/null || true)
     for p in "${ports[@]}"; do
-      grep -qE "^${p}[[:space:]]+ALLOW" <<<"$st" && continue   # 用户自己早已放行的规则：不记录，卸载时也不动
-      ufw allow "$p" >/dev/null 2>&1 && opened+=("$p")
+      grep -qE "^${p}[[:space:]]+ALLOW" <<<"$st" && continue   # 用户自己早已放行的规则
+      ufw allow "$p" >/dev/null 2>&1 || true
     done
     info "检测到 ufw 已启用，已放行：${ports[*]}"
   elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
     for p in "${ports[@]}"; do
       firewall-cmd --permanent --query-port="$p" >/dev/null 2>&1 && continue
-      firewall-cmd --permanent --add-port="$p" >/dev/null 2>&1 && opened+=("$p")
+      firewall-cmd --permanent --add-port="$p" >/dev/null 2>&1 || true
     done
     firewall-cmd --reload >/dev/null 2>&1 || true
     info "检测到 firewalld 已启用，已放行：${ports[*]}"
   fi
-  if ((${#opened[@]})); then
-    { cat "$FIREWALL_RECORD" 2>/dev/null || true; printf '%s\n' "${opened[@]}"; } | sort -u > "$FIREWALL_RECORD.new"
-    chmod 600 "$FIREWALL_RECORD.new"; mv -f "$FIREWALL_RECORD.new" "$FIREWALL_RECORD"
-  fi
   return 0
-}
-
-close_firewall() { # 卸载时关闭 ClashGate 自己放行过的端口（用户原本就放行的规则不动）
-  [[ -s $FIREWALL_RECORD ]] || return 0
-  local p ports=()
-  mapfile -t ports < <(grep -E '^[0-9]+/(tcp|udp)$' "$FIREWALL_RECORD" || true)
-  ((${#ports[@]})) || return 0
-  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
-    for p in "${ports[@]}"; do ufw delete allow "$p" >/dev/null 2>&1 || true; done
-    info "已从 ufw 移除 ClashGate 放行的端口：${ports[*]}"
-  elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-    for p in "${ports[@]}"; do firewall-cmd --permanent --remove-port="$p" >/dev/null 2>&1 || true; done
-    firewall-cmd --reload >/dev/null 2>&1 || true
-    info "已从 firewalld 移除 ClashGate 放行的端口：${ports[*]}"
-  fi
-  rm -f "$FIREWALL_RECORD"
 }
 
 setup_service() {
