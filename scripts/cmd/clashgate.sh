@@ -23,10 +23,7 @@ Usage: clashgate [subcommand]
   info              show node config (proxies snippet, client config dir, subscription link)
   sub               show the subscription link (certificate modes)
   reset-sub         change the subscription link; the old link stops working immediately
-  passwd            change the panel password (custom)
   reset-password    reset the panel password (random)
-  reset-secret      reset the Zashboard API secret (random)
-  cert              request / renew / validate the certificate now
   restart           restart the core
   update            update core, scripts and panel
   log               show recent logs
@@ -50,10 +47,7 @@ ClashGate (clashgate) - команда управления прокси-сер�
   info              показать конфигурацию узлов (фрагмент proxies, каталог клиента, ссылка подписки)
   sub               показать ссылку подписки (режимы с сертификатом)
   reset-sub         сменить ссылку подписки; старая ссылка сразу перестаёт работать
-  passwd            изменить пароль панели (свой)
   reset-password    сбросить пароль панели (случайный)
-  reset-secret      сбросить API-секрет Zashboard (случайный)
-  cert              сейчас запросить / продлить / проверить сертификат
   restart           перезапустить ядро
   update            обновить ядро, скрипты и панель
   log               показать последние журналы
@@ -76,10 +70,7 @@ ClashGate (clashgate) —— 代理服务端管理命令 (v$CS_VERSION)
   info              查看节点配置（proxies 片段、客户端配置目录、订阅链接）
   sub               查看订阅链接（证书模式）
   reset-sub         更换订阅链接，旧链接立即失效
-  passwd            修改面板密码（自定义）
   reset-password    重置面板密码（随机生成）
-  reset-secret      重置 Zashboard API 密钥（随机生成）
-  cert              立即申请 / 续期 / 校验证书
   restart           重启内核
   update            更新内核、脚本与面板
   log               查看最近日志
@@ -216,11 +207,11 @@ print_summary() {
     fi
     printf '\n\033[1m管理面板\033[0m\n'
     printf '  地址：%s\n  端口：%s（随机空闲高端口，请确保防火墙已放行 TCP %s）\n  用户名：admin\n' "$(panel_url)" "$(panel_port)" "$(panel_port)"
-    [[ -n $PANEL_PASS ]] && printf '  密码：%s（仅显示一次；可用 clashgate passwd 修改）\n' "$PANEL_PASS"
+    [[ -n $PANEL_PASS ]] && printf '  密码：%s（仅显示一次；可在面板中修改）\n' "$PANEL_PASS"
     printf '  证书方式：%s\n' "$(cert_mode_label)"
     printf '  证书：%s\n' "$(tls_label)"
     if [[ ${CERT_MODE:-port} != manual ]] && cert_is_temp; then
-      printf '  \033[1;33m证书尚未签发成功，当前为临时自签证书；检查配置后可执行 clashgate cert 立即重试\033[0m\n'
+      printf '  \033[1;33m证书尚未签发成功，当前为临时自签证书；系统每小时自动重试，也可在面板「HTTPS 证书」页立即重试\033[0m\n'
     fi
     printf '\n统一安装目录：%s（本地客户端备份：%s）\n' "$CS_ROOT" "$CLIENT_DIR"
   else
@@ -329,28 +320,6 @@ update_self() {
   info "ClashGate 已更新到 GitHub ${REPO_BRANCH:-main} 最新版（通道：${ch_label}）"
 }
 
-do_cert() { # 立即申请 / 续期 / 校验证书
-  require_installed; load_env; require_panel
-  if [[ ${CERT_MODE:-port} == manual ]]; then
-    printf '正在校验手动证书（%s/certs/）……\n' "$CONF_DIR"
-    check_manual_cert_files || return 1
-    systemctl restart mihomo || true
-    printf '手动证书正常：%s，到期 %s（剩余 %s 天）\n' "$(cert_issuer)" "$(cert_enddate)" "$(cert_days_left)"
-    return 0
-  fi
-  printf '正在申请 / 续期证书（%s，%s，%s）……\n' "$DOMAIN" "$(cert_mode_label)" "$(tls_label)"
-  if ! "$LIB_DIR/scripts/certctl.sh" renew; then
-    if [[ ${CERT_MODE:-port} == dns ]]; then
-      printf '\033[1;31m申请 / 续期失败\033[0m：请确认 Cloudflare API Token 具备 %s 的 DNS 编辑权限\n' "${DOMAIN#\*.}"
-    else
-      printf '\033[1;31m申请 / 续期失败\033[0m：请确认域名 A 记录指向 %s（没有指向别处的 AAAA 记录）、云防火墙放行 TCP 80、80 端口未被占用\n' "$SERVER_IP"
-    fi
-    return 1
-  fi
-  if cert_is_temp; then printf '\033[1;31m证书仍未签发\033[0m，请检查配置后重试\n'; return 1; fi
-  printf '证书正常：%s，到期 %s（剩余 %s 天；到期前 30 天内自动续期）\n' "$(cert_issuer)" "$(cert_enddate)" "$(cert_days_left)"
-}
-
 do_status() {
   require_installed; load_env
   printf '\033[1m运行状态（ClashGate v%s）\033[0m\n' "$CS_VERSION"
@@ -366,15 +335,15 @@ do_status() {
     printf '  Zashboard：%s（端口 %s，API 密钥：%s）\n' "$(zashboard_url)" "$(controller_port)" "${MIHOMO_SECRET:-—}"
     printf '  域名：%s（证书：%s）\n' "$DOMAIN" "$(tls_label)"
     if cert_is_temp; then
-      printf '  证书：\033[1;31m尚未签发\033[0m（临时自签证书；可执行 clashgate cert 重试）\n'
+      printf '  证书：\033[1;31m尚未签发\033[0m（临时自签证书；可在面板「HTTPS 证书」页重试）\n'
     elif [[ -f $CONF_DIR/certs/fullchain.pem ]]; then
       local days; days=$(cert_days_left)
       printf '  证书到期：%s（%s，剩余 %s 天）\n' "$(cert_enddate)" "$(cert_issuer)" "$days"
       if [[ -n $days ]] && ((days < 14)); then
-        printf '  \033[1;33m证书即将到期\033[0m：请及时续期或更新证书（clashgate cert）\n'
+        printf '  \033[1;33m证书即将到期\033[0m：请在面板「HTTPS 证书」页续期或更新证书\n'
       fi
     else
-      printf '  证书：\033[1;31m缺失\033[0m（执行 clashgate cert）\n'
+      printf '  证书：\033[1;31m缺失\033[0m（请在面板「HTTPS 证书」页处理）\n'
     fi
     if [[ ${CERT_MODE:-port} != manual ]]; then
       printf '  上次自动续期：%s\n' "$(cert_last_run)"
@@ -430,25 +399,6 @@ do_reset_sub() {
   printf '新的订阅链接（旧链接已失效）：\n  %s\n' "$(sub_url)"
 }
 
-do_passwd() {
-  require_installed; load_env; require_panel
-  has_tty || die "需要在终端中运行；或使用 clashgate reset-password 随机重置"
-  local p1 p2
-  while :; do
-    printf '请输入新密码（至少 8 位）：' >/dev/tty; read -rs p1 </dev/tty; printf '\n' >/dev/tty
-    printf '请再次输入：' >/dev/tty; read -rs p2 </dev/tty; printf '\n' >/dev/tty
-    if [[ $p1 != "$p2" ]]; then printf '两次输入不一致，请重试\n'
-    elif ((${#p1} < 8)); then printf '密码太短，至少 8 位\n'
-    else break; fi
-  done
-  PANEL_HASH=$(printf '%s\n' "$p1" | "$(py_bin || echo python3)" "$LIB_DIR/panel/panel.py" hash-password)
-  SUB_TOKEN=$(panel_cfg_get sub_token)
-  write_panel_cfg
-  rm -f "$PANEL_SESSIONS"   # sign out every browser that used the old password
-  systemctl restart clashgate
-  printf '面板密码已修改。登录地址：%s（用户名 admin）\n' "$(panel_url)"
-}
-
 do_reset_password() {
   load_env
   [[ $MODE == auto-cert && -f $PANEL_CFG ]] || die "未安装管理面板（仅证书模式提供）"
@@ -456,18 +406,6 @@ do_reset_password() {
   rm -f "$PANEL_SESSIONS"   # sign out every browser that used the old password
   systemctl restart clashgate
   printf '管理面板：%s\n用户名：admin\n新密码：%s\n' "$(panel_url)" "$PANEL_PASS"
-}
-
-do_reset_secret() {
-  require_installed; load_env; require_panel
-  MIHOMO_SECRET=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 20)
-  save_env
-  render_controller
-  assemble_config
-  validate_conf || die "当前配置未通过校验（mihomo -t），未重启"
-  systemctl restart mihomo
-  sleep 1
-  printf 'Zashboard：%s\n新的 API 密钥（Secret）：%s\n' "$(zashboard_url)" "$MIHOMO_SECRET"
 }
 
 do_restart() {
@@ -515,8 +453,8 @@ do_menu() {
   local items=() labels=() i c
   items+=(status info);          labels+=("查看运行状态" "查看节点配置")
   if [[ $MODE == auto-cert ]]; then
-    items+=(sub reset-sub passwd reset-password reset-secret cert)
-    labels+=("查看订阅链接" "更换订阅链接" "修改面板密码（自定义）" "重置面板密码（随机）" "重置 Zashboard 密钥（随机）" "立即申请 / 续期 / 校验证书")
+    items+=(sub reset-sub reset-password)
+    labels+=("查看订阅链接" "更换订阅链接" "重置面板密码（随机）")
   fi
   items+=(restart log update lang uninstall); labels+=("重启内核" "查看日志" "更新内核 + 脚本与面板" "语言 / Language" "卸载")
   while :; do
@@ -570,7 +508,6 @@ do_uninstall() {
     fi
   fi
   ((in_cluster)) && leave_cluster
-  close_firewall
   systemctl disable --now clashgate clashgate-cert.timer clashgate-cert.service 2>/dev/null || true
   rm -f /etc/systemd/system/clashgate.service /etc/systemd/system/clashgate-cert.{service,timer}
   systemctl disable --now mihomo 2>/dev/null || true
@@ -607,7 +544,7 @@ do_uninstall() {
 ACTION=""
 while (($#)); do
   case "$1" in
-    install|update|uninstall|info|status|sub|passwd|restart|log|menu|reset-password|reset-secret|reset-sub|cert|lang) ACTION=$1 ;;
+    install|update|uninstall|info|status|sub|restart|log|menu|reset-password|reset-sub|lang) ACTION=$1 ;;
     help) usage; exit 0 ;;
     # 以下为开发/测试用隐藏参数，不写入用户文档
     -d|--domain) DOMAIN=${2:?缺少域名}; MODE=auto-cert; MODE_SET=1; shift ;;

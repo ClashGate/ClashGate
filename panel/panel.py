@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.28 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.29 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -220,9 +220,9 @@ from cg_qr import (  # noqa: E402
     qr_png_data_url,
 )
 
-# Versions compare as integer tuples (parse_version_tuple): 1.28 > 1.27 > 1.26 > 1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
-# would sort below 1.09 on every installed panel); the next releases are 1.29, 1.30, ...
-VERSION = "1.28"
+# Versions compare as integer tuples (parse_version_tuple): 1.29 > 1.28 > 1.27 > 1.26 > 1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
+# would sort below 1.09 on every installed panel); the next releases are 1.30, 1.31, ...
+VERSION = "1.29"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -281,7 +281,6 @@ UFW_BIN = os.environ.get("UFW_BIN", "ufw")
 FIREWALL_CMD_BIN = os.environ.get("FIREWALL_CMD_BIN", "firewall-cmd")
 # Ports ClashGate itself opened in ufw / firewalld (one spec per line, e.g. 443/tcp); `clashgate uninstall`
 # closes exactly these. Shared with scripts/lib/core.sh open_firewall.
-FIREWALL_RECORD = CS_ROOT + "/firewall_ports.txt"
 REALITY_SNI_POOL = (
     "www.microsoft.com",
     "www.apple.com",
@@ -441,7 +440,6 @@ from cg_config import (  # noqa: E402
     ufw_specs_for_node,
     collect_ufw_specs,
     sync_ufw,
-    record_firewall_port,
     sync_client_files,
     replace_top_level_yaml_section,
     _sync_custom_conf_listeners,

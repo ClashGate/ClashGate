@@ -158,9 +158,9 @@ issue_cert() {
     printf '%s\n' "$out" | grep -iE '^certctl:|error|invalid|fail|timeout|refused|unauthorized|connection' | tail -n 8 >&2 || true
     "$LIB_DIR/scripts/certctl.sh" selfsign >/dev/null
     if [[ ${CERT_MODE:-port} == dns ]]; then
-      warn "证书申请失败，已先用临时自签证书启动。请检查 Cloudflare API Token 是否具备 $DOMAIN 的 DNS 编辑权限；系统每小时自动重试，也可执行 clashgate cert 立即重试"
+      warn "证书申请失败，已先用临时自签证书启动。请检查 Cloudflare API Token 是否具备 $DOMAIN 的 DNS 编辑权限；系统每小时自动重试，也可在面板「HTTPS 证书」页立即重试"
     else
-      warn "证书申请失败，已先用临时自签证书启动。请检查：域名 A 记录是否指向 $SERVER_IP、80 端口是否放行；系统每小时自动重试，也可执行 clashgate cert 立即重试"
+      warn "证书申请失败，已先用临时自签证书启动。请检查：域名 A 记录是否指向 $SERVER_IP、80 端口是否放行；系统每小时自动重试，也可在面板「HTTPS 证书」页立即重试"
     fi
   fi
   su -s /bin/sh mihomo -c "test -r $CONF_DIR/certs/privkey.pem" || die "mihomo 用户无法读取证书私钥"

@@ -22,7 +22,6 @@ ClusterRemoteError
 DEFAULT_NODE_NAMES
 ENV_FILE
 FIREWALL_CMD_BIN
-FIREWALL_RECORD
 FRAG_CLUSTER_LISTENERS
 FRAG_CLUSTER_PROXIES
 FRAG_CONTROLLER
@@ -275,7 +274,6 @@ read_nodes
 reality_client
 reality_keypair
 record_core_check
-record_firewall_port
 record_panel_check
 record_pending_reload
 refresh_update_check_for_version

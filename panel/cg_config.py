@@ -946,7 +946,7 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
     if kind in ("http", "socks") and form.get(f"{kind}_tls") == "1":
         need_cert = True
     if need_cert and not certs_present():
-        raise ValueError(f"{kind} 启用 TLS 需要域名证书，未找到 {CERT}（请先在服务器执行 clashgate cert）")
+        raise ValueError(f"{kind} 启用 TLS 需要域名证书，未找到 {CERT}（请先在「HTTPS 证书」页申请证书）")
 
     port_s = form.get("port", "").strip()
     if port_s:
@@ -1777,24 +1777,8 @@ def collect_ufw_specs(nodes: list, inbounds: list) -> set:
     return specs
 
 
-def record_firewall_port(spec: str, opened: bool):
-    """Keep FIREWALL_RECORD = the ports ClashGate opened itself, so uninstall closes only those."""
-    try:
-        with open(FIREWALL_RECORD) as f:
-            cur = {l.strip() for l in f if l.strip()}
-    except OSError:
-        cur = set()
-    new = (cur | {spec}) if opened else (cur - {spec})
-    if new != cur:
-        try:
-            atomic_write(FIREWALL_RECORD, "".join(x + "\n" for x in sorted(new)), 0o600)
-        except OSError as e:
-            sys.stderr.write(f"firewall record warning: {e}\n")
-
-
 def sync_ufw(old_specs: set, new_specs: set):
-    """When ufw or firewalld is active, allow newly added node ports and delete removed node ports (including UDP).
-    Ports opened here are recorded (unless the user had already allowed them) so uninstall can close them."""
+    """When ufw or firewalld is active, allow newly added node ports and delete removed node ports (including UDP)."""
     env = read_env()
     cport = get_controller_port(env)
     protected = {"80/tcp", f"{env.get('PANEL_PORT') or 0}/tcp", f"{cport}/tcp"}
@@ -1803,26 +1787,18 @@ def sync_ufw(old_specs: set, new_specs: set):
     rc, out = run([UFW_BIN, "status"])
     if rc == 0 and "Status: active" in out:
         for spec in sorted(new_specs - old_specs):
-            had = re.search(rf"^{re.escape(spec)}\s+ALLOW\b", out, re.M)
-            rc_a, _ = run([UFW_BIN, "allow", spec])
-            if rc_a == 0 and not had:
-                record_firewall_port(spec, True)
+            run([UFW_BIN, "allow", spec])
         for spec in sorted((old_specs - new_specs) - protected):
             run([UFW_BIN, "delete", "allow", spec])
-            record_firewall_port(spec, False)
         return
     rc, _ = run([FIREWALL_CMD_BIN, "--state"])
     if rc == 0:
         changed = False
         for spec in sorted(new_specs - old_specs):
-            had, _ = run([FIREWALL_CMD_BIN, "--permanent", f"--query-port={spec}"])
-            rc_a, _ = run([FIREWALL_CMD_BIN, "--permanent", f"--add-port={spec}"])
-            if rc_a == 0 and had != 0:
-                record_firewall_port(spec, True)
+            run([FIREWALL_CMD_BIN, "--permanent", f"--add-port={spec}"])
             changed = True
         for spec in sorted((old_specs - new_specs) - protected):
             run([FIREWALL_CMD_BIN, "--permanent", f"--remove-port={spec}"])
-            record_firewall_port(spec, False)
             changed = True
         if changed:
             run([FIREWALL_CMD_BIN, "--reload"])
