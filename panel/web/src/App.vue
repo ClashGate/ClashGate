@@ -20,7 +20,6 @@ const {
   state,
   normalizeCluster,
   showPendingDiff,
-  showVersionPanel,
   showTrafficDetail,
   showSubQrModal,
   zbUrlRevealed,
@@ -114,7 +113,6 @@ const {
   trafficDisplay,
   trafficDetail,
   updateCoreDirect,
-  toggleVersionPanel,
   checkUpdateAndPrompt,
   statePollTimer,
   refreshServerStateSilent,
@@ -675,22 +673,22 @@ const {
       <!-- Status strip: homepage only -->
       <div v-show="activeTab === 'inbounds'" class="space-y-3">
         <div class="cg-rail">
-          <article
-            id="stat-card-status"
-            role="button"
-            tabindex="0"
-            @click="toggleVersionPanel"
-            @keydown.enter.prevent="toggleVersionPanel"
-            class="cg-rail-cell"
-          >
-            <span
-              class="cg-live"
-              :class="state.status.state_cls === 'ok' ? 'is-ok' : state.status.state_cls === 'warn' ? 'is-warn' : 'is-bad'"
-            ></span>
+          <div id="stat-card-status" class="cg-rail-cell">
             <span class="cg-rail-label">{{ t('运行状态') }}</span>
-            <span class="cg-rail-strong">{{ t(state.status.state_txt || '未知') }}</span>
-            <span class="cg-stat-mode">{{ state.custom_config_mode ? t('自定义服务端') : t('默认服务端模板') }}</span>
-          </article>
+            <span class="cg-rail-value">
+              <span class="cg-state-pill">
+                <span
+                  class="cg-live"
+                  :class="state.status.state_cls === 'ok' ? 'is-ok' : state.status.state_cls === 'warn' ? 'is-warn' : 'is-bad'"
+                ></span>
+                <span>{{ t(state.status.state_txt || '未知') }}</span>
+              </span>
+              <span
+                class="cg-stat-mode"
+                :title="state.custom_config_mode ? t('自定义服务端') : t('默认服务端模板')"
+              >{{ state.custom_config_mode ? t('自定义') : t('默认模板') }}</span>
+            </span>
+          </div>
 
           <article
             id="stat-card-pending-reload"
@@ -698,14 +696,17 @@ const {
             tabindex="0"
             @click="showPendingDiff = !showPendingDiff"
             @keydown.enter.prevent="showPendingDiff = !showPendingDiff"
-            class="cg-rail-cell"
+            class="cg-rail-cell is-action"
             :class="{ 'is-pending': state.pending_reload_count > 0 }"
+            :aria-expanded="showPendingDiff ? 'true' : 'false'"
           >
             <span class="cg-rail-label">{{ t('待应用') }}</span>
-            <span v-if="state.pending_reload_count > 0" class="cg-rail-hint is-inline">
-              {{ showPendingDiff ? t('收起') : t('有修改，点开查看') }}
+            <span class="cg-rail-value">
+              <span id="pending-reload-count" class="cg-pending-count">{{ state.pending_reload_count }}</span>
+              <span v-if="state.pending_reload_count > 0" class="cg-rail-hint">
+                {{ showPendingDiff ? t('收起') : t('有修改，点开查看') }}
+              </span>
             </span>
-            <span id="pending-reload-count" class="cg-rail-num">{{ state.pending_reload_count }}</span>
           </article>
 
           <article
@@ -714,23 +715,24 @@ const {
             tabindex="0"
             @click="showTrafficDetail = !showTrafficDetail"
             @keydown.enter.prevent="showTrafficDetail = !showTrafficDetail"
-            class="cg-rail-cell"
+            class="cg-rail-cell is-action"
+            :aria-expanded="showTrafficDetail ? 'true' : 'false'"
           >
             <span class="cg-rail-label">{{ t('流量') }}</span>
-            <span class="cg-rail-num" dir="ltr">{{ trafficDisplay }}</span>
+            <span class="cg-rail-value">
+              <bdi class="cg-rail-num" dir="ltr">{{ trafficDisplay }}</bdi>
+            </span>
           </article>
-        </div>
 
-        <Transition name="cg-collapse">
-          <div
-            v-if="showVersionPanel"
-            id="version-panel"
-            class="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-sm text-slate-800 flex flex-wrap items-center gap-x-6 gap-y-1"
-          >
-            <span class="font-semibold">{{ t('Mihomo 内核') }} <bdi dir="ltr">{{ versionLabel(state.mihomo_version) || '—' }}</bdi></span>
-            <span class="font-semibold">{{ t('面板') }} <bdi dir="ltr">{{ versionLabel(state.version) || '—' }}</bdi><span v-if="state.update_channel === 'test'" class="text-amber-700">{{ t('（测试）') }}</span></span>
+          <div id="stat-card-version" class="cg-rail-cell">
+            <span class="cg-rail-label">{{ t('版本') }}</span>
+            <span class="cg-rail-value">
+              <span class="cg-ver"><span class="cg-ver-k">{{ t('内核') }}</span><bdi dir="ltr">{{ versionLabel(state.mihomo_version) || '—' }}</bdi></span>
+              <span class="cg-ver"><span class="cg-ver-k">{{ t('面板') }}</span><bdi dir="ltr">{{ versionLabel(state.version) || '—' }}</bdi></span>
+              <span v-if="state.update_channel === 'test'" class="cg-chan">{{ t('测试') }}</span>
+            </span>
           </div>
-        </Transition>
+        </div>
 
         <Transition name="cg-collapse">
           <div

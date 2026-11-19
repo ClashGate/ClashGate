@@ -208,11 +208,11 @@ const {
                     {{ t('ACL4SSR 自动同步') }}
                   </span>
                 </div>
-                <div v-if="state.sub_url" class="flex items-center gap-2 flex-wrap">
+                <div v-if="state.sub_url" class="cg-btn-row">
                   <button
                     type="button"
                     @click="copyRaw(state.sub_url, 'sub-url')"
-                    class="cg-btn-primary px-3.5 py-1.5 rounded-xl text-xs font-semibold cursor-pointer"
+                    class="cg-btn-primary cg-btn-sm"
                   >
                     {{ copiedKey === 'sub-url' ? t('已复制') : t('复制订阅链接') }}
                   </button>
@@ -221,7 +221,7 @@ const {
                     id="sub-qr-btn"
                     type="button"
                     @click="showSubQrModal = true"
-                    class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
+                    class="cg-btn-sm cg-btn-secondary"
                   >
                     {{ t('二维码') }}
                   </button>
@@ -229,7 +229,7 @@ const {
                     type="button"
                     :disabled="busyKey === 'reset-sub'"
                     @click="resetSubUrl"
-                    class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
+                    class="cg-btn-sm cg-btn-secondary"
                   >
                     {{ busyKey === 'reset-sub' ? t('更换中…') : t('更换订阅链接') }}
                   </button>
@@ -237,7 +237,7 @@ const {
                     :href="state.sub_url"
                     target="_blank"
                     rel="noopener"
-                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition"
+                    class="cg-btn-sm cg-btn-secondary"
                   >
                     {{ t('查看配置') }}
                   </a>
@@ -508,11 +508,11 @@ const {
                   </div>
 
                   <!-- Actions: 复制配置 + 重置密码 + 删除 -->
-                  <div class="flex items-center gap-2 shrink-0 flex-wrap">
+                  <div class="flex items-center gap-2 flex-wrap min-w-0 max-w-full">
                     <button
                       type="button"
                       @click="copyRaw(item.single_config, `single-${item.key}`)"
-                      class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 hover:text-emerald-800 hover:border-emerald-200 text-slate-700 border border-slate-200/90 transition cursor-pointer"
+                      class="cg-btn-sm cg-btn-secondary"
                     >
                       {{ copiedKey === `single-${item.key}` ? t('已复制') : t('复制配置') }}
                     </button>
@@ -521,7 +521,7 @@ const {
                       type="button"
                       :disabled="busyKey === `rst-${item.key}`"
                       @click="resetInboundPassword(item)"
-                      class="px-3 py-1.5 rounded-xl text-xs font-medium bg-amber-50/80 hover:bg-amber-100 text-amber-800 border border-amber-200/80 disabled:opacity-50 transition cursor-pointer"
+                      class="cg-btn-sm cg-btn-secondary"
                     >
                       {{ busyKey === `rst-${item.key}` ? t('重置中…') : t('重置密码') }}
                     </button>
@@ -529,7 +529,7 @@ const {
                       type="button"
                       :disabled="busyKey === `del-${item.key}`"
                       @click="deleteInbound(item)"
-                      class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                      class="cg-btn-sm cg-btn-danger"
                     >
                       {{ busyKey === `del-${item.key}` ? t('删除中…') : t('删除') }}
                     </button>

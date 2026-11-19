@@ -212,7 +212,7 @@ const {
                 <button
                   type="button"
                   @click="fillCurrentInboundsToConverter"
-                  class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
+                  class="cg-btn-sm cg-btn-secondary"
                 >
                   {{ t('载入当前入站节点') }}
                 </button>
@@ -223,7 +223,7 @@ const {
                     converterOutput = '';
                     converterError = ''
                   "
-                  class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
+                  class="cg-btn-sm cg-btn-secondary"
                 >
                   {{ t('清空') }}
                 </button>
@@ -246,7 +246,7 @@ const {
                       type="button"
                       :disabled="busyKey.startsWith('convert-')"
                       @click="convertConfigFormat('readable')"
-                      class="cg-btn-primary px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-50"
+                      class="cg-btn-primary cg-btn-sm"
                     >
                       {{ t('转换为易读配置') }}
                     </button>
@@ -254,7 +254,7 @@ const {
                       type="button"
                       :disabled="busyKey.startsWith('convert-')"
                       @click="convertConfigFormat('single')"
-                      class="px-3 py-1 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer disabled:opacity-50"
+                      class="cg-btn-sm cg-btn-secondary"
                     >
                       {{ t('转换为单行配置') }}
                     </button>
@@ -276,7 +276,7 @@ const {
                     type="button"
                     :disabled="!converterOutput"
                     @click="copyRaw(converterOutput, 'conv-out')"
-                    class="px-3.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 disabled:opacity-40 transition cursor-pointer"
+                    class="cg-btn-sm cg-btn-secondary"
                   >
                     {{ copiedKey === 'conv-out' ? t('已复制结果') : t('复制转换结果') }}
                   </button>

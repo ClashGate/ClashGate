@@ -297,7 +297,6 @@ export const EN = {
   "切换到正式通道": "Switch to stable channel",
   "切换到正式通道并立即更新到正式版最新版本，确定切换？": "This switches to the stable channel and immediately updates to the latest stable version. Switch?",
   "测试版可能不稳定，可能出现功能异常或兼容性问题。切换后将立即更新到测试通道最新版本，确定切换？": "Test builds may be unstable and could have broken features or compatibility issues. Switching will immediately update to the latest test version. Switch?",
-  "（测试）": " (Test)",
   "已切换通道，正在更新到该通道最新版本……": "Channel switched. Updating to that channel's latest version…",
   "面板正在重启，请稍候……": "The panel is restarting, please wait…",
   "升级成功！当前版本 {v}，即将刷新页面": "Upgrade succeeded! Now on {v}, refreshing the page…",
@@ -310,7 +309,7 @@ export const EN = {
  "请勿重复加入": "Already added. Don't add it again.",
  "语言": "Language",
  "流量": "Traffic",
- "有修改，点开查看": "Changes waiting — open to review",
+ "有修改，点开查看": "Review changes",
  "+ 添加节点「{name}」（端口 {port}）": "+ Add node “{name}” (port {port})",
  "- 删除节点「{name}」": "- Delete node “{name}”",
  "~ 重置密码「{name}」": "~ Reset password “{name}”",
@@ -436,7 +435,11 @@ export const EN = {
  "端口模式由 Let's Encrypt 通过 80 端口验证域名，申请前请确认：": "In port mode Let's Encrypt checks your domain over port 80. Before requesting, make sure:",
  "端口模式需要准备什么": "What port mode needs",
  "证书到期前 30 天会自动续期，续期时同样需要 80 端口。不方便开放 80 端口时，可以改用 Cloudflare DNS。": "The certificate renews automatically 30 days before it expires; renewal needs port 80 too. If you can't open port 80, use Cloudflare DNS instead.",
- "详情": "Details"
+ "详情": "Details",
+ "内核": "Core",
+ "版本": "Version",
+ "自定义": "Custom",
+ "默认模板": "Default"
 }
 
 export const LANGS = ['zh', 'en', 'ru', 'fa']
