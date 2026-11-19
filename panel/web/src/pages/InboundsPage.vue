@@ -501,7 +501,7 @@ const {
                           class="w-1.5 h-1.5 rounded-full"
                           :class="item.listening ? 'bg-emerald-500' : item.pending_reload ? 'bg-amber-500' : 'bg-rose-500'"
                         ></span>
-                        {{ item.listening ? t('运行中') : item.pending_reload ? t('待重载') : t('未运行') }}
+                        {{ item.listening ? t('运行中') : item.pending_reload ? t('待应用') : t('未运行') }}
                       </span>
                     </div>
                     <div class="text-xs text-slate-500 tabular-nums">{{ t('端口') }} <bdi dir="ltr" class="font-mono">{{ item.port }}</bdi></div>

@@ -305,7 +305,7 @@ const {
                   <ul class="text-xs text-slate-500 leading-relaxed space-y-1 list-disc ps-4">
                     <li>{{ t('已经在集群里的面板会自动和新面板互联，不需要再输入密码。') }}</li>
                     <li>{{ t('对方面板需要 ClashGate 1.14 或更高版本，并使用有效的 HTTPS 证书。') }}</li>
-                    <li>{{ t('添加后立即生效，不需要点「重载配置」。') }}</li>
+                    <li>{{ t('添加后立即生效，不需要点「应用配置」。') }}</li>
                     <li>{{ t('这些出站不会出现在节点列表和客户端订阅里，可以在 Zashboard 的分流策略组里选择它们作为出口。') }}</li>
                   </ul>
                 </section>

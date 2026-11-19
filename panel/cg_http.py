@@ -1057,7 +1057,7 @@ class Panel(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.respond_mutation(s, f"丢弃草稿失败：{e}", False)
         run_snell_migration()
-        return self.respond_mutation(s, "已丢弃待重载草稿", True)
+        return self.respond_mutation(s, "已丢弃待应用草稿", True)
 
     def do_settings(self, s, form):
         if "node_name" in form:
@@ -1099,7 +1099,7 @@ class Panel(BaseHTTPRequestHandler):
                 if not updates:
                     if used == "reset":
                         return self.respond_mutation(s, "已关闭自定义服务端。原有节点无法用默认模板生成，已重置为默认服务端模板并生成新的 VlessReality 节点，请在客户端更新订阅。", True)
-                    return self.respond_mutation(s, "已关闭自定义服务端，已切换回默认服务端模板并重载生效。", True)
+                    return self.respond_mutation(s, "已关闭自定义服务端，已切换回默认服务端模板并应用生效。", True)
             if "update_channel" in updates:
                 apply_update_channel_env(updates["update_channel"])
                 # Keep other toggles if sent together.
@@ -1163,7 +1163,7 @@ class Panel(BaseHTTPRequestHandler):
     def do_action(self, s, action):
         # This baseline lives on the panel module; other save_* functions rebind it there.
         mod = sys.modules.get("panel") or sys.modules["__main__"]
-        zh = {"restart": "重启", "reload": "重载"}[action]
+        zh = {"restart": "重启", "reload": "应用配置"}[action]
         with LOCK:
             pending_st = load_pending_reload()
             if pending_st.get("mihomo_secret"):
@@ -1267,7 +1267,7 @@ class Panel(BaseHTTPRequestHandler):
                 detail="~ 更换订阅链接",
                 sub_token=new_token,
             )
-        return self.respond_mutation(s, "已记录更换订阅链接，请点顶部「重载配置」生效（重载后旧订阅链接失效）。", True)
+        return self.respond_mutation(s, "已记录更换订阅链接，请点顶部「应用配置」生效（应用后旧订阅链接失效）。", True)
 
     def do_reset_secret(self, s):
         alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -1288,7 +1288,7 @@ class Panel(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 return self.respond_mutation(s, f"重置密钥失败：{e}", False)
-        return self.respond_mutation(s, "已生成新 Zashboard API 密钥，请点顶部「重载配置」生效（重载后直连地址才会更新）。", True)
+        return self.respond_mutation(s, "已生成新 Zashboard API 密钥，请点顶部「应用配置」生效（应用后直连地址才会更新）。", True)
 
     def do_cert_action(self, s):
         with LOCK:
@@ -1422,7 +1422,7 @@ class Panel(BaseHTTPRequestHandler):
                 prev_inb = _RECENT_ADD_REQS[req_id][1]
                 return self.respond_mutation(
                     s,
-                    f"已添加 {KIND_ZH.get(prev_inb['kind'], prev_inb['kind'])} 节点「{prev_inb['name']}」（端口 {prev_inb['port']}），已保存，请点顶部「重载配置」生效",
+                    f"已添加 {KIND_ZH.get(prev_inb['kind'], prev_inb['kind'])} 节点「{prev_inb['name']}」（端口 {prev_inb['port']}），已保存，请点顶部「应用配置」生效",
                     True,
                 )
             cur = load_inbounds()
@@ -1445,7 +1445,7 @@ class Panel(BaseHTTPRequestHandler):
                 return self.respond_mutation(s, f"添加失败：{e}", False)
         return self.respond_mutation(
             s,
-            f"已添加 {KIND_ZH.get(inb['kind'], inb['kind'])} 节点「{inb['name']}」（端口 {inb['port']}），已保存，请点顶部「重载配置」生效",
+            f"已添加 {KIND_ZH.get(inb['kind'], inb['kind'])} 节点「{inb['name']}」（端口 {inb['port']}），已保存，请点顶部「应用配置」生效",
             True,
         )
 
@@ -1456,7 +1456,7 @@ class Panel(BaseHTTPRequestHandler):
             removed = [i for i in cur if i["id"] == iid]
             new = [i for i in cur if i["id"] != iid]
             if len(new) == len(cur):
-                return self.respond_mutation(s, "节点删除成功，重载配置生效", True)
+                return self.respond_mutation(s, "节点删除成功，应用配置后生效", True)
             try:
                 save_inbounds(new)
                 for rm in removed:
@@ -1469,7 +1469,7 @@ class Panel(BaseHTTPRequestHandler):
                     )
             except Exception as e:
                 return self.respond_mutation(s, f"删除失败：{e}", False)
-        return self.respond_mutation(s, "节点删除成功，重载配置生效", True)
+        return self.respond_mutation(s, "节点删除成功，应用配置后生效", True)
 
     def do_delete_node(self, s, name):
         with LOCK:
@@ -1491,7 +1491,7 @@ class Panel(BaseHTTPRequestHandler):
                     )
             except Exception as e:
                 return self.respond_mutation(s, f"删除失败：{e}", False)
-        return self.respond_mutation(s, f"已删除节点「{name}」，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, f"已删除节点「{name}」，请点顶部「应用配置」生效", True)
 
     def do_reset_node_password(self, s, name):
         with LOCK:
@@ -1526,7 +1526,7 @@ class Panel(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 return self.respond_mutation(s, f"重置密钥失败：{e}", False)
-        return self.respond_mutation(s, f"已重置节点「{name}」的 UUID、Reality 私钥与 VLESS 加密密钥，重载配置生效", True)
+        return self.respond_mutation(s, f"已重置节点「{name}」的 UUID、Reality 私钥与 VLESS 加密密钥，应用配置后生效", True)
 
     def do_reset_inbound_password(self, s, iid):
         with LOCK:
@@ -1557,7 +1557,7 @@ class Panel(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 return self.respond_mutation(s, f"重置密码失败：{e}", False)
-        return self.respond_mutation(s, "密码重置成功，重载配置生效", True)
+        return self.respond_mutation(s, "密码重置成功，应用配置后生效", True)
 
     def do_add_proxies(self, s, form):
         raw = form.get("proxies_raw", "")
@@ -1589,7 +1589,7 @@ class Panel(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.respond_mutation(s, f"添加服务端 proxies 节点失败：{e}", False)
         names = "、".join(p["name"] for p in added)
-        return self.respond_mutation(s, f"已添加 {len(added)} 个服务端出站（{names}），已保存，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, f"已添加 {len(added)} 个服务端出站（{names}），已保存，请点顶部「应用配置」生效", True)
 
     def do_delete_proxy(self, s, name):
         with LOCK:
@@ -1607,7 +1607,7 @@ class Panel(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 return self.respond_mutation(s, f"删除服务端节点失败：{e}", False)
-        return self.respond_mutation(s, f"已删除节点「{name}」，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, f"已删除节点「{name}」，请点顶部「应用配置」生效", True)
 
     def do_add_provider(self, s, form):
         url = form.get("sub_url", "")
@@ -1628,7 +1628,7 @@ class Panel(BaseHTTPRequestHandler):
             except Exception as e:
                 return self.respond_mutation(s, f"导入订阅链接失败：{e}", False)
         return self.respond_mutation(
-            s, f"已导入订阅源「{prov_name}」（路径 {entry['path']}），已保存，请点顶部「重载配置」生效", True)
+            s, f"已导入订阅源「{prov_name}」（路径 {entry['path']}），已保存，请点顶部「应用配置」生效", True)
 
     def do_delete_provider(self, s, name):
         with LOCK:
@@ -1646,7 +1646,7 @@ class Panel(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 return self.respond_mutation(s, f"删除订阅源失败：{e}", False)
-        return self.respond_mutation(s, f"已删除订阅源「{name}」，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, f"已删除订阅源「{name}」，请点顶部「应用配置」生效", True)
 
 
     def do_routing_add(self, s, form):
@@ -1669,7 +1669,7 @@ class Panel(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 return self.respond_mutation(s, f"添加分流组失败：{e}", False)
-        return self.respond_mutation(s, f"已添加分流组「{entry['name']}」，已保存，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, f"已添加分流组「{entry['name']}」，已保存，请点顶部「应用配置」生效", True)
 
     def do_routing_import(self, s, form):
         name = (form.get("name") or "").strip()
@@ -1690,7 +1690,7 @@ class Panel(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 return self.respond_mutation(s, f"引入分流规则失败：{e}", False)
-        return self.respond_mutation(s, f"已引入分流组「{entry['name']}」，已保存，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, f"已引入分流组「{entry['name']}」，已保存，请点顶部「应用配置」生效", True)
 
     def do_routing_delete(self, s, form):
         gid = (form.get("id") or "").strip()
@@ -1708,7 +1708,7 @@ class Panel(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 return self.respond_mutation(s, f"删除分流组失败：{e}", False)
-        return self.respond_mutation(s, f"已删除分流组「{name}」，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, f"已删除分流组「{name}」，请点顶部「应用配置」生效", True)
 
     def do_routing_rename(self, s, form):
         gid = (form.get("id") or "").strip()
@@ -1726,7 +1726,7 @@ class Panel(BaseHTTPRequestHandler):
                     )
             except Exception as e:
                 return self.respond_mutation(s, f"重命名分流组失败：{e}", False)
-        return self.respond_mutation(s, f"已重命名分流组为「{new_name}」，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, f"已重命名分流组为「{new_name}」，请点顶部「应用配置」生效", True)
 
     def do_routing_provider(self, s, form, add: bool):
         gid = (form.get("id") or "").strip()
@@ -1749,7 +1749,7 @@ class Panel(BaseHTTPRequestHandler):
                 record_pending_reload(op="update-routing", kind="routing", name=gname, detail=detail)
             except Exception as e:
                 return self.respond_mutation(s, f"修改规则集失败：{e}", False)
-        return self.respond_mutation(s, f"{detail.lstrip('+- ')}，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, f"{detail.lstrip('+- ')}，请点顶部「应用配置」生效", True)
 
     def do_routing_reorder(self, s, form):
         raw = (form.get("order") or "").strip()
@@ -1772,7 +1772,7 @@ class Panel(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 return self.respond_mutation(s, f"调整分流顺序失败：{e}", False)
-        return self.respond_mutation(s, "已调整分流顺序，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, "已调整分流顺序，请点顶部「应用配置」生效", True)
 
     def do_routing_rules(self, s, form):
         gid = (form.get("id") or "").strip()
@@ -1793,7 +1793,7 @@ class Panel(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 return self.respond_mutation(s, f"更新分流规则失败：{e}", False)
-        return self.respond_mutation(s, f"已更新分流组「{name}」规则，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, f"已更新分流组「{name}」规则，请点顶部「应用配置」生效", True)
 
     def do_routing_update(self, s, form):
         gid = (form.get("id") or "").strip()
@@ -1834,7 +1834,7 @@ class Panel(BaseHTTPRequestHandler):
                 )
             except Exception as e:
                 return self.respond_mutation(s, f"更新分流组失败：{e}", False)
-        return self.respond_mutation(s, f"已更新分流组「{name}」，请点顶部「重载配置」生效", True)
+        return self.respond_mutation(s, f"已更新分流组「{name}」，请点顶部「应用配置」生效", True)
 
     def do_save_custom_config(self, s, form):
         if not load_panel_settings().get("custom_server_enabled"):

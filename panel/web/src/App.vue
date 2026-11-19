@@ -604,7 +604,7 @@ const {
                 : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
             "
           >
-            <span>{{ busyKey === '/action/reload' ? t('重载中…') : t('重载配置') }}</span>
+            <span>{{ busyKey === '/action/reload' ? t('应用中…') : t('应用配置') }}</span>
             <span
               v-if="state.pending_reload_count > 0"
               class="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-amber-500 text-white tabular-nums"
@@ -687,7 +687,7 @@ const {
             class="cg-rail-cell"
             :class="{ 'is-pending': state.pending_reload_count > 0 }"
           >
-            <span class="cg-rail-label">{{ t('待重载') }}</span>
+            <span class="cg-rail-label">{{ t('待应用') }}</span>
             <span v-if="state.pending_reload_count > 0" class="cg-rail-hint is-inline">
               {{ showPendingDiff ? t('收起') : t('有修改，点开查看') }}
             </span>

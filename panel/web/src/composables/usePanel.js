@@ -358,7 +358,7 @@ export function usePanel() {
     if (state.pending_reload_count <= 0) return
     openConfirmDialog({
       title: t('丢弃草稿'),
-      message: t('确定丢弃所有待重载草稿？丢弃后未生效的变更将全部撤销，回到当前线上配置。'),
+      message: t('确定丢弃所有待应用草稿？丢弃后未生效的变更将全部撤销，回到当前线上配置。'),
       confirmText: t('确认丢弃'),
       tone: 'rose',
       onConfirm: () => postAction('/action/discard-pending', {}, '/action/discard-pending'),
@@ -1045,7 +1045,7 @@ export function usePanel() {
           const stData = await stRes.json()
           applyServerState(stData)
           if ((url === '/action/reload' || url === '/action/restart') && Number(stData.pending_reload_count || 0) === 0) {
-            showToast(t('已重载配置并更新客户端订阅'), true)
+            showToast(t('已应用配置并更新客户端订阅'), true)
             return { ok: true, state: stData }
           }
         }
@@ -1123,7 +1123,7 @@ export function usePanel() {
     if (!item || !item.reset_url) return
     openConfirmDialog({
       title: t('重置密码'),
-      message: t('确定重置节点「{name}」的密码？点顶部「重载配置」后生效，客户端需要重新更新订阅。', { name: item.name }),
+      message: t('确定重置节点「{name}」的密码？点顶部「应用配置」后生效，客户端需要重新更新订阅。', { name: item.name }),
       confirmText: t('确认重置'),
       tone: 'amber',
       onConfirm: () => postAction(item.reset_url, {}, `rst-${item.key}`),
@@ -1134,7 +1134,7 @@ export function usePanel() {
     if (!item || !item.delete_url) return
     openConfirmDialog({
       title: t('删除节点'),
-      message: t('确定删除节点「{name}」？点顶部「重载配置」后生效。', { name: item.name }),
+      message: t('确定删除节点「{name}」？点顶部「应用配置」后生效。', { name: item.name }),
       confirmText: t('确认删除'),
       tone: 'rose',
       onConfirm: () => postAction(item.delete_url, {}, `del-${item.key}`),
@@ -1144,7 +1144,7 @@ export function usePanel() {
   function resetSubUrl() {
     openConfirmDialog({
       title: t('更换订阅链接'),
-      message: t('确定更换订阅链接？需点击顶部「重载配置」后新订阅链接才会生效（重载后旧链接失效）。'),
+      message: t('确定更换订阅链接？需点击顶部「应用配置」后新订阅链接才会生效（应用后旧链接失效）。'),
       confirmText: t('确认更换'),
       tone: 'amber',
       onConfirm: async () => {
@@ -1158,7 +1158,7 @@ export function usePanel() {
   function resetZbSecret() {
     openConfirmDialog({
       title: t('重置 API 密钥'),
-      message: t('确定重置 Zashboard API 密钥？需点击顶部「重载配置」后直连地址才会更新。'),
+      message: t('确定重置 Zashboard API 密钥？需点击顶部「应用配置」后直连地址才会更新。'),
       confirmText: t('确认重置'),
       tone: 'amber',
       onConfirm: async () => {
@@ -1718,7 +1718,7 @@ export function usePanel() {
     if (!next && state.custom_config_mode) {
       openConfirmDialog({
         title: t('关闭自定义服务端'),
-        message: t('关闭后，服务端将切换回面板生成的默认配置（默认服务端模板）并立即重载。你的自定义配置会保留在服务器上，重新开启后可一键恢复。'),
+        message: t('关闭后，服务端将切换回面板生成的默认配置（默认服务端模板）并立即应用。你的自定义配置会保留在服务器上，重新开启后可一键恢复。'),
         confirmText: t('关闭并切换'),
         tone: 'amber',
         onConfirm: () => applyCustomServer(false),

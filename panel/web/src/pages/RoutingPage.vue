@@ -205,7 +205,7 @@ const {
             <div class="flex items-start justify-between gap-3 flex-wrap">
               <div>
                 <h3 class="text-sm font-bold text-slate-900">{{ t('分流组') }}</h3>
-                <p class="text-xs text-slate-500 mt-1">{{ t('拖动调整顺序（与主配置一致），点顶部「重载配置」后生效。') }}</p>
+                <p class="text-xs text-slate-500 mt-1">{{ t('拖动调整顺序（与主配置一致），点顶部「应用配置」后生效。') }}</p>
               </div>
             </div>
             <div
