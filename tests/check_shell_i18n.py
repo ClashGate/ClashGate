@@ -92,6 +92,15 @@ case $CASE in
   menu-nocert) MODE=no-cert; do_menu ;;
   menu-cert) MODE=auto-cert; DOMAIN=example.com; do_menu ;;
   install-port|install-dns|install-manual|install-nocert) interactive_setup; mode_label; echo; cert_mode_label; echo; tls_label; echo ;;
+  summary-cert|summary-nocert)
+    STATE=$(mktemp); printf 'VlessReality\t33149\n' > "$STATE"
+    CLIENT_DIR=$(mktemp -d); printf 'proxies:\n  - name: VlessReality\n' > "$CLIENT_DIR/proxies.yaml"
+    sub_url() { builtin printf 'https://example.com:38523/sub/abc/mihomo.yaml'; }
+    panel_url() { builtin printf 'https://example.com:38523'; }
+    cert_is_temp() { return 1; }
+    WARNINGS=(); PANEL_PASS=pw123; PANEL_PORT=38523; CONTROLLER_PORT=27001; CERT_MODE=dns; TLS=production
+    if [[ $CASE == summary-cert ]]; then MODE=auto-cert; else MODE=no-cert; fi
+    print_summary ;;
 esac
 '''
 cases = {
@@ -102,6 +111,8 @@ cases = {
     "install-port": ["2", "1", "*.bad", "example.com"],
     "install-dns": ["2", "2", "bad domain", "*.example.com", "tok en", "token123"],
     "install-manual": ["3", "example.com"],
+    "summary-cert": [],
+    "summary-nocert": [],
 }
 with tempfile.TemporaryDirectory() as td:
     script = os.path.join(td, "h.sh")
@@ -119,7 +130,11 @@ with tempfile.TemporaryDirectory() as td:
             if len(out.strip()) < 20:
                 problems.append(f"{lang}/{case}: no output ({p.returncode}): {out!r}")
                 continue
+            if case.startswith("summary") and len(out.strip().splitlines()) > 8:
+                problems.append(f"{lang}/{case}: install summary should stay short: {out!r}")
             if lang == "zh":
+                if os.environ.get("CG_SHOW_SUMMARY") and case.startswith("summary"):
+                    print(out)
                 if not CJK.search(out):
                     problems.append(f"zh/{case}: no Chinese output")
                 continue
