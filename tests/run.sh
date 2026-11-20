@@ -38,6 +38,16 @@ fi
 export MIHOMO_BIN
 "$MIHOMO_BIN" -v | head -1
 
+step "geo data (tests/.cache/geo; copied into each test root so mihomo -t never downloads)"
+GEO_DIR=tests/.cache/geo; mkdir -p "$GEO_DIR"
+for e in "geoip.metadb country.mmdb" "GeoSite.dat geosite.dat" "ASN.mmdb GeoLite2-ASN.mmdb"; do
+  read -r name remote <<<"$e"
+  [[ -s $GEO_DIR/$name ]] || curl -fsSL --retry 2 -o "$GEO_DIR/$name" \
+    "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/$remote"
+done
+export CG_TEST_GEO_DIR=$PWD/$GEO_DIR
+ls "$GEO_DIR"
+
 step "panel tests"
 python3 -m unittest discover -s tests -v
 

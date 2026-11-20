@@ -103,6 +103,9 @@ def setup_panel(who, panel_dir, pki, init_state=True):
     cs = root + "/etc/clashgate"
     os.makedirs(cs + "/certs")
     shutil.copytree(os.path.join(REPO, "resources"), cs + "/resources")
+    geo = os.environ.get("CG_TEST_GEO_DIR")
+    for g in os.listdir(geo) if geo else []:
+        shutil.copy(os.path.join(geo, g), cs + "/" + g)
     shutil.copy(f"{pki}/{who}.pem", cs + "/certs/fullchain.pem")
     shutil.copy(f"{pki}/{who}.key", cs + "/certs/privkey.pem")
     with open(cs + "/clashgate.env", "w") as f:

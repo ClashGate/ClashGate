@@ -241,3 +241,4 @@ DNS API 模式缺少 Cloudflare API Token	DNS API mode is missing the Cloudflare
 注意：当前为%s，客户端可能拒绝下载订阅\n	Note: using %s; clients may refuse to download the subscription\n
 节点配置（粘贴到客户端的 proxies）：\n	Node config (paste into your client under proxies):\n
 运行 \033[1mclashgate\033[0m 打开菜单\n	Run \033[1mclashgate\033[0m to open the menu\n
+地理数据下载失败：%s（请确认服务器可以访问 jsDelivr 或 GitHub）	Failed to download geo data: %s (make sure the server can reach jsDelivr or GitHub)

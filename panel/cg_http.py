@@ -2017,6 +2017,7 @@ def serve(cfg_path):
     refresh_update_check_for_version()
     start_weekly_update_check()
     threading.Thread(target=run_snell_migration, name="snell-v6-migration", daemon=True).start()
+    threading.Thread(target=ensure_geodata, name="geodata", daemon=True).start()
     addr = (cfg.get("listen", "0.0.0.0"), int(cfg.get("port", 8443)))
     if cfg.get("tls_cert"):
         cert_p = ROOT + cfg["tls_cert"]

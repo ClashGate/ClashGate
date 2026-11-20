@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.request
 
 from routing_mgr import RoutingManager, parse_yaml_document_factory
 
@@ -1705,7 +1706,57 @@ def enable_cert_renew_timer():
     run([SYSTEMCTL, "enable", "--now", "clashgate-cert.timer"], timeout=30)
 
 
+# Geo data for GEOIP / GEOSITE / IP-ASN rules, under the names Mihomo looks for in its home dir.
+# The installer and the panel fetch them with the system resolver, so `mihomo -t` never downloads.
+GEO_FILES = (("geoip.metadb", "country.mmdb"), ("GeoSite.dat", "geosite.dat"), ("ASN.mmdb", "GeoLite2-ASN.mmdb"))
+GEO_BASES = ("https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release",
+             "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest")
+_GEO_LOCK = threading.Lock()
+
+
+def _geo_present(root: str, name: str) -> bool:
+    names = {name.lower()} | ({"country.mmdb"} if name == "geoip.metadb" else set())
+    try:
+        return any(e.lower() in names and os.path.getsize(os.path.join(root, e)) > 0 for e in os.listdir(root))
+    except OSError:
+        return False
+
+
+def ensure_geodata(root: str = "") -> list:
+    """Download missing geo data files into the core's home dir; return the names still missing."""
+    root = root or CS_ROOT
+    missing = []
+    with _GEO_LOCK:
+        for name, remote in GEO_FILES:
+            if _geo_present(root, name):
+                continue
+            dst = os.path.join(root, name)
+            for base in GEO_BASES:
+                try:
+                    with urllib.request.urlopen(f"{base}/{remote}", timeout=60) as resp, open(dst + ".tmp", "wb") as fp:
+                        shutil.copyfileobj(resp, fp)
+                    if os.path.getsize(dst + ".tmp") > 1024:
+                        os.chmod(dst + ".tmp", 0o644)
+                        os.replace(dst + ".tmp", dst)
+                        try:
+                            shutil.chown(dst, "mihomo", "mihomo")
+                        except (LookupError, OSError):
+                            pass
+                        break
+                except Exception:
+                    pass
+            else:
+                missing.append(name)
+            try:
+                os.unlink(dst + ".tmp")
+            except OSError:
+                pass
+    return missing
+
+
 def validate_config(path=CONF, bin_path: str = ""):
+    if os.path.isdir(CS_ROOT):
+        ensure_geodata()
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, "ui"), exist_ok=True)
         cert_src = CS_ROOT + "/certs"
@@ -1721,18 +1772,12 @@ def validate_config(path=CONF, bin_path: str = ""):
                 src_p = os.path.join(CS_ROOT, entry)
                 dst_p = os.path.join(d, entry)
                 if (entry in ("ruleset", "zerotier", "tailscale")
-                        or entry.endswith((".mmdb", ".dat", ".yaml", ".yml", ".mrs"))):
+                        or entry.endswith((".mmdb", ".metadb", ".dat", ".yaml", ".yml", ".mrs"))):
                     if not os.path.exists(dst_p):
                         try:
                             os.symlink(src_p, dst_p)
                         except OSError:
                             pass
-        mmdb = CS_ROOT + "/country.mmdb"
-        if os.path.isfile(mmdb) and not os.path.exists(os.path.join(d, "country.mmdb")):
-            try:
-                os.symlink(mmdb, os.path.join(d, "country.mmdb"))
-            except OSError:
-                pass
         safe = f"{CS_ROOT}:/etc/clashgate"
         test_path = path
         if ROOT and os.path.isfile(path):

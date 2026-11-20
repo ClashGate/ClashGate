@@ -116,20 +116,41 @@ gen_nodes() {
   mv -f "$STATE.new" "$STATE"
 }
 
+# GEOIP / GEOSITE / IP-ASN 规则用到的地理数据，用 Mihomo 默认查找的文件名放在内核目录（-d）。
+# 安装和更新时用系统 curl 下好，mihomo -t 校验和运行都不再自己下载（它的内置 DNS 在校验时可能解析失败）。
+GEO_FILES=("geoip.metadb country.mmdb" "GeoSite.dat geosite.dat" "ASN.mmdb GeoLite2-ASN.mmdb")
+GEO_BASES=(https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest)
+GEO_FAILED=""
+ensure_geodata() {
+  local e name remote base ok
+  for e in "${GEO_FILES[@]}"; do
+    read -r name remote <<<"$e"
+    [[ -s $CONF_DIR/$name ]] && continue
+    [[ $name == geoip.metadb && -s $CONF_DIR/country.mmdb ]] && continue
+    ok=0
+    for base in "${GEO_BASES[@]}"; do
+      if curl -fsSL --retry 2 --connect-timeout 10 --max-time 300 -o "$CONF_DIR/$name.tmp" "$base/$remote" \
+        && (($(stat -c %s "$CONF_DIR/$name.tmp") > 1024)); then
+        chmod 644 "$CONF_DIR/$name.tmp"; mv -f "$CONF_DIR/$name.tmp" "$CONF_DIR/$name"
+        chown mihomo:mihomo "$CONF_DIR/$name" 2>/dev/null || true
+        ok=1; break
+      fi
+    done
+    rm -f "$CONF_DIR/$name.tmp"
+    ((ok)) || { GEO_FAILED=$name; return 1; }
+  done
+}
+
 validate_conf() {
   local d rc=0 f
   d=$(mktemp -d)
   mkdir -p "$d/ui"   # 避免 mihomo -t 校验时临时下载 external-ui
   [[ -d $CONF_DIR/certs ]] && ln -s "$CONF_DIR/certs" "$d/certs"
   [[ -d $CONF_DIR/ruleset ]] && ln -s "$CONF_DIR/ruleset" "$d/ruleset"
-  for f in "$CONF_DIR"/*.mmdb "$CONF_DIR"/*.dat; do
+  for f in "$CONF_DIR"/*.mmdb "$CONF_DIR"/*.metadb "$CONF_DIR"/*.dat; do
     [[ -f $f ]] && ln -s "$f" "$d/$(basename "$f")"
   done
   SAFE_PATHS="$CONF_DIR" "$BIN" -t -d "$d" -f "$CONF" >/dev/null || rc=$?
-  if ((rc == 0)) && [[ -f $d/country.mmdb && ! -L $d/country.mmdb && -d $CONF_DIR ]]; then
-    cp -a "$d/country.mmdb" "$CONF_DIR/country.mmdb" 2>/dev/null || true
-    chown mihomo:mihomo "$CONF_DIR/country.mmdb" 2>/dev/null || true
-  fi
   rm -rf "$d"
   return "$rc"
 }
