@@ -173,54 +173,43 @@ verify() {
   ss_out=$(ss -ltn 2>/dev/null || true)
   while IFS=$'\t' read -r name port rest; do
     grep -q ":$port " <<<"$ss_out" || die "节点 $name 未在端口 $port 监听"
-    info "监听中：$name :$port"
   done < "$STATE"
   [[ $MODE == auto-cert ]] || return 0
   grep -q ":$CONTROLLER_PORT " <<<"$ss_out" || die "Mihomo 控制接口未在端口 $CONTROLLER_PORT 监听"
-  info "Zashboard：$(zashboard_url) 正常"
   local i h p sub_body
   h=$(panel_host); p=$(panel_port)
   for ((i = 0; i < 10; i++)); do panel_https_ok /healthz >/dev/null && break; sleep 1; done
   ((i < 10)) || { journalctl -u clashgate -n 20 --no-pager >&2; die "面板未在 $p 端口响应 HTTPS"; }
-  info "面板：$(panel_url)（端口 $p）正常（面板自身 HTTPS，证书与 Mihomo 共用）"
   sub_body=$(panel_https_ok "/sub/$SUB_TOKEN/mihomo.yaml" || true)
   grep -q 'proxies:' <<<"$sub_body" || die "订阅接口没有返回 mihomo 配置"
   [[ $(curl -sk -o /dev/null -w '%{http_code}' --resolve "$h:$p:127.0.0.1" \
     "$(panel_url)/sub/wrongtoken0000000000000000/mihomo.yaml") == 404 ]] || die "订阅接口未拒绝错误的 token"
-  info "订阅链接：$(sub_url) 正常"
 }
 
 print_summary() {
-  printf '\n\033[1;32m✔ 安装完成！（ClashGate v%s）\033[0m\n\n' "$CS_VERSION"
-  printf '请在云服务商的防火墙 / 安全组放行以下 TCP 端口：'
+  local ports=()
   if [[ $MODE == auto-cert ]]; then
-    [[ ${CERT_MODE:-port} == port ]] && printf ' 80'
-    [[ $PANEL_PORT == 80 && ${CERT_MODE:-port} == port ]] || printf ' %s' "$PANEL_PORT"
-    printf ' %s' "$CONTROLLER_PORT"
+    [[ ${CERT_MODE:-port} == port ]] && ports+=(80)
+    [[ $PANEL_PORT == 80 && ${CERT_MODE:-port} == port ]] || ports+=("$PANEL_PORT")
+    ports+=("$CONTROLLER_PORT")
   fi
-  awk -F'\t' '{printf " %s", $2}' "$STATE"; printf '\n'
+  mapfile -t -O "${#ports[@]}" ports < <(cut -f2 "$STATE")
+  printf '\n\033[1;32m✔ 安装完成（ClashGate v%s）\033[0m\n' "$CS_VERSION"
+  printf '请在云服务商防火墙放行 TCP 端口：%s\n' "${ports[*]}"
   if [[ $MODE == auto-cert ]]; then
-    printf '\n\033[1mmihomo 订阅链接\033[0m（导入 mihomo / Clash 客户端即可；链接即凭证，泄露后执行 clashgate reset-sub 更换）：\n'
-    printf '  \033[1;36m%s\033[0m\n' "$(sub_url)"
-    if [[ ${CERT_MODE:-port} != manual && $TLS != production ]]; then
-      printf '  注意：当前为%s，客户端可能拒绝下载订阅\n' "$(tls_label)"
-    fi
-    printf '\n\033[1m管理面板\033[0m\n'
-    printf '  地址：%s\n  端口：%s（随机空闲高端口，请确保防火墙已放行 TCP %s）\n  用户名：admin\n' "$(panel_url)" "$(panel_port)" "$(panel_port)"
-    [[ -n $PANEL_PASS ]] && printf '  密码：%s（仅显示一次；可在面板中修改）\n' "$PANEL_PASS"
-    printf '  证书方式：%s\n' "$(cert_mode_label)"
-    printf '  证书：%s\n' "$(tls_label)"
+    printf '订阅链接：\033[1;36m%s\033[0m\n' "$(sub_url)"
+    printf '面板：%s\n用户名：admin\n' "$(panel_url)"
+    [[ -n $PANEL_PASS ]] && printf '密码：%s（仅显示一次）\n' "$PANEL_PASS"
     if [[ ${CERT_MODE:-port} != manual ]] && cert_is_temp; then
-      printf '  \033[1;33m证书尚未签发成功，当前为临时自签证书；系统每小时自动重试，也可在面板「HTTPS 证书」页立即重试\033[0m\n'
+      printf '\033[1;33m证书尚未签发成功，当前为临时自签证书；系统每小时自动重试，也可在面板「HTTPS 证书」页立即重试\033[0m\n'
+    elif [[ ${CERT_MODE:-port} != manual && $TLS != production ]]; then
+      printf '注意：当前为%s，客户端可能拒绝下载订阅\n' "$(tls_label)"
     fi
-    printf '\n统一安装目录：%s（本地客户端备份：%s）\n' "$CS_ROOT" "$CLIENT_DIR"
   else
-    printf '\n\033[1m客户端 proxies 片段\033[0m\n'
+    printf '节点配置（粘贴到客户端的 proxies）：\n'
     cat "$CLIENT_DIR/proxies.yaml"
-    printf '\n\033[1m客户端配置目录\033[0m：%s\n' "$CLIENT_DIR"
-    printf '  - mihomo-client.yaml（完整 mihomo 客户端配置）\n  - proxies.yaml（仅节点片段）\n'
   fi
-  printf '\n管理：运行 \033[1mclashgate\033[0m 打开管理菜单（clashgate help 查看全部子命令）\n'
+  printf '运行 \033[1mclashgate\033[0m 打开菜单\n'
   if ((${#WARNINGS[@]})); then
     printf '\n\033[1;33m需要注意：\033[0m\n'; printf '  - %s\n' "${WARNINGS[@]}"
   fi
