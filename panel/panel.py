@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.30 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.31 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -220,9 +220,9 @@ from cg_qr import (  # noqa: E402
     qr_png_data_url,
 )
 
-# Versions compare as integer tuples (parse_version_tuple): 1.30 > 1.29 > 1.28 > 1.27 > 1.26 > 1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
-# would sort below 1.09 on every installed panel); the next releases are 1.31, 1.32, ...
-VERSION = "1.30"
+# Versions compare as integer tuples (parse_version_tuple): 1.31 > 1.30 > 1.29 > 1.28 > 1.27 > 1.26 > 1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
+# would sort below 1.09 on every installed panel); the next releases are 1.32, 1.33, ...
+VERSION = "1.31"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -285,7 +285,6 @@ REALITY_SNI_POOL = (
     "www.microsoft.com",
     "www.apple.com",
     "addons.mozilla.org",
-    "www.yahoo.com",
     "www.amd.com",
     "www.nvidia.com",
     "www.samsung.com",
@@ -436,6 +435,7 @@ from cg_config import (  # noqa: E402
     cert_task_lock,
     restart_mihomo_for_cert,
     enable_cert_renew_timer,
+    ensure_geodata,
     validate_config,
     ufw_specs_for_node,
     collect_ufw_specs,

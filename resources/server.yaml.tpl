@@ -8,12 +8,14 @@ tcp-concurrent: true
 log-level: warning
 find-process-mode: "off"
 
-# 只为 GEOIP 规则。域名走外部规则集，不需要 geosite / geoip.dat
+# GEOIP / GEOSITE / IP-ASN 规则的数据文件（geoip.metadb、GeoSite.dat、ASN.mmdb）在安装和更新时预先下载到内核目录
 geodata-mode: false
 geo-auto-update: true
 geo-update-interval: 48
 geox-url:
   mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
+  geosite: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
+  asn: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/GeoLite2-ASN.mmdb"
 
 @@CONTROLLER@@
 

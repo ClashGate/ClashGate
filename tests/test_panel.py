@@ -4,6 +4,7 @@ Needs a Mihomo binary for `mihomo -t` (MIHOMO_BIN, default tests/.cache/mihomo; 
 downloads the pinned version). Run: python3 -m unittest discover -s tests -v
 """
 import json
+import io
 import os
 import re
 import shutil
@@ -29,6 +30,9 @@ os.environ.update(CLASHGATE_ROOT=ROOT, MIHOMO_BIN=MIHOMO, SYSTEMCTL="true",
 CS = ROOT + "/etc/clashgate"
 os.makedirs(CS + "/certs")
 shutil.copytree(os.path.join(REPO, "resources"), CS + "/resources")
+GEO_CACHE = os.environ.get("CG_TEST_GEO_DIR", "")   # tests/run.sh fills it once
+for _g in os.listdir(GEO_CACHE) if GEO_CACHE else []:
+    shutil.copy(os.path.join(GEO_CACHE, _g), CS + "/" + _g)
 sys.path.insert(0, os.path.join(REPO, "panel"))
 import panel as P  # noqa: E402
 
@@ -78,7 +82,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -962,6 +966,69 @@ class V121Test(unittest.TestCase):
         self.assertIn("'/action/cert'", js)
         for gone in ("/action/restart", "/action/cert-dns", "/routing/update"):
             self.assertNotIn(gone, js)
+
+
+class GeoDataTest(unittest.TestCase):
+    """1.31: geo data is fetched up front into the core's home dir; mihomo -t must never download it."""
+
+    def setUp(self):
+        global G
+        G = P.ensure_geodata.__globals__
+
+    def test_reality_sni_pool_has_no_yahoo(self):
+        self.assertFalse([h for h in P.REALITY_SNI_POOL if "yahoo" in h])
+        self.assertNotIn("yahoo", read(os.path.join(REPO, "scripts/lib/common.sh")))
+
+    def test_validation_uses_local_geodata_offline(self):
+        P.ensure_geodata()
+        for name, _ in G["GEO_FILES"]:
+            self.assertTrue(G["_geo_present"](P.CS_ROOT, name), name)
+        # geox-url points nowhere: the check only passes if the validator links the local files.
+        cfg = os.path.join(tempfile.mkdtemp(), "geo.yaml")
+        with open(cfg, "w") as f:
+            f.write("geodata-mode: false\ngeox-url:\n  mmdb: http://127.0.0.1:9/a.mmdb\n"
+                    "  geosite: http://127.0.0.1:9/b.dat\n  asn: http://127.0.0.1:9/c.mmdb\n"
+                    "proxies: []\nrules:\n  - GEOSITE,google,DIRECT\n  - IP-ASN,13335,DIRECT,no-resolve\n"
+                    "  - GEOIP,private,DIRECT,no-resolve\n  - MATCH,DIRECT\n")
+        with mock.patch.object(G["urllib"].request, "urlopen",
+                               side_effect=OSError("offline")):
+            rc, out = P.validate_config(path=cfg)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("download", out.lower())
+
+    def test_ensure_geodata_fetches_missing_files(self):
+        root = tempfile.mkdtemp()
+        with open(root + "/Country.mmdb", "wb") as f:   # legacy name, any case, counts for GEOIP
+            f.write(b"x")
+        seen = []
+
+        def fake(url, timeout=0):
+            seen.append(url)
+            return io.BytesIO(b"g" * 4096)
+        with mock.patch.object(G["urllib"].request, "urlopen", side_effect=fake):
+            self.assertEqual(P.ensure_geodata(root), [])
+            self.assertEqual(P.ensure_geodata(root), [])   # second call: nothing to fetch
+        self.assertEqual(sorted(os.listdir(root)), ["ASN.mmdb", "Country.mmdb", "GeoSite.dat"])
+        self.assertEqual([u.rsplit("/", 1)[1] for u in seen], ["geosite.dat", "GeoLite2-ASN.mmdb"])
+        with mock.patch.object(G["urllib"].request, "urlopen",
+                               side_effect=OSError("offline")):
+            self.assertEqual(P.ensure_geodata(tempfile.mkdtemp()), ["geoip.metadb", "GeoSite.dat", "ASN.mmdb"])
+
+    def test_installer_and_update_fetch_geodata(self):
+        sh = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))
+        core = read(os.path.join(REPO, "scripts/lib/core.sh"))
+        inst = sh[sh.index("do_install() {"):sh.index("do_update() {")]
+        self.assertLess(inst.index("ensure_geodata || die"), inst.index("render_server"))
+        upd = sh[sh.index("do_update() {"):sh.index("update_self() {")]
+        self.assertLess(upd.index("ensure_geodata"), upd.index("update_self"))
+        self.assertIn('"$CONF_DIR"/*.metadb', core)
+        tpl = read(os.path.join(REPO, "resources/server.yaml.tpl"))
+        for name, remote in G["GEO_FILES"]:
+            self.assertIn(f'"{name} {remote}"', core)
+            self.assertIn(f"{G["GEO_BASES"][0]}/{remote}", tpl)
+        for base in G["GEO_BASES"]:
+            self.assertIn(base, core)
+        self.assertIn('target=ensure_geodata', read(os.path.join(REPO, "panel/cg_http.py")))
 
 
 if __name__ == "__main__":

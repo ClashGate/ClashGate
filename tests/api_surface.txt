@@ -209,6 +209,7 @@ dump_yaml_map
 dump_yaml_providers
 dump_yaml_proxies
 enable_cert_renew_timer
+ensure_geodata
 ensure_unified_root
 extract_top_level_yaml_section
 extract_yaml_secret

@@ -242,6 +242,7 @@ do_install() {
   [[ $MODE == auto-cert && -z $MIHOMO_SECRET ]] && MIHOMO_SECRET=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 20)
   save_env
   install_core; ensure_user; log "安装 ClashGate 文件"; install_files; gen_nodes
+  ensure_geodata || die "地理数据下载失败：$GEO_FAILED（请确认服务器可以访问 jsDelivr 或 GitHub）"
   if [[ $MODE == auto-cert ]]; then
     if [[ ${CERT_MODE:-port} == manual ]]; then
       setup_manual_cert
@@ -265,6 +266,7 @@ do_update() {
   install_deps
   if [[ $MODE == auto-cert ]]; then ensure_python; fi
   install_core
+  ensure_geodata || warn "地理数据下载失败：$GEO_FAILED（请确认服务器可以访问 jsDelivr 或 GitHub）"
   update_self
   log "重启服务"
   validate_conf || die "配置未通过校验（mihomo -t），未重启"
