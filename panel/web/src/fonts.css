@@ -51,3 +51,62 @@
   font-display: swap;
   src: url("../node_modules/@fontsource/newsreader/files/newsreader-latin-600-normal.woff2") format("woff2");
 }
+
+/* The opt-in skins (bento / console / flow) use Public Sans + Spline Sans Mono for
+   Latin; Cyrillic falls back to IBM Plex Sans and CJK to the system stack. */
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/public-sans/files/public-sans-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/public-sans/files/public-sans-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/public-sans/files/public-sans-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/public-sans/files/public-sans-latin-700-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/public-sans/files/public-sans-latin-800-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spline Sans Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/spline-sans-mono/files/spline-sans-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spline Sans Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/spline-sans-mono/files/spline-sans-mono-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spline Sans Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/spline-sans-mono/files/spline-sans-mono-latin-600-normal.woff2") format("woff2");
+}

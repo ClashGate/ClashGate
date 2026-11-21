@@ -333,27 +333,27 @@ const {
                 <button
                   type="button"
                   role="radio"
-                  :aria-checked="theme === 'airmail' ? 'true' : 'false'"
+                  :aria-checked="theme === 'bento' ? 'true' : 'false'"
                   class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
-                  :class="theme === 'airmail' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
-                  @click="setTheme('airmail')"
-                >{{ t('航空邮件') }}</button>
+                  :class="theme === 'bento' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  @click="setTheme('bento')"
+                >{{ t('便当') }}</button>
                 <button
                   type="button"
                   role="radio"
-                  :aria-checked="theme === 'transit' ? 'true' : 'false'"
+                  :aria-checked="theme === 'console' ? 'true' : 'false'"
                   class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
-                  :class="theme === 'transit' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
-                  @click="setTheme('transit')"
-                >{{ t('地铁图') }}</button>
+                  :class="theme === 'console' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  @click="setTheme('console')"
+                >{{ t('控制台') }}</button>
                 <button
                   type="button"
                   role="radio"
-                  :aria-checked="theme === 'gate' ? 'true' : 'false'"
+                  :aria-checked="theme === 'flow' ? 'true' : 'false'"
                   class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
-                  :class="theme === 'gate' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
-                  @click="setTheme('gate')"
-                >{{ t('登机口') }}</button>
+                  :class="theme === 'flow' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  @click="setTheme('flow')"
+                >{{ t('向导') }}</button>
               </div>
             </div>
           </section>

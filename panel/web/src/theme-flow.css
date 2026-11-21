@@ -1,0 +1,191 @@
+/* ClashGate "Flow" skin — a guided, single-column setup flow with numbered steps
+   and a vertical progress line. Active only on <html data-theme="flow">.
+   The default skin is untouched. */
+
+html[data-theme="flow"] {
+  --font-sans: "Public Sans", "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+}
+html[data-theme="flow"] .cg-wordmark,
+html[data-theme="flow"] .cg-page-title,
+html[data-theme="flow"] .cg-app h2 {
+  font-family: "Public Sans", "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+html[data-theme="flow"] .cg-side,
+html[data-theme="flow"] .cg-mobile-nav {
+  display: none;
+}
+
+/* One surface: the page-title bar blends in, the topnav carries the border. */
+html[data-theme="flow"] .cg-top,
+html[data-theme="flow"] .cg-topbar {
+  background: transparent;
+  border-bottom: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-theme="flow"] .cg-topbar { height: 56px; }
+
+/* Slim status readout, then the guided flow centers in the page. */
+html[data-theme="flow"] .cg-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: #fff;
+  border: 1px solid #e3e8f0;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 1px 1px rgba(16, 24, 40, 0.03), 0 10px 24px -22px rgba(22, 48, 86, 0.22);
+}
+html[data-theme="flow"] .cg-rail-cell {
+  border: 0;
+  border-inline-end: 1px solid #edf1f6;
+  border-radius: 0;
+  padding: 12px 16px;
+  box-shadow: none;
+  background: transparent;
+}
+html[data-theme="flow"] .cg-rail-cell:last-child { border-inline-end: 0; }
+html[data-theme="flow"] .cg-rail-num { font-size: 20px; }
+html[data-theme="flow"] .cg-rail-label { font-size: 12px; color: #67788c; }
+
+html[data-theme="flow"] body {
+  background-color: #f6f8fb;
+  background-image:
+    radial-gradient(1000px 480px at 100% -6%, rgba(29, 111, 224, 0.07), transparent 62%),
+    linear-gradient(180deg, #fafcff 0%, #f1f4f9 100%);
+  background-attachment: fixed;
+}
+
+/* ---- top navigation: segmented, underline active ---- */
+html[data-theme="flow"] .cg-topnav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 24px;
+  background: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid #e3e8f0;
+  position: sticky;
+  top: 56px;
+  z-index: 25;
+}
+html[data-theme="flow"] .cg-topnav-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+html[data-theme="flow"] .cg-topnav-brand .cg-logo { width: 30px; height: 30px; border-radius: 8px; }
+html[data-theme="flow"] .cg-topnav-brand .cg-wordmark { font-size: 16px; font-weight: 800; letter-spacing: -0.02em; color: #1a2330; }
+html[data-theme="flow"] .cg-topnav-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+html[data-theme="flow"] .cg-topnav-tabs::-webkit-scrollbar { display: none; }
+html[data-theme="flow"] .cg-topnav-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 12px;
+  background: transparent;
+  color: #4e5b6b;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+}
+html[data-theme="flow"] .cg-topnav-item:hover { color: #1a2330; }
+html[data-theme="flow"] .cg-topnav-item.is-active { color: #1d6fe0; border-bottom-color: #1d6fe0; }
+html[data-theme="flow"] .cg-topnav-item.is-locked { color: #a3adbb; }
+
+/* ---- guided flow: numbered steps joined by a vertical line ---- */
+html[data-theme="flow"] .cg-home {
+  counter-reset: cgflow;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  position: relative;
+  padding-inline-start: 56px;
+  max-width: 860px;
+  margin-inline: auto;
+}
+html[data-theme="flow"] .cg-home::before {
+  content: "";
+  position: absolute;
+  left: 21px;
+  top: 20px;
+  bottom: 20px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(#1d6fe0, #c9d1dd 72%);
+}
+html[data-theme="flow"] .cg-home > section {
+  position: relative;
+}
+html[data-theme="flow"] .cg-home > section::before {
+  counter-increment: cgflow;
+  content: counter(cgflow);
+  position: absolute;
+  left: -56px;
+  top: 14px;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #1d6fe0;
+  color: #1d6fe0;
+  font-weight: 800;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 20px -10px rgba(29, 111, 224, 0.5);
+  z-index: 1;
+}
+html[data-theme="flow"] .cg-home > section:first-child::before {
+  background: #1d6fe0;
+  color: #fff;
+}
+
+/* Step 1 (subscription) is the promoted step. */
+html[data-theme="flow"] #sub-card {
+  border-color: #bfdbfe;
+  box-shadow: 0 1px 1px rgba(16, 24, 40, 0.03), 0 18px 40px -28px rgba(29, 111, 224, 0.5);
+}
+html[data-theme="flow"] #sub-card h2 { font-size: 18px; }
+
+/* Step sections get a little more air. */
+html[data-theme="flow"] .cg-home-add,
+html[data-theme="flow"] .cg-home-in {
+  background: #fff;
+  border: 1px solid #e3e8f0;
+  box-shadow: 0 1px 1px rgba(16, 24, 40, 0.03), 0 14px 30px -28px rgba(22, 48, 86, 0.28);
+}
+
+@keyframes cgFlowIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+html[data-theme="flow"] .cg-home > section {
+  animation: cgFlowIn 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+html[data-theme="flow"] .cg-home > section:nth-child(2) { animation-delay: 60ms; }
+html[data-theme="flow"] .cg-home > section:nth-child(3) { animation-delay: 120ms; }
+
+@media (max-width: 640px) {
+  html[data-theme="flow"] .cg-topnav { top: 0; position: static; }
+  html[data-theme="flow"] .cg-topnav-brand .cg-wordmark { display: none; }
+  html[data-theme="flow"] .cg-home { padding-inline-start: 44px; }
+  html[data-theme="flow"] .cg-home::before { left: 17px; }
+  html[data-theme="flow"] .cg-home > section::before { left: -44px; width: 34px; height: 34px; font-size: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="flow"] .cg-home > section { animation: none; }
+}

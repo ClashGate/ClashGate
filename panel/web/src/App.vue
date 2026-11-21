@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue'
 import { t, lang, setLang, LANGS, langLabel } from './i18n.js'
 import CgIcon from './CgIcon.vue'
 import XmasArt from './XmasArt.vue'
@@ -200,6 +201,19 @@ const {
   addMasqueOutbound,
   retryMasque,
 } = usePanel()
+
+// New opt-in skins use a top/rail navigation instead of the classic sidebar.
+const isClassicShell = computed(() => theme.value === 'default' || theme.value === 'christmas')
+const navItems = computed(() => [
+  { id: 'inbounds', icon: 'house', label: t('首页'), locked: false },
+  { id: 'outbounds', icon: 'outbound', label: t('服务端出站'), locked: false },
+  { id: 'routing', icon: 'routing', label: t('服务端分流'), locked: state.custom_server_enabled },
+  { id: 'cluster', icon: 'cluster', label: t('集群'), locked: state.custom_server_enabled },
+  { id: 'readable', icon: 'convert', label: t('节点转换'), locked: false },
+  { id: 'certs', icon: 'shield', label: t('HTTPS 证书'), locked: false },
+  { id: 'advanced', icon: 'server', label: t('自定义服务端'), locked: state.custom_server_enabled },
+  { id: 'settings', icon: 'settings', label: t('设置'), locked: false },
+])
 </script>
 
 <template>
@@ -530,13 +544,6 @@ const {
           <div class="flex items-center justify-end gap-2 pt-1">
             <button
               type="button"
-              @click="copyRaw(state.sub_url, 'sub-url-modal')"
-              class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
-            >
-              {{ copiedKey === 'sub-url-modal' ? t('已复制') : t('复制订阅链接') }}
-            </button>
-            <button
-              type="button"
               @click="showSubQrModal = false"
               class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition cursor-pointer"
             >
@@ -667,6 +674,28 @@ const {
         </div>
       </div>
     </header>
+
+    <!-- Top / rail navigation for the opt-in skins (bento, console, flow) -->
+    <nav v-if="!isClassicShell" class="cg-topnav" aria-label="pages">
+      <div class="cg-topnav-brand">
+        <span class="cg-logo-wrap"><img src="/assets/logo.png" alt="" class="cg-logo" /></span>
+        <span class="cg-wordmark">ClashGate</span>
+      </div>
+      <div class="cg-topnav-tabs">
+        <button
+          v-for="item in navItems"
+          :key="item.id"
+          type="button"
+          class="cg-topnav-item"
+          :class="[item.locked ? 'is-locked' : '', activeTab === item.id ? 'is-active' : '']"
+          :title="item.locked ? t('已启用自定义服务端配置，请自行修改相关配置') : undefined"
+          @click="selectTab(item.id)"
+        >
+          <CgIcon :name="item.locked ? 'lock' : item.icon" :size="16" />
+          <span class="cg-topnav-label">{{ item.label }}</span>
+        </button>
+      </div>
+    </nav>
 
     <!-- Main Container -->
     <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-7 space-y-6 flex-1">
