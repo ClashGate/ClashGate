@@ -1,8 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
 import { t } from '../i18n.js'
-import { theme } from '../theme.js'
-import CgIcon from '../CgIcon.vue'
 import { usePanel } from '../composables/usePanel.js'
 
 const {
@@ -192,20 +189,10 @@ const {
   addMasqueOutbound,
   retryMasque,
 } = usePanel()
-
-// Console skin: select a node to inspect it in a detail panel; drawer for the add form.
-const selectedInboundKey = ref('')
-const selectedInbound = computed(() =>
-  state.inbounds.find((i) => i.key === selectedInboundKey.value) || state.inbounds[0] || null,
-)
-const addDrawerOpen = ref(false)
-
-// Flow skin: a three-step accordion (1 订阅 / 2 添加节点 / 3 节点列表).
-const flowStep = ref(1)
 </script>
 
 <template>
-<div class="cg-home" :class="'cg-home-' + theme">
+<div class="cg-home">
           <!-- 客户端订阅链接 -->
             <section
               id="sub-card"
@@ -285,20 +272,10 @@ const flowStep = ref(1)
             </section>
 
             <!-- Right: Locked-Default Add Node Form -->
-            <section
-              class="cg-home-add cg-surface rounded-2xl p-5 sm:p-6"
-              :class="{ 'is-drawer-open': addDrawerOpen }"
-            >
+            <section class="cg-home-add cg-surface rounded-2xl p-5 sm:p-6">
               <div class="flex items-center justify-between gap-2 mb-4">
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('添加节点') }}</h2>
-                <button
-                  v-if="theme === 'console'"
-                  type="button"
-                  class="cg-drawer-close"
-                  :aria-label="t('关闭')"
-                  @click="addDrawerOpen = false"
-                >✕</button>
-                <span v-else class="px-2.5 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                <span class="px-2.5 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
                   {{ t('安全默认策略') }}
                 </span>
               </div>
@@ -501,8 +478,6 @@ const flowStep = ref(1)
                   v-for="item in state.inbounds"
                   :key="item.key"
                   class="p-4 hover:bg-emerald-50/35 transition flex flex-wrap items-center justify-between gap-3"
-                  :class="[theme === 'console' ? 'cursor-pointer' : '', selectedInbound && selectedInbound.key === item.key ? 'is-selected' : '']"
-                  @click="selectedInboundKey = item.key"
                 >
                   <div class="space-y-1 min-w-0 flex-[1_1_12rem]">
                     <div class="flex items-center gap-2 flex-wrap">
@@ -536,7 +511,7 @@ const flowStep = ref(1)
                   <div class="flex items-center gap-2 flex-wrap min-w-0 max-w-full">
                     <button
                       type="button"
-                      @click.stop="copyRaw(item.single_config, `single-${item.key}`)"
+                      @click="copyRaw(item.single_config, `single-${item.key}`)"
                       class="cg-btn-sm cg-btn-secondary"
                     >
                       {{ copiedKey === `single-${item.key}` ? t('已复制') : t('复制配置') }}
@@ -545,7 +520,7 @@ const flowStep = ref(1)
                       v-if="item.can_reset_password"
                       type="button"
                       :disabled="busyKey === `rst-${item.key}`"
-                      @click.stop="resetInboundPassword(item)"
+                      @click="resetInboundPassword(item)"
                       class="cg-btn-sm cg-btn-secondary"
                     >
                       {{ busyKey === `rst-${item.key}` ? t('重置中…') : t('重置密码') }}
@@ -553,7 +528,7 @@ const flowStep = ref(1)
                     <button
                       type="button"
                       :disabled="busyKey === `del-${item.key}`"
-                      @click.stop="deleteInbound(item)"
+                      @click="deleteInbound(item)"
                       class="cg-btn-sm cg-btn-danger"
                     >
                       {{ busyKey === `del-${item.key}` ? t('删除中…') : t('删除') }}
@@ -562,84 +537,5 @@ const flowStep = ref(1)
                 </div>
               </div>
             </section>
-
-            <!-- Console skin: node detail panel -->
-            <section v-if="theme === 'console'" class="cg-console-detail cg-surface rounded-2xl p-5 sm:p-6">
-              <template v-if="selectedInbound">
-                <div class="flex items-center justify-between gap-3 flex-wrap">
-                  <div class="flex items-center gap-2.5 min-w-0">
-                    <span
-                      class="w-2.5 h-2.5 rounded-full"
-                      :class="selectedInbound.listening ? 'bg-emerald-500' : selectedInbound.pending_reload ? 'bg-amber-500' : 'bg-rose-500'"
-                    ></span>
-                    <h2 class="text-base font-bold text-slate-900 tracking-tight cg-wrap">{{ selectedInbound.name }}</h2>
-                  </div>
-                  <span
-                    class="px-2.5 py-0.5 text-xs font-semibold rounded-full"
-                    :class="selectedInbound.listening ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60' : selectedInbound.pending_reload ? 'bg-amber-50 text-amber-700 border border-amber-200/60' : 'bg-rose-50 text-rose-700 border border-rose-200/60'"
-                  >
-                    {{ selectedInbound.listening ? t('运行中') : selectedInbound.pending_reload ? t('待应用') : t('未运行') }}
-                  </span>
-                </div>
-
-                <dl class="grid grid-cols-2 gap-3.5 mt-4">
-                  <div class="rounded-xl bg-[#f7f9fc] border border-slate-200/80 p-3.5">
-                    <dt class="text-xs font-medium text-slate-500">{{ t('协议类型') }}</dt>
-                    <dd class="mt-1 text-sm font-bold text-slate-900">{{ selectedInbound.kind_label }}</dd>
-                  </div>
-                  <div class="rounded-xl bg-[#f7f9fc] border border-slate-200/80 p-3.5">
-                    <dt class="text-xs font-medium text-slate-500">{{ t('监听端口') }}</dt>
-                    <dd class="mt-1 text-sm font-bold text-slate-900 tabular-nums"><bdi dir="ltr">{{ selectedInbound.port }}</bdi></dd>
-                  </div>
-                </dl>
-
-                <div class="cg-btn-row mt-4">
-                  <button
-                    type="button"
-                    @click="copyRaw(selectedInbound.single_config, `detail-${selectedInbound.key}`)"
-                    class="cg-btn-primary cg-btn-sm"
-                  >
-                    {{ copiedKey === `detail-${selectedInbound.key}` ? t('已复制') : t('复制配置') }}
-                  </button>
-                  <button
-                    v-if="selectedInbound.can_reset_password"
-                    type="button"
-                    :disabled="busyKey === `rst-${selectedInbound.key}`"
-                    @click="resetInboundPassword(selectedInbound)"
-                    class="cg-btn-sm cg-btn-secondary"
-                  >
-                    {{ busyKey === `rst-${selectedInbound.key}` ? t('重置中…') : t('重置密码') }}
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="busyKey === `del-${selectedInbound.key}`"
-                    @click="deleteInbound(selectedInbound)"
-                    class="cg-btn-sm cg-btn-danger"
-                  >
-                    {{ busyKey === `del-${selectedInbound.key}` ? t('删除中…') : t('删除') }}
-                  </button>
-                </div>
-              </template>
-              <div v-else class="cg-empty py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-sm text-slate-500">
-                {{ t('暂无入站节点，请在上方添加节点') }}
-              </div>
-            </section>
-
-            <!-- Console skin: floating add button + drawer backdrop -->
-            <button
-              v-if="theme === 'console'"
-              type="button"
-              class="cg-fab"
-              :aria-label="t('添加节点')"
-              :aria-expanded="addDrawerOpen ? 'true' : 'false'"
-              @click="addDrawerOpen = !addDrawerOpen"
-            >
-              <CgIcon name="plus" :size="22" />
-            </button>
-            <div
-              v-if="theme === 'console' && addDrawerOpen"
-              class="cg-drawer-backdrop"
-              @click="addDrawerOpen = false"
-            ></div>
         </div>
 </template>

@@ -308,12 +308,12 @@ const {
           </section>
 
           <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="flex items-center justify-between gap-4">
               <div class="min-w-0">
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('皮肤') }}</h2>
                 <p class="text-xs text-slate-500 mt-1 leading-relaxed">{{ t('只改变面板外观，保存在当前浏览器。') }}</p>
               </div>
-              <div class="w-full sm:w-auto flex flex-wrap rounded-lg border border-slate-200 p-0.5 bg-white" role="radiogroup" :aria-label="t('皮肤')">
+              <div class="flex shrink-0 rounded-lg border border-slate-200 p-0.5 bg-white" role="radiogroup" :aria-label="t('皮肤')">
                 <button
                   type="button"
                   role="radio"
@@ -330,30 +330,6 @@ const {
                   :class="theme === 'christmas' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
                   @click="setTheme('christmas')"
                 >{{ t('圣诞') }}</button>
-                <button
-                  type="button"
-                  role="radio"
-                  :aria-checked="theme === 'bento' ? 'true' : 'false'"
-                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
-                  :class="theme === 'bento' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
-                  @click="setTheme('bento')"
-                >{{ t('便当') }}</button>
-                <button
-                  type="button"
-                  role="radio"
-                  :aria-checked="theme === 'console' ? 'true' : 'false'"
-                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
-                  :class="theme === 'console' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
-                  @click="setTheme('console')"
-                >{{ t('控制台') }}</button>
-                <button
-                  type="button"
-                  role="radio"
-                  :aria-checked="theme === 'flow' ? 'true' : 'false'"
-                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
-                  :class="theme === 'flow' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
-                  @click="setTheme('flow')"
-                >{{ t('向导') }}</button>
               </div>
             </div>
           </section>

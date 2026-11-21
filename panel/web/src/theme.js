@@ -3,7 +3,7 @@
 import { ref } from 'vue'
 
 const KEY = 'clashgate_theme'
-export const THEMES = ['default', 'christmas', 'bento', 'console', 'flow']
+export const THEMES = ['default', 'christmas']
 
 function detect() {
   try {

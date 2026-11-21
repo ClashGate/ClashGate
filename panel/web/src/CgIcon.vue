@@ -18,7 +18,6 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
-  Plus,
 } from 'lucide-vue-next'
 
 const icons = {
@@ -40,7 +39,6 @@ const icons = {
   chevron: ChevronRight,
   eye: Eye,
   eyeOff: EyeOff,
-  plus: Plus,
 }
 
 defineProps({

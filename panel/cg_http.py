@@ -97,7 +97,8 @@ def render_spa_html(title: str, boot_data: dict, fallback_html: str = "") -> str
         "<link rel=icon type=image/png href=/favicon.png><link rel='shortcut icon' href=/favicon.ico>"
         "<style>html{background:#f3f6fb}html:not(.cg-ready) #app{visibility:hidden}</style>"
         # Panel skin (Settings): applied before first paint so the page never flashes the default look.
-        "<script>try{var _ct=localStorage.getItem('clashgate_theme');if(_ct==='christmas'||_ct==='bento'||_ct==='console'||_ct==='flow')document.documentElement.dataset.theme=_ct}catch(e){}</script>"
+        "<script>try{if(localStorage.getItem('clashgate_theme')==='christmas')"
+        "document.documentElement.dataset.theme='christmas'}catch(e){}</script>"
         f"<style>{css}</style>"
         f"<script>window.__CS_BOOT__ = {boot_json};</script>"
         "</head>"

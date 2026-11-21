@@ -1,6 +1,6 @@
 # ClashGate Agent Handoff Guide
 
-This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.33**. Next version number: **1.34**. Public repository: https://github.com/ClashGate/ClashGate
+This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.34**. Next version number: **1.35**. Public repository: https://github.com/ClashGate/ClashGate
 
 ---
 
@@ -77,7 +77,7 @@ Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snel
 | `panel/cg_qr.py` | QR codes |
 | `panel/routing_mgr.py` | Server-side routing: `/etc/clashgate/routing/` + `routing.json`, assembled into the template |
 | `panel/i18n_en.py` | English translations of server API messages (source strings stay Chinese) |
-| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.31.0`) |
+| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.34.0`) |
 | `panel/dist/` | **Committed build output.** After frontend changes, run `cd panel/web && npm ci && npm run build` and commit the `panel/dist` updates (CI checks `git diff --exit-code -- panel/dist`) |
 | `resources/server.yaml.tpl`, `resources/client.yaml.tpl` | Server / client config templates |
 | `resources/routing/` | Default routing groups (节点选择 / node select, 漏网之鱼 / final / unmatched) |
@@ -94,7 +94,7 @@ Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snel
 
 ---
 
-## 3. Current CLI commands (v1.31)
+## 3. Current CLI commands (v1.34)
 
 With no argument: opens the management menu if already installed, otherwise starts install. `clashgate help` lists every subcommand.
 
@@ -140,7 +140,7 @@ The public default branch is `main` (stable). `test` is the test channel.
 2. The project owner verifies on a real machine (the owner clicks 「检查更新」 (Check for updates) in the panel).
 3. **Push to `main` only after the owner explicitly agrees.** A version that fails acceptance is retired and must not be reused.
 
-Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.32`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.34`, `1.35`, and so on.
+Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.34`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.35`, `1.36`, and so on.
 
 Commit messages are in English. **Never force push.**
 
@@ -233,10 +233,11 @@ Tests **must not** re-issue certificates against the Let's Encrypt production en
 | 1.29 | Removed the CLI `passwd`, `reset-secret`, and `cert` commands; uninstall only leaves the cluster and no longer closes firewall ports |
 | 1.30 | Install checks print only the step header unless a check fails; the final summary is shorter |
 | 1.31 | Pre-download geo data on install/update; the validation temp dir links geo files; the panel fills in missing files; yahoo removed from the Reality SNI pool |
-| 1.32 | Added three opt-in panel skins (Airmail, Metro map, Departures) under 设置 → 皮肤; superseded by 1.33 before a stable release |
-| 1.33 | Redesigned the opt-in panel skins (Bento, Console, Flow): top/rail navigation, bento grid, master-detail and guided-flow home layouts; removed the duplicate copy button in the subscription QR modal |
+| 1.32 | Added three opt-in panel skins (Airmail, Metro map, Departures); rolled back in 1.34 |
+| 1.33 | Redesigned the opt-in skins (Bento, Console, Flow) and removed the duplicate copy button in the subscription QR modal; rolled back in 1.34 |
+| 1.34 | Reverts the opt-in panel skins to restore the 1.31 UI; keeps only the removal of the duplicate copy button in the subscription QR modal |
 
-Next version: **1.34**.
+Next version: **1.35**.
 
 ---
 

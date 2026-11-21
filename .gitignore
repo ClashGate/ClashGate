@@ -18,9 +18,7 @@ serve.yaml
 __pycache__/
 node_modules/
 
-# Impeccable working material (decision rounds, mocks, review captures)
+# local AI tooling / working material — never publish
 .impeccable/
-
-# local AI tooling / skills (stageshow etc.) — reference only, not part of the product
 .agents/
 skills-lock.json
