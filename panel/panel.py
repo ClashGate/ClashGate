@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.35 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.36 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -220,9 +220,9 @@ from cg_qr import (  # noqa: E402
     qr_png_data_url,
 )
 
-# Versions compare as integer tuples (parse_version_tuple): 1.35 > 1.34 > 1.33 > 1.32 > 1.31 > 1.30 > 1.29 > 1.28 > 1.27 > 1.26 > 1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
-# would sort below 1.09 on every installed panel); the next releases are 1.36, 1.37, ...
-VERSION = "1.35"
+# Versions compare as integer tuples (parse_version_tuple): 1.36 > 1.35 > 1.34 > 1.33 > 1.32 > 1.31 > 1.30 > 1.29 > 1.28 > 1.27 > 1.26 > 1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
+# would sort below 1.09 on every installed panel); the next releases are 1.37, 1.38, ...
+VERSION = "1.36"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -233,6 +233,9 @@ PROXIES_JSON = CS_ROOT + "/proxies.json"
 PROVIDERS_JSON = CS_ROOT + "/providers.json"
 PENDING_RELOAD_JSON = CS_ROOT + "/pending_reload.json"
 PENDING_BASELINE_JSON = CS_ROOT + "/pending_baseline.json"
+# Written by `clashgate update` when it kept the live config because panel drafts were pending:
+# the config still uses the old template until it is assembled again (refresh_template_if_flagged).
+TEMPLATE_REFRESH_FLAG = CS_ROOT + "/template_refresh"
 TRAFFIC_JSON = CS_ROOT + "/traffic.json"
 SESSIONS_JSON = CS_ROOT + "/sessions.json"
 PANEL_SETTINGS = CS_ROOT + "/panel_settings.json"
@@ -279,8 +282,7 @@ CLASHGATE_BIN = os.environ.get(
 SYSTEMCTL = os.environ.get("SYSTEMCTL", "systemctl")
 UFW_BIN = os.environ.get("UFW_BIN", "ufw")
 FIREWALL_CMD_BIN = os.environ.get("FIREWALL_CMD_BIN", "firewall-cmd")
-# Ports ClashGate itself opened in ufw / firewalld (one spec per line, e.g. 443/tcp); `clashgate uninstall`
-# closes exactly these. Shared with scripts/lib/core.sh open_firewall.
+# Keep in sync with REALITY_SNI_POOL in scripts/lib/common.sh.
 REALITY_SNI_POOL = (
     "www.microsoft.com",
     "www.apple.com",
@@ -457,6 +459,10 @@ from cg_config import (  # noqa: E402
     _reconstruct_draft_from_live_conf,
     discard_pending_reload,
     reconcile_pending_with_live,
+    refresh_template_if_flagged,
+    DNS_IPV6_ONLY,
+    ipv6_only,
+    ipv6_listen,
     record_pending_reload,
     _dedup_inbounds,
     save_inbounds,

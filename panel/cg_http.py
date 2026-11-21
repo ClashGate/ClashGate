@@ -61,6 +61,10 @@ def _gzip_bytes(data: bytes, cache_key=None) -> bytes:
     return out
 
 
+_CERT_TASK = {"running": False, "ok": None, "msg": "", "detail": "", "started_at": 0.0, "finished_at": 0.0}
+_CERT_TASK_LOCK = threading.Lock()
+
+
 def _read_or_none(path: str):
     try:
         with open(path) as f:
@@ -85,9 +89,43 @@ def load_dist_asset(rel: str) -> str:
         return ""
 
 
+_ASSET_VER = {}
+_ASSET_VER_LOCK = threading.Lock()
+
+
+def asset_version(rel: str) -> str:
+    """Short content hash of a dist file, computed once per (path, mtime, size)."""
+    fp = resolve_dist_file(rel)
+    try:
+        st = os.stat(fp)
+    except OSError:
+        return ""
+    key = (fp, st.st_mtime_ns, st.st_size)
+    with _ASSET_VER_LOCK:
+        hit = _ASSET_VER.get(rel)
+    if hit and hit[0] == key:
+        return hit[1]
+    try:
+        with open(fp, "rb") as f:
+            ver = hashlib.sha256(f.read()).hexdigest()[:12]
+    except OSError:
+        return ""
+    with _ASSET_VER_LOCK:
+        _ASSET_VER[rel] = (key, ver)
+    return ver
+
+
+def asset_url(rel: str) -> str:
+    """/assets/app.js?v=<hash>: the browser keeps it until a panel upgrade changes the file."""
+    ver = asset_version(rel)
+    return f"/{rel}?v={ver}" if ver else f"/{rel}"
+
+
 def render_spa_html(title: str, boot_data: dict, fallback_html: str = "") -> str:
-    css = load_dist_asset("assets/style.css")
-    js = load_dist_asset("assets/app.js")
+    # The JS / CSS bundles (~450 kB) are separate, content-versioned files the browser caches;
+    # only this small page (boot data) is sent on every visit.
+    css_url = html.escape(asset_url("assets/style.css"), quote=True)
+    js_url = html.escape(asset_url("assets/app.js"), quote=True)
     boot_json = json.dumps(boot_data, ensure_ascii=False).replace("</", "<\\/")
     noscript = f"<noscript>{fallback_html}</noscript>" if fallback_html else ""
     return (
@@ -99,13 +137,13 @@ def render_spa_html(title: str, boot_data: dict, fallback_html: str = "") -> str
         # Panel skin (Settings): applied before first paint so the page never flashes the default look.
         "<script>try{if(localStorage.getItem('clashgate_theme')==='christmas')"
         "document.documentElement.dataset.theme='christmas'}catch(e){}</script>"
-        f"<style>{css}</style>"
+        f"<link rel=stylesheet href=\"{css_url}\">"
         f"<script>window.__CS_BOOT__ = {boot_json};</script>"
         "</head>"
         "<body class='antialiased'>"
         "<div id=app></div>"
         f"{noscript}"
-        f"<script>{js}</script>"
+        f"<script src=\"{js_url}\"></script>"
         "</body></html>"
     )
 
@@ -165,6 +203,19 @@ class Panel(BaseHTTPRequestHandler):
     cfg_path: str = ""
     sessions: dict = {}
     fails: dict = {}
+    # Rate-limit buckets that signed in successfully (bucket -> time). The all-sources cap must not
+    # let someone guessing from many addresses lock the owner out of their own panel.
+    trusted: dict = {}
+
+    def _is_trusted(self, bucket: str, now: float) -> bool:
+        return now - self.trusted.get(bucket, 0) < SESSION_TTL
+
+    def _trust(self, bucket: str, now: float):
+        with _SESSION_LOCK:
+            for k in [k for k, v in self.trusted.items() if now - v >= SESSION_TTL]:
+                self.trusted.pop(k, None)
+            if len(self.trusted) < 256 or bucket in self.trusted:
+                self.trusted[bucket] = now
 
     def log_message(self, fmt, *args):
         # Never log the subscription token (the access log goes to the journal).
@@ -241,6 +292,27 @@ class Panel(BaseHTTPRequestHandler):
             self.wfile.write(data)
         except (BrokenPipeError, ConnectionError, ssl.SSLError, socket.timeout):
             pass
+
+    def send_asset(self, fp: str, rel: str, ctype: str):
+        """Static dist file with caching: the exact versioned URL the page links is immutable;
+        fonts / images keep a week; anything else revalidates. An ETag answers repeat visits with 304."""
+        ver = asset_version(rel)
+        asked = parse_qs(urlparse(self.path).query).get("v", [""])[0]
+        if ver and asked == ver:
+            cc = "public, max-age=31536000, immutable"
+        elif fp.endswith((".woff2", ".woff", ".png")):
+            cc = "public, max-age=604800"
+        else:
+            cc = "no-cache"
+        headers = {"Cache-Control": cc}
+        if ver:
+            etag = f'W/"{ver}"'
+            headers["ETag"] = etag
+            inm = self.headers.get("If-None-Match") or ""
+            if etag in [t.strip() for t in inm.split(",")] or inm.strip() == "*":
+                return self.send(304, b"", ctype, headers)
+        with open(fp, "rb") as f:
+            return self.send(200, f.read(), ctype, headers, cache_key=(fp, os.path.getmtime(fp)))
 
     def redirect(self, to, cookie=None):
         h = {"Location": to}
@@ -415,6 +487,9 @@ class Panel(BaseHTTPRequestHandler):
                 "mihomo_version": mver,
                 "inbound_total": len(ports),
                 "inbound_listening": n_listen,
+                # Nodes the core is serving now (drafts not applied yet are left out), for 「节点 x/y 在线」.
+                **self._live_node_counts(listening),
+                "uptime_s": st.get("uptime"),
                 "outbound_nodes_count": len(srv_proxies),
                 "outbound_providers_count": len(providers),
                 "pending_reload_count": len(localized_pending_items),
@@ -443,6 +518,15 @@ class Panel(BaseHTTPRequestHandler):
                 else get_routing().public_state()
             ), req_lang),
         }
+
+    @staticmethod
+    def _live_node_counts(listening: set) -> dict:
+        try:
+            live_n, live_i = live_nodes_and_inbounds()
+            ports = [int(n["port"]) for n in live_n] + [int(i["port"]) for i in live_i]
+        except Exception:
+            return {"live_total": None, "live_up": None}
+        return {"live_total": len(ports), "live_up": sum(1 for p in ports if p in listening)}
 
     def respond_mutation(self, s, msg: str, ok: bool = True, detail: str = ""):
         if not ok and not detail:
@@ -519,8 +603,7 @@ class Panel(BaseHTTPRequestHandler):
                                 "font/woff2" if fp.endswith(".woff2") else (
                                     "font/woff" if fp.endswith(".woff") else "application/octet-stream")))
                     )
-                    with open(fp, "rb") as f:
-                        return self.send(200, f.read(), ctype, cache_key=(fp, os.path.getmtime(fp)))
+                    return self.send_asset(fp, rel, ctype)
             return self.send(404, "not found", "text/plain")
         if path in ("/favicon.ico", "/favicon.png", "/logo.png"):
             fp = resolve_dist_file("favicon.ico" if path == "/favicon.ico" else ("assets/logo.png" if path == "/logo.png" else "favicon.png"))
@@ -537,6 +620,10 @@ class Panel(BaseHTTPRequestHandler):
             return self.do_cluster_hello()
         tok, s = self.session()
         if not s:
+            if path.startswith("/api/") or self.is_ajax():
+                # Polling clients must see the expired session, not a 303 to the login page's HTML.
+                return self.send(401, json.dumps({"ok": False, "msg": "登录会话已过期，请刷新页面重新登录"}, ensure_ascii=False),
+                                 "application/json; charset=utf-8")
             return self.redirect("/login")
         if path == "/":
             return self.send(200, self.dashboard(s, initial_tab="inbounds"))
@@ -567,6 +654,8 @@ class Panel(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             return self.send(200, json.dumps(d, ensure_ascii=False), "application/json; charset=utf-8")
+        if path == "/api/cert-task-status":
+            return self.cert_task_status(s)
         if path == "/api/update-core-status":
             with _CORE_UPDATE_TASK_LOCK:
                 tstate = dict(_CORE_UPDATE_TASK)
@@ -661,7 +750,7 @@ class Panel(BaseHTTPRequestHandler):
         if path == "/action/upgrade-self":
             return self.do_upgrade_self(s)
         if path == "/action/cert":
-            return self.do_cert_action(s)
+            return self.do_cert_action(s, form)
         if path == "/action/cert-mode":
             return self.do_cert_mode(s, form)
         if path == "/action/reset-secret":
@@ -783,7 +872,7 @@ class Panel(BaseHTTPRequestHandler):
                 self.fails.pop(k, None)   # prune so the table cannot grow without bound
             recent = [t for t in self.fails.get(ip, []) if now - t < LOGIN_WINDOW]
             total = sum(len(v) for v in self.fails.values())
-        if len(recent) >= LOGIN_MAX_FAILS_PER_IP or total >= LOGIN_MAX_FAILS_TOTAL:
+        if len(recent) >= LOGIN_MAX_FAILS_PER_IP or (total >= LOGIN_MAX_FAILS_TOTAL and not self._is_trusted(ip, now)):
             return self.send(429, self.login_page("尝试次数过多，请 10 分钟后再试。"))
         if self.cfg_path and os.path.isfile(self.cfg_path):
             try:
@@ -796,6 +885,7 @@ class Panel(BaseHTTPRequestHandler):
         user, pw = form.get("username", ""), form.get("password", "")
         if hmac.compare_digest(user, self.cfg["username"]) and verify_password(pw, self.cfg["password_hash"]):
             self.fails.pop(ip, None)
+            self._trust(ip, now)
             tok = secrets.token_urlsafe(32)
             sess = {"csrf": secrets.token_urlsafe(24), "exp": now + SESSION_TTL}
             remember_session(tok, sess)
@@ -817,7 +907,7 @@ class Panel(BaseHTTPRequestHandler):
         with _SESSION_LOCK:
             recent = [t for t in self.fails.get(ip, []) if now - t < LOGIN_WINDOW]
             total = sum(len([t for t in v if now - t < LOGIN_WINDOW]) for v in self.fails.values())
-        return len(recent) >= LOGIN_MAX_FAILS_PER_IP or total >= LOGIN_MAX_FAILS_TOTAL
+        return len(recent) >= LOGIN_MAX_FAILS_PER_IP or (total >= LOGIN_MAX_FAILS_TOTAL and not self._is_trusted(ip, now))
 
     def _cluster_note_fail(self):
         ip, now = self.login_bucket(), time.time()
@@ -873,6 +963,7 @@ class Panel(BaseHTTPRequestHandler):
                 return self._cjson(401, {"ok": False, "code": "bad_password", "msg": "面板密码错误"})
             with _SESSION_LOCK:
                 self.fails.pop(self.login_bucket(), None)
+            self._trust(self.login_bucket(), time.time())
         busy = self._cluster_busy_mode()
         if busy:
             return busy
@@ -1124,6 +1215,10 @@ class Panel(BaseHTTPRequestHandler):
                 discard_pending_reload()
             except Exception as e:
                 return self.respond_mutation(s, f"丢弃草稿失败：{e}", False)
+            try:
+                refresh_template_if_flagged()   # an update that waited for the drafts lands now
+            except Exception as e:
+                sys.stderr.write(f"template refresh failed: {e}\n")
         run_snell_migration()
         return self.respond_mutation(s, "已丢弃待应用草稿", True)
 
@@ -1297,6 +1392,10 @@ class Panel(BaseHTTPRequestHandler):
                 if new_token:
                     self._commit_sub_token(new_token)
                 clear_pending_reload()
+                try:
+                    os.remove(TEMPLATE_REFRESH_FLAG)   # assembled with the current template just now
+                except OSError:
+                    pass
                 sync_client_files()
                 wait_mihomo_ports()
         if rc == 0:
@@ -1352,16 +1451,59 @@ class Panel(BaseHTTPRequestHandler):
                 return self.respond_mutation(s, f"重置密钥失败：{e}", False)
         return self.respond_mutation(s, "已生成新 Zashboard API 密钥，请点顶部「应用配置」生效（应用后直连地址才会更新）。", True)
 
-    def do_cert_action(self, s):
-        with LOCK:
+    # Certificate jobs (renew / switch mode) can take up to 3 minutes (ACME, DNS propagation).
+    # They run without the panel LOCK (certctl serializes itself with its flock), one at a time,
+    # and with `async=1` in a background thread the browser polls (/api/cert-task-status).
+    def _cert_job(self, s, form, job):
+        if form.get("async") == "1" and self.is_ajax():
+            with _CERT_TASK_LOCK:
+                if _CERT_TASK["running"]:
+                    return self.respond_mutation(s, "另一个证书任务正在运行，请稍后再试", False)
+                _CERT_TASK.update(running=True, ok=None, msg="", detail="", started_at=time.time(), finished_at=0.0)
+
+            def worker():
+                try:
+                    ok, msg, detail = job()
+                except Exception as e:
+                    ok, msg, detail = False, f"证书任务失败：{e}", ""
+                with _CERT_TASK_LOCK:
+                    _CERT_TASK.update(running=False, ok=ok, msg=msg, detail=detail, finished_at=time.time())
+
+            threading.Thread(target=worker, name="cert-task", daemon=True).start()
+            return self.send(200, json.dumps({"ok": True, "running": True}), "application/json; charset=utf-8")
+        with _CERT_TASK_LOCK:
+            if _CERT_TASK["running"]:
+                return self.respond_mutation(s, "另一个证书任务正在运行，请稍后再试", False)
+            _CERT_TASK["running"] = True
+        try:
+            ok, msg, detail = job()
+        finally:
+            with _CERT_TASK_LOCK:
+                _CERT_TASK["running"] = False
+        return self.respond_mutation(s, msg, ok, detail=detail)
+
+    def cert_task_status(self, s):
+        with _CERT_TASK_LOCK:
+            t = dict(_CERT_TASK)
+        if t["running"]:
+            payload = {"ok": True, "running": True, "elapsed": int(time.time() - t["started_at"])}
+        else:
+            state = self.build_client_state(s)
+            payload = {"ok": t["ok"] is not False, "running": False, "done": t["ok"] is not None,
+                       "msg": t["msg"], "detail": t["detail"], "state": state}
+        return self.send(200, json.dumps(payload, ensure_ascii=False), "application/json; charset=utf-8")
+
+    def do_cert_action(self, s, form=None):
+        def job():
             env = read_env()
             rc, out = run([resolve_certctl_path(), "renew"], timeout=180, env=certctl_env())
             tok = env.get("CF_TOKEN", "")
             if tok:
                 out = out.replace(tok, "***")
-        if rc == 0:
-            return self.respond_mutation(s, "证书检查 / 续期完成。", True)
-        return self.respond_mutation(s, friendly_error("证书申请 / 续期失败：")[0], False, detail=raw_detail(out))
+            if rc == 0:
+                return True, "证书检查 / 续期完成。", ""
+            return False, friendly_error("证书申请 / 续期失败：")[0], raw_detail(out)
+        return self._cert_job(s, form or {}, job)
 
     def do_cert_mode(self, s, form):
         mode = (form.get("cert_mode") or "dns").strip()
@@ -1375,32 +1517,39 @@ class Panel(BaseHTTPRequestHandler):
                 return self.respond_mutation(s, "请输入 Cloudflare API Token", False)
             if re.search(r'[\s"\'`$\\]', raw_token):
                 return self.respond_mutation(s, "API Token 不能包含空格或引号", False)
-        with LOCK:
-            env = read_env()
-            prev_mode = (env.get("CERT_MODE") or "port").strip()
-            prev_token = env.get("CF_TOKEN", "")
-            if mode == prev_mode and (mode != "dns" or raw_token == prev_token):
-                return self.respond_mutation(s, "未切换证书模式，未重新生成证书。", False)
-            if mode == "dns":
-                write_env_var("CERT_MODE", "dns")
-                write_env_var("CF_TOKEN", raw_token)
-            else:
-                write_env_var("CERT_MODE", "port")
+        env = read_env()
+        prev_mode = (env.get("CERT_MODE") or "port").strip()
+        prev_token = env.get("CF_TOKEN", "")
+        if mode == prev_mode and (mode != "dns" or raw_token == prev_token):
+            return self.respond_mutation(s, "未切换证书模式，未重新生成证书。", False)
+
+        def job():
+            with LOCK:
+                if mode == "dns":
+                    write_env_var("CERT_MODE", "dns")
+                    write_env_var("CF_TOKEN", raw_token)
+                else:
+                    write_env_var("CERT_MODE", "port")
             rc, out = run([resolve_certctl_path(), "reissue"], timeout=180, env=certctl_env())
             if raw_token:
                 out = out.replace(raw_token, "***")
-            if rc != 0:
-                write_env_var("CERT_MODE", prev_mode or "port")
-                if prev_mode == "dns" and prev_token:
-                    write_env_var("CF_TOKEN", prev_token)
-                return self.respond_mutation(s, cert_failure_message(out, mode), False, detail=raw_detail(out))
-            if prev_mode == "manual":
-                enable_cert_renew_timer()
-        return self.respond_mutation(s, "已切换并重新生成证书。", True)
+            with LOCK:
+                if rc != 0:
+                    write_env_var("CERT_MODE", prev_mode or "port")
+                    if prev_mode == "dns" and prev_token:
+                        write_env_var("CF_TOKEN", prev_token)
+                    return False, cert_failure_message(out, mode), raw_detail(out)
+                if prev_mode == "manual":
+                    enable_cert_renew_timer()
+            return True, "已切换并重新生成证书。", ""
+        return self._cert_job(s, form, job)
 
     def do_cert_manual(self, s):
         """Switch to (or re-check) the manual certificate placed in /etc/clashgate/certs/."""
         cert_dir = CS_ROOT + "/certs"
+        with _CERT_TASK_LOCK:
+            if _CERT_TASK["running"]:
+                return self.respond_mutation(s, "另一个证书任务正在运行，请稍后再试", False)
         with LOCK:
             env = read_env()
             prev_mode = (env.get("CERT_MODE") or "port").strip()
@@ -2018,6 +2167,7 @@ def serve(cfg_path):
     try:
         with LOCK:
             reconcile_pending_with_live()   # before the Snell migration, which waits for no drafts
+            refresh_template_if_flagged()
     except Exception as e:
         sys.stderr.write(f"pending reconcile failed: {e}\n")
     start_traffic_poller(30)
@@ -2025,16 +2175,20 @@ def serve(cfg_path):
     start_weekly_update_check()
     threading.Thread(target=run_snell_migration, name="snell-v6-migration", daemon=True).start()
     threading.Thread(target=ensure_geodata, name="geodata", daemon=True).start()
-    addr = (cfg.get("listen", "0.0.0.0"), int(cfg.get("port", 8443)))
+    host = cfg.get("listen", "0.0.0.0")
+    if host == "0.0.0.0" and ipv6_only():
+        host = "::"   # IPv6-only server: listen on both stacks (Linux default bindv6only=0)
+    addr = (host, int(cfg.get("port", 8443)))
+    six = {"address_family": socket.AF_INET6} if ":" in host else {}
     if cfg.get("tls_cert"):
         cert_p = ROOT + cfg["tls_cert"]
         key_p = ROOT + cfg["tls_key"]
         if not os.path.isfile(cert_p) and os.path.isfile(ROOT + CERT):
             cert_p, key_p = ROOT + CERT, ROOT + KEY
-        httpd = TLSServer(addr, Panel, cert_p, key_p)
+        httpd = type("TLSServer6", (TLSServer,), six)(addr, Panel, cert_p, key_p) if six else TLSServer(addr, Panel, cert_p, key_p)
         scheme = "https"
     else:   # local development only
-        httpd = ThreadingHTTPServer(addr, Panel)
+        httpd = type("HTTPServer6", (ThreadingHTTPServer,), six)(addr, Panel) if six else ThreadingHTTPServer(addr, Panel)
         scheme = "http"
     sys.stderr.write(f"clashgate v{VERSION} listening on {scheme}://{addr[0]}:{addr[1]}\n")
     httpd.serve_forever()

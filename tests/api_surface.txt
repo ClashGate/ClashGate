@@ -20,6 +20,7 @@ CUSTOM_SAVED
 ClusterError
 ClusterRemoteError
 DEFAULT_NODE_NAMES
+DNS_IPV6_ONLY
 ENV_FILE
 FIREWALL_CMD_BIN
 FRAG_CLUSTER_LISTENERS
@@ -72,6 +73,7 @@ SNELL_VERSION
 STATE_ZH
 STR_KEYS
 SYSTEMCTL
+TEMPLATE_REFRESH_FLAG
 TLSServer
 TRAFFIC_JSON
 TRAFFIC_LOCK
@@ -229,6 +231,8 @@ get_routing
 get_traffic_stats
 hash_password
 install_manual_cert
+ipv6_listen
+ipv6_only
 is_custom_config_mode
 listener_to_inbound
 live_nodes_and_inbounds
@@ -278,6 +282,7 @@ reconcile_pending_with_live
 record_core_check
 record_panel_check
 record_pending_reload
+refresh_template_if_flagged
 refresh_update_check_for_version
 register_cloudflare_masque
 remember_session

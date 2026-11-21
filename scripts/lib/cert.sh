@@ -36,7 +36,12 @@ check_dns() {
   mine6=$(ip -6 addr show scope global 2>/dev/null | awk '/inet6/{sub(/\/.*/, "", $2); print $2}' || true)
   for a in $v6; do grep -qxF "$a" <<<"$mine6" || bad6+="$a "; done
   local msg=""
-  if [[ -z $ips ]]; then
+  if [[ $SERVER_IP == *:* ]]; then   # 纯 IPv6 服务器：Let's Encrypt 通过 AAAA 记录访问本机
+    if grep -qixF "$SERVER_IP" <<<"$v6"; then
+      info "域名解析正常：$DOMAIN -> $SERVER_IP"; return 0
+    fi
+    msg="域名 $DOMAIN 没有指向本机 $SERVER_IP 的 AAAA 记录。请添加 AAAA 记录指向本机（Cloudflare 请设为灰云 DNS only）"
+  elif [[ -z $ips ]]; then
     msg="域名 $DOMAIN 无法解析。请添加 A 记录指向 $SERVER_IP（Cloudflare 请设为灰云 DNS only）"
   elif [[ " $ips " != *" $SERVER_IP "* ]]; then
     msg="域名 $DOMAIN 解析到 ${ips% }，而不是本机 $SERVER_IP。若是 Cloudflare 橙云请改为灰云，否则端口模式无法申请证书"
@@ -48,7 +53,12 @@ check_dns() {
   warn "$msg"
   # 交互安装时让用户决定：现在修 DNS 再装，或先装上（临时证书），解析生效后自动签发
   if has_tty && [[ $(ask '域名解析不正确，仍要继续安装吗？（继续则先用临时证书，解析生效后每小时自动重试签发）[Y/n]：' y) == [nN]* ]]; then
-    printf '已取消。请先把域名 A 记录指向 %s，再重新运行安装命令。\n' "$SERVER_IP"; exit 0
+    if [[ $SERVER_IP == *:* ]]; then
+      printf '已取消。请先把域名 AAAA 记录指向 %s，再重新运行安装命令。\n' "$SERVER_IP"
+    else
+      printf '已取消。请先把域名 A 记录指向 %s，再重新运行安装命令。\n' "$SERVER_IP"
+    fi
+    exit 0
   fi
   return 0
 }

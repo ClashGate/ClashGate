@@ -1,5 +1,6 @@
 // Panel state, API calls, and form handlers shared by App.vue and page components.
-// Extracted from App.vue without changing behaviour.
+// Core state (boot data, toast, dialogs, postAction, server-state sync, tabs) lives here; each page's
+// own state and actions are in the use*.js modules next to this file and receive the shared core.
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { t, lang, setLang, LANGS, langLabel } from '../i18n.js'
 import { theme, setTheme } from '../theme.js'
@@ -18,6 +19,15 @@ import {
   validateClassicalRulesPaste,
   validateHttpUrl,
 } from './validation.js'
+import { useCerts } from './useCerts.js'
+import { useRouting } from './useRouting.js'
+import { useCluster } from './useCluster.js'
+import { useConverter } from './useConverter.js'
+import { useCustomConfig } from './useCustomConfig.js'
+import { useOutbounds } from './useOutbounds.js'
+import { useInbounds } from './useInbounds.js'
+import { useUpdates } from './useUpdates.js'
+import { useSettings } from './useSettings.js'
 
 let _panel
 
@@ -258,56 +268,6 @@ export function usePanel() {
     }
   }
 
-  // Change Password Modal state
-  const showPasswordModal = ref(false)
-  const passwordForm = reactive({
-    current_password: '',
-    new_password: '',
-    confirm_password: '',
-  })
-
-  function openPasswordModal() {
-    passwordForm.current_password = ''
-    passwordForm.new_password = ''
-    passwordForm.confirm_password = ''
-    showPasswordModal.value = true
-  }
-
-  function closePasswordModal() {
-    showPasswordModal.value = false
-    passwordForm.current_password = ''
-    passwordForm.new_password = ''
-    passwordForm.confirm_password = ''
-  }
-
-  async function submitChangePassword() {
-    if (busyKey.value) return
-    if (!passwordForm.current_password) {
-      showToast(t('请输入当前密码'), false)
-      return
-    }
-    if (!passwordForm.new_password || passwordForm.new_password.length < 8) {
-      showToast(t('新密码长度至少 8 位'), false)
-      return
-    }
-    if (passwordForm.new_password !== passwordForm.confirm_password) {
-      showToast(t('两次输入的新密码不一致'), false)
-      return
-    }
-    const res = await postAction(
-      '/action/change-password',
-      {
-        current_password: passwordForm.current_password,
-        new_password: passwordForm.new_password,
-        confirm_password: passwordForm.confirm_password,
-      },
-      '/action/change-password'
-    )
-    if (res && res.ok) {
-      closePasswordModal()
-    }
-  }
-
   const confirmDialog = reactive({
     show: false,
     title: '',
@@ -406,84 +366,6 @@ export function usePanel() {
     }
     return titles[activeTab.value] || t('首页')
   })
-
-  const coreUpdate = computed(() => state.update_check.core || {})
-  const panelUpdate = computed(() => state.update_check.panel || {})
-
-  // update-state: pure helpers (mirrored by tests/test_panel.py)
-  // Versions compare as integer tuples like the backend's parse_version_tuple (1.15 > 1.14, 1.15.0 == 1.15).
-  function cgVersionTuple(v) {
-    const nums = (String(v || '').trim().replace(/^v/i, '').match(/\d+/g) || ['0']).map(Number)
-    while (nums.length > 1 && nums[nums.length - 1] === 0) nums.pop()
-    return nums
-  }
-  function cgVersionNewer(a, b) {
-    const x = cgVersionTuple(a), y = cgVersionTuple(b)
-    for (let i = 0; i < Math.max(x.length, y.length); i++) {
-      const d = (x[i] || 0) - (y[i] || 0)
-      if (d) return d > 0
-    }
-    return false
-  }
-  // The badge is shown only for a version strictly newer than what is installed now,
-  // and never while an upgrade is running or the page is about to reload after one.
-  function cgShowUpdate(slot, installed, upgrading) {
-    if (upgrading || !slot || !slot.has_update) return false
-    if (!slot.latest || !installed) return true
-    return cgVersionNewer(slot.latest, installed)
-  }
-  // After an upgrade lands, the cached check result describes the old build: drop it.
-  function cgSlotAfterUpgrade(slot, version) {
-    return { ...(slot || {}), current: version || (slot && slot.current) || '', has_update: false }
-  }
-  // end update-state
-
-  const upgradeInProgress = ref(false)
-  const panelHasUpdate = computed(() =>
-    cgShowUpdate(panelUpdate.value, state.version, upgradeInProgress.value || busyKey.value === '/action/upgrade-self')
-  )
-  const coreHasUpdate = computed(() =>
-    cgShowUpdate(coreUpdate.value, state.mihomo_version, upgradeInProgress.value || busyKey.value === '/action/update-core')
-  )
-
-  function versionLabel(v) {
-    const s = String(v || '').trim()
-    if (!s) return ''
-    return /^v/i.test(s) ? s : `v${s}`
-  }
-
-  function updateHint(v) {
-    const label = versionLabel(v)
-    return label ? t('有新版本 {v}', { v: label }) : t('有新版本')
-  }
-
-  function applyUpdateCheck(src) {
-    if (!src || typeof src !== 'object') return
-    state.update_check = {
-      core: mergeUpdateSlot(state.update_check.core, src.core),
-      panel: mergeUpdateSlot(state.update_check.panel, src.panel),
-    }
-  }
-
-  function mergeUpdateSlot(prev, next) {
-    const base = {
-      checked_at: 0,
-      current: '',
-      latest: '',
-      has_update: false,
-      ...(prev || {}),
-    }
-    if (!next || typeof next !== 'object') return base
-    const prevTs = Number(base.checked_at || 0)
-    const nextTs = Number(next.checked_at || 0)
-    if (!nextTs || nextTs < prevTs) return base
-    return {
-      ...base,
-      ...next,
-      checked_at: nextTs,
-      has_update: !!next.has_update,
-    }
-  }
 
   const converterPlaceholder = computed(
     () => t('在此粘贴节点配置，例如：') + '\n- {"name":"VlessReality","type":"vless","server":"1.2.3.4","port":28443,...}'
@@ -593,244 +475,7 @@ export function usePanel() {
     toast.show = false
   }
 
-  const PROTOCOLS = [
-    {
-      value: 'vless-reality',
-      label: 'VLESS Reality',
-      defaultName: 'VlessReality',
-      desc: '免证书的新一代协议',
-      lockedNote: '已锁定安全默认：默认启用 VLESS Encryption (vless-x25519)。SNI 可自填，留空从内置域名池随机抽取',
-    },
-    {
-      value: 'hysteria2',
-      label: 'Hysteria2',
-      defaultName: 'Hysteria2',
-      desc: '新一代 UDP 协议',
-      lockedNote: '已锁定安全默认：混淆密码 (Salamander) 默认随机生成，不可手动关闭',
-    },
-    {
-      value: 'shadowsocks',
-      label: 'Shadowsocks',
-      defaultName: 'Shadowsocks',
-      desc: '经典轻量级加密协议，默认锁定 aes-256-gcm',
-      lockedNote: '已锁定安全默认：加密算法固定为 aes-256-gcm，密码自动随机生成',
-    },
-    {
-      value: 'snell',
-      label: 'Snell V6',
-      defaultName: 'SnellV6',
-      desc: '轻量高效的私有协议，内置基于 PSK 的流量整形',
-      lockedNote: '已锁定安全默认：PSK 自动随机生成，流量整形使用 v6 默认模式',
-    },
-    {
-      value: 'anytls',
-      label: 'AnyTLS',
-      defaultName: 'AnyTLS',
-      desc: '内置随机填充与随机指纹的新一代 TLS 协议',
-      lockedNote: '已锁定安全默认：客户端 TLS 指纹与长度填充策略均自动随机生成',
-    },
-    {
-      value: 'shadowquic',
-      label: 'ShadowQUIC',
-      defaultName: 'ShadowQUIC',
-      desc: '免证书的新一代 QUIC 协议，内置随机 JLS 伪装',
-      lockedNote: '已锁定安全默认：伪装地址 (JLS) 可自填，留空从内置域名池随机抽取，拥塞控制默认 bbr',
-    },
-    {
-      value: 'sudoku',
-      label: 'Sudoku',
-      defaultName: 'Sudoku',
-      desc: '基于数独流量特征变换与 chacha20 加密的抗审查协议',
-      lockedNote: '已锁定安全默认：AEAD 加密固定为 chacha20-poly1305，密钥对自动生成',
-    },
-    {
-      value: 'tuic',
-      label: 'TUIC v5',
-      defaultName: 'TUICv5',
-      desc: '基于 QUIC 的低延迟零握手机制 UDP 协议',
-      lockedNote: '已启用安全默认：UUID 与密码随机生成，开启 0-RTT 与 native UDP 转发',
-    },
-    {
-      value: 'trusttunnel',
-      label: 'TrustTunnel',
-      defaultName: 'TrustTunnel',
-      desc: '基于标准 HTTP/2 与 HTTP/3 的高隐蔽 TLS 隧道协议',
-      lockedNote: '已启用安全默认：强随机密码与 TLS 证书加密传输',
-    },
-    {
-      value: 'mieru',
-      label: 'Mieru',
-      defaultName: 'Mieru',
-      desc: '抗深度包检测（DPI）的混淆传输代理协议',
-      lockedNote: '已启用安全默认：强随机密码与抗 DPI 流量混淆',
-    },
-    {
-      value: 'http',
-      label: 'HTTP',
-      defaultName: 'HTTP',
-      desc: '通用 HTTP / HTTPS 代理协议',
-      lockedNote: '已启用安全默认：鉴权密码自动随机生成',
-    },
-    {
-      value: 'socks',
-      label: 'SOCKS5',
-      defaultName: 'SOCKS5',
-      desc: '通用 SOCKS5 代理协议，支持 UDP 转发',
-      lockedNote: '已启用安全默认：鉴权密码自动随机生成，默认开启 UDP',
-    },
-  ]
-
-  const DEFAULT_NAMES = Object.fromEntries(PROTOCOLS.map((p) => [p.value, p.defaultName]))
-  const PROTOCOL_MAP = Object.fromEntries(PROTOCOLS.map((p) => [p.value, p]))
-
-  const inboundForm = reactive({
-    kind: 'vless-reality',
-    name: 'VlessReality',
-    port: '',
-    tuic_cc: 'bbr',
-    tt_cc: 'bbr',
-    mieru_transport: 'TCP',
-    http_tls: '0',
-    socks_tls: '0',
-    sni: '',
-  })
-
-  const currentProtocol = computed(() => PROTOCOL_MAP[inboundForm.kind] || PROTOCOLS[0])
-  const currentDefaultName = computed(() => DEFAULT_NAMES[inboundForm.kind] || 'VlessReality')
-  // Protocols that show one extra option field (SNI or a select) in the add-node form.
-  const PROTOCOL_HAS_OPTION = new Set(['vless-reality', 'shadowquic', 'tuic', 'trusttunnel', 'mieru', 'http', 'socks'])
-  const sniEditable = computed(() =>
-    inboundForm.kind === 'vless-reality' || inboundForm.kind === 'shadowquic'
-  )
-
-  watch(
-    () => inboundForm.kind,
-    (newKind, oldKind) => {
-      const oldDefault = DEFAULT_NAMES[oldKind] || ''
-      const newDefault = DEFAULT_NAMES[newKind] || newKind
-      if (!inboundForm.name.trim() || inboundForm.name.trim() === oldDefault) {
-        inboundForm.name = newDefault
-      }
-    }
-  )
-
-  const providerForm = reactive({
-    sub_url: '',
-    provider_name: '',
-  })
-
-  const proxiesRaw = ref('')
   const customConfigText = ref(state.custom_config_raw || '')
-
-  // Readable config converter state
-  const converterInput = ref('')
-  const converterOutput = ref('')
-  const converterError = ref('')
-
-  // HTTPS Certificate management state
-  const certModeForm = reactive({
-    mode: state.cert_mode === 'dns' || state.cert_mode === 'manual' ? state.cert_mode : 'port',
-    cf_token: state.cf_token || '',
-  })
-  const certRegenLock = ref(false)
-
-  const certModeValue = computed(() => state.cert_mode || (state.status && state.status.cert_mode) || 'port')
-  const certModeLabel = computed(() => {
-    if (state.mode === 'no-cert' && !state.certs_present && !state.domain) {
-      return t('无证书模式')
-    }
-    const m = certModeValue.value
-    if (m === 'dns') return t('Cloudflare DNS')
-    if (m === 'manual') return t('手动证书')
-    return t('端口模式')
-  })
-  const certDomainDisplay = computed(() => state.domain || (state.status && state.status.domain) || '—')
-  const certIssuerDisplay = computed(() => (state.status && state.status.cert_issuer) || state.cert_issuer || '—')
-  const certExpiresDisplay = computed(() => (state.status && state.status.cert_expires) || state.cert_expires || '—')
-  const certDaysValue = computed(() => {
-    const d = state.status && state.status.cert_days !== undefined ? state.status.cert_days : state.cert_days
-    return d === null || d === undefined || d === '' ? null : Number(d)
-  })
-  const certIsTemp = computed(() => /clashgate temporary/i.test(certIssuerDisplay.value))
-  const certBaselineMode = computed(() => (certModeValue.value === 'dns' ? 'dns' : 'port'))
-  const certModeDirty = computed(() => {
-    // Manual: always clickable, so replaced files can be re-checked and loaded.
-    if (certModeForm.mode === 'manual') return true
-    if (certModeValue.value === 'manual') return certModeForm.mode === 'dns' || certModeForm.mode === 'port'
-    if (certModeForm.mode !== certBaselineMode.value) return true
-    if (certModeForm.mode === 'dns' && (certModeForm.cf_token || '') !== (state.cf_token || '')) return true
-    return false
-  })
-  const certRegenDisabled = computed(() => !certModeDirty.value || certRegenLock.value || busyKey.value === '/action/cert-mode')
-
-  function confirmCertRenew() {
-    if (busyKey.value || certRegenLock.value) return
-    openConfirmDialog({
-      title: t('立即申请 / 续期'),
-      message: t("将马上向 Let's Encrypt 申请证书（证书还有效且不急着续期时会直接跳过）。同一域名每周最多签发 5 张，请不要反复点击。"),
-      confirmText: t('立即申请'),
-      tone: 'amber',
-      onConfirm: async () => {
-        certRegenLock.value = true
-        try {
-          await postAction('/action/cert', {}, '/action/cert')
-        } finally {
-          certRegenLock.value = false
-        }
-      },
-    })
-  }
-
-  function submitCertMode() {
-    if (busyKey.value || certRegenLock.value || !certModeDirty.value) return
-    if (certModeForm.mode === 'dns') {
-      const tok = certModeForm.cf_token
-      if (!tok) {
-        showToast(t('请输入 Cloudflare API Token'), false)
-        return
-      }
-      if (/[\s"']/.test(tok)) {
-        showToast(t('API Token 不能包含空格或引号'), false)
-        return
-      }
-    }
-    if (certModeForm.mode === 'manual') {
-      openConfirmDialog({
-        title: certModeValue.value === 'manual' ? t('重新校验证书') : t('切换到手动证书'),
-        message: t('将检查 /etc/clashgate/certs/ 里的证书和私钥，通过后启用，内核会重启几秒钟。检查不通过时保持原来的证书不变。'),
-        confirmText: t('开始校验'),
-        tone: 'amber',
-        onConfirm: () => doSubmitCertMode(),
-      })
-      return
-    }
-    openConfirmDialog({
-      title: t('切换并重新生成证书'),
-      message: t("将马上向 Let's Encrypt 重新申请证书。同一域名每周最多签发 5 张，失败几次后可能要等一周，请确认设置无误再继续。申请失败时保持原来的证书和模式不变。"),
-      confirmText: t('确认切换'),
-      tone: 'amber',
-      onConfirm: () => doSubmitCertMode(),
-    })
-  }
-
-  async function doSubmitCertMode() {
-    if (busyKey.value || certRegenLock.value || !certModeDirty.value) return
-    certRegenLock.value = true
-    maskAllSensitive()
-    try {
-      await postAction(
-        '/action/cert-mode',
-        {
-          cert_mode: certModeForm.mode,
-          cf_token: certModeForm.cf_token,
-        },
-        '/action/cert-mode'
-      )
-    } finally {
-      certRegenLock.value = false
-      maskAllSensitive()
-    }
-  }
 
   const trafficDisplay = computed(() => {
     const s = state.status || {}
@@ -844,104 +489,71 @@ export function usePanel() {
     return s.traffic_detail || '↑ 0 B · ↓ 0 B'
   })
 
-  function confirmUpdateCore() {
-    if (busyKey.value) return
-    openConfirmDialog({
-      title: t('更新内核'),
-      message: t('将下载最新的 Mihomo 内核并重启。重启时所有连接会中断几秒钟，客户端会自动重连。'),
-      confirmText: t('确认更新'),
-      tone: 'amber',
-      onConfirm: () => updateCoreDirect(),
-    })
+  // Home status rail ---------------------------------------------------------------------------
+  // Same units as the server's format_traffic_detail (1024-based).
+  function fmtBytes(b) {
+    const n = Math.max(0, Number(b) || 0)
+    if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toFixed(2)} TB`
+    if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} GB`
+    if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`
+    if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`
+    return `${Math.round(n)} B`
   }
 
-  async function updateCoreDirect() {
-    if (busyKey.value) return
-    busyKey.value = '/action/update-core'
-    const body = new URLSearchParams({ csrf: state.csrf, async: '1' }).toString()
-    try {
-      const startRes = await fetch('/action/update-core', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'X-Requested-With': 'fetch',
-          Accept: 'application/json',
-        },
-        body,
-        credentials: 'same-origin',
-        cache: 'no-store',
-      })
-      if (startRes.status === 401) {
-        window.location.href = '/login'
-        return
-      }
-      const startData = await startRes.json().catch(() => null)
-      if (startData && startData.running === false) {
-        busyKey.value = ''
-        if (startData.state) applyServerState(startData.state)
-        showToast(startData.msg || (startData.ok ? t('内核更新成功') : t('更新内核失败')), !!startData.ok)
-        return
-      }
-    } catch {
-      // Fall through to poll /api/update-core-status
-    }
+  const trafficUp = computed(() => fmtBytes(state.status && state.status.traffic_up_bytes))
+  const trafficDown = computed(() => fmtBytes(state.status && state.status.traffic_down_bytes))
 
-    const deadline = Date.now() + 180000
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 1200))
-      try {
-        const pollRes = await fetch('/api/update-core-status', {
-          headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
-          credentials: 'same-origin',
-          cache: 'no-store',
-        })
-        if (pollRes.status === 401) {
-          window.location.href = '/login'
-          return
-        }
-        if (!pollRes.ok) continue
-        const pollData = await pollRes.json()
-        if (pollData && pollData.running === false) {
-          if (pollData.state) applyServerState(pollData.state)
-          showToast(pollData.msg || (pollData.ok ? t('内核更新成功') : t('更新内核失败')), !!pollData.ok)
-          busyKey.value = ''
-          return
-        }
-      } catch {
-        // Transient connection drop while mihomo restarts — keep polling
-      }
-    }
-    busyKey.value = ''
-    showToast(t('更新内核等待超时，请刷新页面查看内核版本状态'), false)
-  }
-
-  function toggleVersionPanel() {
-    showVersionPanel.value = !showVersionPanel.value
-  }
-
-  async function checkUpdateAndPrompt() {
-    const res = await postAction('/action/check-update', {}, '/action/check-update', { silentToast: true })
-    if (!res || !res.ok) return
-    const hasUpdate = !!res.has_update
-    state.update_check.panel = {
-      checked_at: Math.floor(Date.now() / 1000),
-      current: res.current_version || state.version,
-      latest: res.latest_version || '',
-      has_update: hasUpdate,
-    }
-    if (hasUpdate) {
-      const latest = res.latest_version || t('最新版')
-      const current = res.current_version || state.version
-      openConfirmDialog({
-        title: t('检查更新'),
-        message: t('检测到新版本 v{latest}（当前版本 v{current}），是否立即升级？', { latest, current }),
-        confirmText: t('立即升级'),
-        tone: 'emerald',
-        onConfirm: () => postAction('/action/upgrade-self', {}, '/action/upgrade-self'),
-      })
+  // Current speed: the difference between two state refreshes (every 15 s while the page is open).
+  const trafficRate = ref(null)
+  let trafficSample = null
+  function noteTrafficSample() {
+    const s = state.status || {}
+    if (s.traffic_up_bytes === undefined || s.traffic_down_bytes === undefined) return
+    const up = Number(s.traffic_up_bytes) || 0
+    const down = Number(s.traffic_down_bytes) || 0
+    const now = Date.now()
+    const prev = trafficSample
+    if (prev && now - prev.at < 3000) return   // an action answer right after a poll: keep the older sample
+    trafficSample = { up, down, at: now }
+    if (!prev) return
+    const dt = (now - prev.at) / 1000
+    if (dt > 120 || up < prev.up || down < prev.down) {
+      trafficRate.value = null   // too old to mean "now", or the counters were reset
       return
     }
-    if (res.msg) showToast(res.msg, true)
+    trafficRate.value = { up: fmtBytes((up - prev.up) / dt), down: fmtBytes((down - prev.down) / dt) }
+  }
+
+  const coreTone = computed(() => {
+    const s = state.status || {}
+    if (s.state_cls === 'bad') return 'bad'
+    if (s.state_cls === 'warn') return 'warn'
+    const total = Number(s.live_total)
+    if (total > 0 && Number(s.live_up) < total) return 'warn'
+    return 'ok'
+  })
+
+  const nodesOnlineText = computed(() => {
+    const s = state.status || {}
+    const total = s.live_total === undefined || s.live_total === null ? Number(s.inbound_total || 0) : Number(s.live_total)
+    const up = s.live_up === undefined || s.live_up === null ? Number(s.inbound_listening || 0) : Number(s.live_up)
+    if (!total) return t('还没有节点')
+    return t('节点 {up}/{total} 在线', { up, total })
+  })
+
+  const uptimeText = computed(() => {
+    const sec = Number(state.status && state.status.uptime_s)
+    if (!Number.isFinite(sec) || sec < 0 || state.status.uptime_s === null || state.status.uptime_s === undefined) return ''
+    const d = Math.floor(sec / 86400)
+    const h = Math.floor((sec % 86400) / 3600)
+    const m = Math.floor((sec % 3600) / 60)
+    if (d > 0) return t('已运行 {d} 天 {h} 小时', { d, h })
+    if (h > 0) return t('已运行 {h} 小时 {m} 分钟', { h, m })
+    return t('已运行 {m} 分钟', { m: Math.max(1, m) })
+  })
+
+  function togglePendingDiff() {
+    if (state.pending_reload_count > 0) showPendingDiff.value = !showPendingDiff.value
   }
 
   let statePollTimer = null
@@ -954,6 +566,11 @@ export function usePanel() {
         credentials: 'same-origin',
         cache: 'no-store',
       })
+      if (res.status === 401) {
+        // Session expired (password changed elsewhere, or 7 days passed): show the login page.
+        window.location.href = '/login'
+        return
+      }
       if (res.ok) {
         const data = await res.json()
         if (data) {
@@ -970,6 +587,7 @@ export function usePanel() {
           if (data.status) {
             Object.assign(state.status, data.status)
             if (data.status.mihomo_version) state.mihomo_version = data.status.mihomo_version
+            noteTrafficSample()
           }
           if (data.certs_present !== undefined) state.certs_present = data.certs_present
           if (data.mode !== undefined) state.mode = data.mode
@@ -1065,6 +683,7 @@ export function usePanel() {
     if (newState.status) {
       Object.assign(state.status, newState.status)
       if (newState.status.mihomo_version) state.mihomo_version = newState.status.mihomo_version
+      noteTrafficSample()
     }
     if (Array.isArray(newState.inbounds)) state.inbounds = newState.inbounds
     if (newState.all_proxies_yaml !== undefined) state.all_proxies_yaml = newState.all_proxies_yaml
@@ -1134,6 +753,19 @@ export function usePanel() {
     }
   }
 
+  // 「应用配置」 with nothing pending still rebuilds the config and reloads the core: ask first.
+  function applyConfig() {
+    if (busyKey.value) return
+    if (state.pending_reload_count > 0) return postAction('/action/reload', {}, '/action/reload')
+    openConfirmDialog({
+      title: t('应用配置'),
+      message: t('当前没有待应用的修改。仍要重新生成服务端配置并重载内核吗？已有连接可能会短暂中断。'),
+      confirmText: t('仍然应用'),
+      tone: 'amber',
+      onConfirm: () => postAction('/action/reload', {}, '/action/reload'),
+    })
+  }
+
   async function copyRaw(text, key) {
     if (!text) return
     const done = () => {
@@ -1164,56 +796,6 @@ export function usePanel() {
     document.body.removeChild(ta)
   }
 
-  let pendingAddReqId = ''
-
-  async function submitAddInbound() {
-    if (busyKey.value) return
-    if (!pendingAddReqId) {
-      pendingAddReqId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-    }
-    const payload = {
-      kind: inboundForm.kind,
-      name: inboundForm.name.trim() || currentDefaultName.value,
-      port: inboundForm.port.trim(),
-      tuic_cc: inboundForm.tuic_cc,
-      tt_cc: inboundForm.tt_cc,
-      mieru_transport: inboundForm.mieru_transport,
-      http_tls: inboundForm.http_tls,
-      socks_tls: inboundForm.socks_tls,
-      sni: sniEditable.value ? inboundForm.sni.trim() : '',
-      req_id: pendingAddReqId,
-    }
-    const res = await postAction('/inbounds/add', payload, 'add-inbound')
-    pendingAddReqId = ''
-    if (res && res.ok) {
-      inboundForm.port = ''
-      inboundForm.sni = ''
-      inboundForm.name = currentDefaultName.value
-    }
-  }
-
-  function resetInboundPassword(item) {
-    if (!item || !item.reset_url) return
-    openConfirmDialog({
-      title: t('重置密码'),
-      message: t('确定重置节点「{name}」的密码？点顶部「应用配置」后生效，客户端需要重新更新订阅。', { name: item.name }),
-      confirmText: t('确认重置'),
-      tone: 'amber',
-      onConfirm: () => postAction(item.reset_url, {}, `rst-${item.key}`),
-    })
-  }
-
-  function deleteInbound(item) {
-    if (!item || !item.delete_url) return
-    openConfirmDialog({
-      title: t('删除节点'),
-      message: t('确定删除节点「{name}」？点顶部「应用配置」后生效。', { name: item.name }),
-      confirmText: t('确认删除'),
-      tone: 'rose',
-      onConfirm: () => postAction(item.delete_url, {}, `del-${item.key}`),
-    })
-  }
-
   function resetSubUrl() {
     openConfirmDialog({
       title: t('更换订阅链接'),
@@ -1242,525 +824,6 @@ export function usePanel() {
     })
   }
 
-  async function submitAddProvider() {
-    const subUrl = providerForm.sub_url.trim()
-    if (!subUrl) {
-      showToast(t('请填写订阅链接'), false)
-      return
-    }
-    if (!/^https?:\/\/\S+$/i.test(subUrl)) {
-      showToast(t('订阅链接必须以 http(s):// 开头'), false)
-      return
-    }
-    const provName = providerForm.provider_name.trim()
-    if (provName && !/^[A-Za-z0-9._-]{1,48}$/.test(provName)) {
-      showToast(t('订阅源名称仅限 1-48 位字母、数字及 . _ -'), false)
-      return
-    }
-    if (provName && state.providers.some((p) => p && p.name === provName)) {
-      showToast(t('订阅源「{name}」已存在，请换一个名称或先删除原订阅源', { name: provName }), false)
-      return
-    }
-    const res = await postAction(
-      '/providers/add',
-      {
-        sub_url: subUrl,
-        provider_name: provName,
-      },
-      'add-provider'
-    )
-    if (res && res.ok) {
-      providerForm.sub_url = ''
-      providerForm.provider_name = ''
-    }
-  }
-
-  function deleteProvider(name) {
-    openConfirmDialog({
-      title: t('删除订阅源'),
-      message: t('确定删除订阅源「{name}」？', { name }),
-      confirmText: t('确认删除'),
-      tone: 'rose',
-      onConfirm: () => postAction('/providers/delete', { name }, `del-prov-${name}`),
-    })
-  }
-
-  async function submitAddProxies() {
-    if (!proxiesRaw.value.trim()) {
-      showToast(t('请先粘贴节点配置'), false)
-      return
-    }
-    const res = await postAction('/proxies/add', { proxies_raw: proxiesRaw.value }, 'add-proxies')
-    if (res && res.ok) {
-      proxiesRaw.value = ''
-    }
-  }
-
-  function deleteProxy(name) {
-    openConfirmDialog({
-      title: t('删除服务端出站'),
-      message: t('确定删除服务端出站「{name}」？', { name }),
-      confirmText: t('确认删除'),
-      tone: 'rose',
-      onConfirm: () => postAction('/proxies/delete', { name }, `del-proxy-${name}`),
-    })
-  }
-
-  // node-name validators live in validation.js
-
-  const nodeNameInput = ref(state.cluster.node_name)
-  const nodeNameSaved = ref(state.cluster.node_name)
-  const nodeNameLength = computed(() => Array.from(String(nodeNameInput.value || '').trim()).length)
-  // Only the over-limit hint is shown while typing; other errors appear on save.
-  const nodeNameOverLimit = computed(() => nodeNameLength.value > CG_NODE_NAME_MAX)
-  const nodeNameHint = computed(() => (
-    nodeNameOverLimit.value ? t('本机名称最多 {n} 个字符', { n: CG_NODE_NAME_MAX }) : ''
-  ))
-
-  async function saveNodeName() {
-    if (busyKey.value) return
-    if (nodeNameOverLimit.value) return
-    const err = nodeNameError(nodeNameInput.value)
-    if (err) {
-      showToast(err, false)
-      return
-    }
-    await postAction('/action/settings', { node_name: nodeNameInput.value.trim() }, 'save-node-name')
-  }
-
-  const clusterForm = reactive({ url: '', password: '' })
-  const clusterTouched = reactive({ url: false, password: false })
-
-  const clusterUrlErr = computed(() => clusterUrlError(clusterForm.url))
-  const clusterPwErr = computed(() => (clusterForm.password ? '' : t('请填写对方面板密码')))
-
-  async function submitAddCluster() {
-    if (busyKey.value) return
-    clusterTouched.url = true
-    clusterTouched.password = true
-    const err = clusterUrlErr.value || clusterPwErr.value
-    if (err) {
-      showToast(err, false)
-      return
-    }
-    const res = await postAction(
-      '/cluster/add',
-      { url: clusterForm.url.trim(), password: clusterForm.password },
-      'cluster-add'
-    )
-    if (res && res.ok) {
-      clusterForm.url = ''
-      clusterForm.password = ''
-      clusterTouched.url = false
-      clusterTouched.password = false
-    } else {
-      clusterForm.password = ''
-    }
-  }
-
-  function removeClusterMember(m) {
-    openConfirmDialog({
-      title: t('移出集群'),
-      message: t('确定把「{name}」移出集群？集群里所有面板都会删除和它的互联，它自己也会退出集群。', { name: m.name }),
-      confirmText: t('确认移出'),
-      tone: 'rose',
-      onConfirm: () => postAction('/cluster/remove', { id: m.id }, `cl-rm-${m.id}`),
-    })
-  }
-
-  const listSep = computed(() => ({ zh: '、', fa: '، ' })[lang.value] || ', ')
-
-  function syncCluster() {
-    return postAction('/cluster/sync', {}, 'cluster-sync')
-  }
-
-  function leaveCluster() {
-    openConfirmDialog({
-      title: t('退出集群'),
-      message: t('确定让本机退出集群？本机和所有成员之间的互联都会删除，其他成员之间的互联保持不变。'),
-      confirmText: t('确认退出'),
-      tone: 'rose',
-      onConfirm: () => postAction('/cluster/leave', {}, 'cluster-leave'),
-    })
-  }
-
-  function loadFileInto(ev, targetRef) {
-    const f = ev.target.files && ev.target.files[0]
-    if (!f) return
-    const r = new FileReader()
-    r.onload = () => {
-      targetRef.value = r.result || ''
-    }
-    r.readAsText(f)
-    ev.target.value = ''
-  }
-
-  function fillCurrentInboundsToConverter() {
-    if (!state.all_proxies_yaml) {
-      showToast(t('当前暂无入站节点可载入'), false)
-      return
-    }
-    converterInput.value = state.all_proxies_yaml
-    convertConfigFormat('readable')
-  }
-
-  async function convertConfigFormat(mode = 'readable') {
-    converterError.value = ''
-    const raw = (converterInput.value || '').trim()
-    if (!raw) {
-      converterError.value = t('请先粘贴需要转换的节点配置（支持单行 JSON / Flow 或多行 YAML）')
-      return
-    }
-    if (busyKey.value) return
-    busyKey.value = `convert-${mode}`
-    try {
-      const body = new URLSearchParams({ csrf: state.csrf, raw }).toString()
-      const res = await fetch('/api/convert-readable', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'X-Requested-With': 'fetch',
-          Accept: 'application/json',
-        },
-        body,
-        credentials: 'same-origin',
-        cache: 'no-store',
-      })
-      if (res.status === 401) {
-        window.location.href = '/login'
-        return
-      }
-      const data = await res.json().catch(() => ({ ok: false, msg: `HTTP ${res.status}` }))
-      if (!res.ok || !data.ok) {
-        converterError.value = data.msg || t('配置解析失败，请检查格式是否正确')
-        return
-      }
-      converterOutput.value = mode === 'single' ? data.single : data.readable
-      showToast(t('已成功转换 {count} 个节点为{kind}', { count: data.count, kind: mode === 'single' ? t('单行配置') : t('多行易读 YAML') }), true)
-    } catch (e) {
-      converterError.value = formatFetchError(e)
-    } finally {
-      busyKey.value = ''
-    }
-  }
-
-  // cert-path helpers live in validation.js
-  // autoFix: the server rewrites the paths (and reports how many); `shown` is what the
-  // editor keeps if the save fails (a failed save returns the old server state).
-  async function saveCustomConfig(text, autoFix, shown = text) {
-    customConfigText.value = shown
-    const res = await postAction(
-      '/config/custom',
-      { custom_config_raw: text, auto_fix_certs: autoFix ? '1' : '0' },
-      'save-custom'
-    )
-    if (!res || !res.ok) customConfigText.value = shown
-  }
-
-  async function submitCustomConfig() {
-    const raw = customConfigText.value || ''
-    if (!raw.trim()) {
-      showToast(t('请先粘贴完整的服务端配置'), false)
-      return
-    }
-    const fixed = fixCertPaths(raw)
-    if (fixed.changed > 0) {
-      openConfirmDialog({
-        title: t('自动配置证书路径？'),
-        message: t('检测到 {n} 处证书路径不是本项目的证书路径（或是相对路径）。项目目录之外的证书，内核可能无法读取，建议自动配置为本项目证书（/etc/clashgate/certs/）。', { n: fixed.changed }),
-        confirmText: t('自动配置并保存'),
-        cancelText: t('保持我的配置'),
-        tone: 'emerald',
-        onConfirm: () => saveCustomConfig(raw, true, fixed.text),
-        onCancel: () => saveCustomConfig(raw, false),
-      })
-      return
-    }
-    await saveCustomConfig(raw, false)
-  }
-
-  function resetTemplateConfig() {
-    openConfirmDialog({
-      title: t('恢复默认服务端模板'),
-      message: t('确定恢复默认服务端模板？这将还原内置标准服务端模板，并重新生成一个默认 VlessReality 节点（同时同步至客户端订阅）。'),
-      confirmText: t('恢复默认服务端模板'),
-      tone: 'rose',
-      onConfirm: () => postAction('/config/reset-template', {}, 'reset-template'),
-    })
-  }
-
-  async function resumeUpgradeIfRunning() {
-    // Page opened/refreshed mid-upgrade: keep tracking it and auto-refresh when done.
-    try {
-      const res = await fetch('/api/upgrade-status', {
-        headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
-        credentials: 'same-origin',
-        cache: 'no-store',
-      })
-      if (!res.ok) return
-      const d = await res.json()
-      const age = Date.now() / 1000 - Number(d.started_at || 0)
-      if (d && d.state === 'running' && age < 600) reloadPanelAfterUpgrade(d.from || state.version)
-    } catch {}
-  }
-
-  async function reloadPanelAfterUpgrade(previousVersion) {
-    // Upgrade runs detached on the server; the panel restarts during it.
-    // Poll status (tolerating connection drops) until done, then report + reload.
-    // Once we decide to reload, the page stays in the "upgrading" state until the browser
-    // replaces it: location.reload() returns at once and the old page keeps rendering for a
-    // moment, which used to flash the stale "update available" badge.
-    const deadline = Date.now() + 360000
-    let sawDown = false
-    let stage = ''
-    let reloading = false
-    const reloadSoon = async (ms, version) => {
-      reloading = true
-      if (version) {
-        state.version = version
-        state.update_check = { ...state.update_check, panel: cgSlotAfterUpgrade(state.update_check.panel, version) }
-      }
-      await new Promise((r) => setTimeout(r, ms))
-      window.location.reload()
-    }
-    upgradeInProgress.value = true
-    try {
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 2000))
-        let d = null
-        try {
-          const res = await fetch('/api/upgrade-status', {
-            headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
-            credentials: 'same-origin',
-            cache: 'no-store',
-          })
-          if (res.status === 401) { reloading = true; window.location.reload(); return }
-          if (!res.ok) { sawDown = true; continue }
-          d = await res.json()
-        } catch {
-          sawDown = true
-          if (stage !== 'restart') { stage = 'restart'; showToast(t('面板正在重启，请稍候……'), true) }
-          continue
-        }
-        // Panel came back on a different version: the upgrade landed even if the
-        // status file is missing/unreadable (older builds wrote invalid JSON).
-        if (d && d.version && previousVersion && d.version !== previousVersion && d.state !== 'running') {
-          d = { state: 'done', rc: 0, version: d.version }
-        }
-        if (d && d.state === 'running' && d.version && previousVersion && d.version !== previousVersion && sawDown) {
-          d = { state: 'done', rc: 0, version: d.version }
-        }
-        if (!d || d.state !== 'done') continue
-        if (Number(d.rc) === 0) {
-          showToast(t('升级成功！当前版本 {v}，即将刷新页面', { v: d.version || '' }), true)
-          await reloadSoon(800, d.version)
-          return
-        }
-        showToast(t('升级失败：{msg}', { msg: d.tail || `exit ${d.rc}` }), false)
-        if (d.version && previousVersion && d.version !== previousVersion) {
-          await reloadSoon(2500, d.version)
-        }
-        return
-      }
-      showToast(t('升级超时，正在刷新页面……'), false)
-      await reloadSoon(1500, '')
-    } finally {
-      if (!reloading) upgradeInProgress.value = false
-    }
-  }
-
-
-  const createRoutingForm = reactive({ name: '', rules_raw: '' })
-  const importRoutingForm = reactive({ name: '', url: '' })
-
-  const routingGroups = computed(() => {
-    const g = state.routing && Array.isArray(state.routing.groups) ? state.routing.groups : []
-    return g
-  })
-
-  function routingNameTaken(name, exceptId = '') {
-    const n = String(name || '').trim()
-    return routingGroups.value.some((g) => g && g.name === n && g.id !== exceptId)
-  }
-
-  async function createRoutingGroup() {
-    const name = createRoutingForm.name.trim()
-    if (!name) {
-      showToast(t('请填写分流组名称'), false)
-      return
-    }
-    if (routingNameTaken(name)) {
-      showToast(t('分流组名称已存在：{name}', { name }), false)
-      return
-    }
-    const check = validateClassicalRulesPaste(createRoutingForm.rules_raw)
-    if (!check.ok) {
-      showToast(check.msg, false)
-      return
-    }
-    const res = await postAction(
-      '/routing/add',
-      { name, rules_raw: createRoutingForm.rules_raw },
-      'routing-add',
-    )
-    if (res && res.ok) {
-      createRoutingForm.name = ''
-      createRoutingForm.rules_raw = ''
-    }
-  }
-
-  async function importRoutingGroup() {
-    const name = importRoutingForm.name.trim()
-    const url = importRoutingForm.url.trim()
-    if (!name) {
-      showToast(t('请填写分流组名称'), false)
-      return
-    }
-    if (routingNameTaken(name)) {
-      showToast(t('分流组名称已存在：{name}', { name }), false)
-      return
-    }
-    const urlCheck = validateHttpUrl(url)
-    if (!urlCheck.ok) {
-      showToast(urlCheck.msg, false)
-      return
-    }
-    const res = await postAction('/routing/import', { name, url }, 'routing-import')
-    if (res && res.ok) {
-      importRoutingForm.name = ''
-      importRoutingForm.url = ''
-    }
-  }
-
-  function confirmDeleteRouting(g) {
-    if (!g || !g.deletable) {
-      showToast(t('该分流组不可删除'), false)
-      return
-    }
-    openConfirmDialog({ tone: 'rose', confirmText: t('确认删除'),
-      title: t('删除分流组'),
-      message: t('确定删除分流组「{name}」？', { name: g.name }),
-      onConfirm: () => postAction('/routing/delete', { id: g.id }, `routing-del-${g.id}`),
-    })
-  }
-
-  async function renameRouting(g) {
-    if (!g) return
-    renameDialog.id = g.id
-    renameDialog.oldName = g.name
-    renameDialog.name = g.name
-    renameDialog.show = true
-    nextTick(() => { const el = document.getElementById('rename-input'); if (el) { el.focus(); el.select() } })
-  }
-
-  const renameDialog = reactive({ show: false, id: '', oldName: '', name: '' })
-  function closeRenameDialog() { renameDialog.show = false }
-  async function acceptRenameDialog() {
-    const trimmed = String(renameDialog.name || '').trim()
-    if (!trimmed) {
-      showToast(t('请填写分流组名称'), false)
-      return
-    }
-    if (routingNameTaken(trimmed, renameDialog.id)) {
-      showToast(t('分流组名称已存在：{name}', { name: trimmed }), false)
-      return
-    }
-    const id = renameDialog.id
-    renameDialog.show = false
-    if (trimmed === renameDialog.oldName) return
-    await postAction('/routing/rename', { id, name: trimmed }, `routing-rename-${id}`)
-  }
-
-  const routingPanelOpen = ref('')
-  const routingRuleDraft = reactive({})
-  const routingProvForm = reactive({ provider: '', url: '' })
-
-  function isLocalRoutingGroup(g) {
-    return g && (g.kind === 'local' || (!g.kind && !(g.rule_providers || []).length))
-  }
-
-  function toggleRoutingPanel(g) {
-    if (!g) return
-    if (routingPanelOpen.value === g.id) {
-      routingPanelOpen.value = ''
-      return
-    }
-    routingPanelOpen.value = g.id
-    if (isLocalRoutingGroup(g)) {
-      const lines = Array.isArray(g.classical_rules) ? g.classical_rules : []
-      routingRuleDraft[g.id] = lines.map((r) => `- ${r}`).join('\n')
-    } else {
-      routingProvForm.provider = ''
-      routingProvForm.url = ''
-    }
-  }
-
-  async function saveLocalRoutingRules(g) {
-    if (!g) return
-    const raw = routingRuleDraft[g.id] || ''
-    const check = validateClassicalRulesPaste(raw)
-    if (!check.ok) {
-      showToast(check.msg, false)
-      return
-    }
-    await postAction('/routing/rules', { id: g.id, rules_raw: raw }, `routing-rules-${g.id}`)
-  }
-
-  async function addRoutingProvider(g) {
-    const provider = routingProvForm.provider.trim()
-    const url = routingProvForm.url.trim()
-    if (!provider) {
-      showToast(t('请填写规则集名称（英文）'), false)
-      return
-    }
-    if (!/^[A-Za-z0-9_.-]{1,64}$/.test(provider)) {
-      showToast(t('规则集名称只能用英文字母、数字、- _ .'), false)
-      return
-    }
-    const urlCheck = validateHttpUrl(url)
-    if (!urlCheck.ok) {
-      showToast(urlCheck.msg, false)
-      return
-    }
-    const res = await postAction('/routing/provider/add', { id: g.id, provider, url }, 'routing-prov-add')
-    if (res && res.ok) { routingProvForm.provider = ''; routingProvForm.url = '' }
-  }
-
-  function deleteRoutingProvider(g, p) {
-    if (!g || !p) {
-      showToast(t('规则集不存在'), false)
-      return
-    }
-    openConfirmDialog({ tone: 'rose', confirmText: t('确认删除'),
-      title: t('删除规则集'),
-      message: t('确定删除规则集「{name}」？', { name: p.name }),
-      onConfirm: () => postAction('/routing/provider/delete', { id: g.id, provider: p.name }, `routing-prov-del-${p.name}`),
-    })
-  }
-
-  const routingDragIdx = ref(-1)
-  const routingDragOver = ref(-1)
-
-  function onRoutingDragStart(idx, ev) {
-    routingDragIdx.value = idx
-    try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(idx)) } catch (_) {}
-  }
-
-  async function onRoutingDrop(idx) {
-    const from = routingDragIdx.value
-    routingDragIdx.value = -1
-    routingDragOver.value = -1
-    if (from < 0 || from === idx) return
-    if (busyKey.value) return
-    const before = routingGroups.value.slice()
-    const groups = before.slice()
-    const [moved] = groups.splice(from, 1)
-    groups.splice(idx, 0, moved)
-    if (state.routing && Array.isArray(state.routing.groups)) state.routing.groups = groups
-    const res = await postAction('/routing/reorder', { order: JSON.stringify(groups.map((g) => g.id)) }, 'routing-reorder')
-    if (!(res && res.ok) && !(res && res.state && res.state.routing) && state.routing) state.routing.groups = before
-  }
-
   // Pages that are locked in the current mode, with the toast that explains why.
   function tabLockedMsg(tab) {
     if (tab === 'advanced' && !state.custom_server_enabled) return t('高级功能请到设置页开启')
@@ -1786,115 +849,6 @@ export function usePanel() {
     } catch {}
   }
 
-  async function toggleCustomServer() {
-    const next = !state.custom_server_enabled
-    if (!next && state.custom_config_mode) {
-      openConfirmDialog({
-        title: t('关闭自定义服务端'),
-        message: t('关闭后，服务端将切换回面板生成的默认配置（默认服务端模板）并立即应用。你的自定义配置会保留在服务器上，重新开启后可一键恢复。'),
-        confirmText: t('关闭并切换'),
-        tone: 'amber',
-        onConfirm: () => applyCustomServer(false),
-      })
-      return
-    }
-    await applyCustomServer(next)
-  }
-
-  async function applyCustomServer(next) {
-    const res = await postAction(
-      '/action/settings',
-      { custom_server_enabled: next ? '1' : '0' },
-      '/action/settings'
-    )
-    if (res && res.ok && !next && activeTab.value === 'advanced') selectTab('inbounds')
-    if (res && res.ok && next && (activeTab.value === 'routing' || activeTab.value === 'cluster')) selectTab('inbounds')
-  }
-
-  async function toggleAutoUpdate() {
-    const next = !state.auto_update
-    await postAction(
-      '/action/settings',
-      { auto_update: next ? '1' : '0' },
-      '/action/settings'
-    )
-  }
-
-  function setUpdateChannel(channel) {
-    const next = channel === 'test' ? 'test' : 'stable'
-    if (next === 'test' && state.update_channel !== 'test') {
-      openConfirmDialog({
-        title: t('切换到测试通道'),
-        message: t('测试版可能不稳定，可能出现功能异常或兼容性问题。切换后将立即更新到测试通道最新版本，确定切换？'),
-        confirmText: t('确认切换'),
-        tone: 'amber',
-        onConfirm: () => applyUpdateChannel(next),
-      })
-      return
-    }
-    if (next === 'stable' && state.update_channel !== 'stable') {
-      openConfirmDialog({
-        title: t('切换到正式通道'),
-        message: t('切换到正式通道并立即更新到正式版最新版本，确定切换？'),
-        confirmText: t('确认切换'),
-        tone: 'amber',
-        onConfirm: () => applyUpdateChannel(next),
-      })
-      return
-    }
-    return applyUpdateChannel(next)
-  }
-
-  async function applyUpdateChannel(next) {
-    const prev = state.update_channel
-    // Always POST so legacy Beat installs migrate env to ClashGate/ClashGate@branch even if UI already shows 测试.
-    const res = await postAction(
-      '/action/settings',
-      { update_channel: next },
-      '/action/settings'
-    )
-    if (res && res.ok) {
-      state.update_channel = next
-      state.update_channel_label = next === 'test' ? t('测试') : t('正式')
-      // Every real channel switch pulls that channel's latest build right away.
-      if (prev !== next) {
-        showToast(t('已切换通道，正在更新到该通道最新版本……'), true)
-        await postAction('/action/upgrade-self', {}, '/action/upgrade-self')
-      }
-    }
-  }
-
-  function masqueNodeName(name) {
-    const n = String(name || 'Cloudflare-MASQUE').trim()
-    return n.startsWith('⛅️') ? n : `⛅️ ${n}`
-  }
-
-  function masqueYamlNamed(yaml, name) {
-    const raw = String(yaml || '').trim().replace(/^-+\s*/, '')
-    try {
-      const obj = JSON.parse(raw)
-      obj.name = name
-      return '- ' + JSON.stringify(obj)
-    } catch {
-      return yaml
-    }
-  }
-
-  async function addMasqueOutbound() {
-    if (!state.masque.yaml) return
-    const name = masqueNodeName(state.masque.name)
-    if (state.proxies.some((p) => p && (p.name === name || p.name === String(state.masque.name || '').trim()))) {
-      showToast(t('请勿重复加入'), false)
-      return
-    }
-    await postAction('/proxies/add', { proxies_raw: masqueYamlNamed(state.masque.yaml, name) }, 'add-masque')
-  }
-
-  async function retryMasque() {
-    const res = await postAction('/action/masque-register', {}, '/action/masque-register')
-    if (res && res.ok && !(res.state && res.state.masque)) state.masque = { ...state.masque, status: 'pending', error: '' }
-  }
-
   onMounted(() => {
     if (boot.flash_msg) {
       showToast(boot.flash_msg, boot.flash_ok !== false)
@@ -1917,12 +871,14 @@ export function usePanel() {
       activeTab.value = next
     })
     resumeUpgradeIfRunning()
+    if (pageMode.value === 'dashboard') resumeCertTaskIfRunning()
     window.addEventListener('blur', maskAllSensitive)
     document.addEventListener('visibilitychange', handleVisibilityChange)
     document.addEventListener('pointerdown', handleDocumentPointerDown)
     document.addEventListener('keydown', handleKeydown)
     nextTick(scrollActiveNavIntoView)
     if (pageMode.value === 'dashboard') {
+      noteTrafficSample()   // first sample: the page's own boot data
       statePollTimer = setInterval(refreshServerStateSilent, 15000)
     }
   })
@@ -1934,6 +890,141 @@ export function usePanel() {
     document.removeEventListener('pointerdown', handleDocumentPointerDown)
     document.removeEventListener('keydown', handleKeydown)
   })
+
+  // Page-specific state and actions live in their own modules and share the state above.
+  const shared = { activeTab, applyServerState, busyKey, customConfigText, maskAllSensitive, openConfirmDialog, postAction, selectTab, showToast, showVersionPanel, state }
+  const {
+    certModeForm,
+    certRegenLock,
+    certModeValue,
+    certModeLabel,
+    certDomainDisplay,
+    certIssuerDisplay,
+    certExpiresDisplay,
+    certDaysValue,
+    certIsTemp,
+    certBaselineMode,
+    certModeDirty,
+    certRegenDisabled,
+    certTaskElapsed,
+    resumeCertTaskIfRunning,
+    confirmCertRenew,
+    submitCertMode,
+  } = useCerts(shared)
+  const {
+    createRoutingForm,
+    importRoutingForm,
+    routingGroups,
+    routingNameTaken,
+    createRoutingGroup,
+    importRoutingGroup,
+    confirmDeleteRouting,
+    renameRouting,
+    renameDialog,
+    closeRenameDialog,
+    acceptRenameDialog,
+    routingPanelOpen,
+    routingRuleDraft,
+    routingProvForm,
+    isLocalRoutingGroup,
+    toggleRoutingPanel,
+    saveLocalRoutingRules,
+    addRoutingProvider,
+    deleteRoutingProvider,
+    routingDragIdx,
+    routingDragOver,
+    onRoutingDragStart,
+    onRoutingDrop,
+  } = useRouting(shared)
+  const {
+    nodeNameInput,
+    nodeNameSaved,
+    nodeNameLength,
+    nodeNameOverLimit,
+    nodeNameHint,
+    saveNodeName,
+    clusterForm,
+    clusterTouched,
+    clusterUrlErr,
+    clusterPwErr,
+    submitAddCluster,
+    removeClusterMember,
+    listSep,
+    syncCluster,
+    leaveCluster,
+  } = useCluster(shared)
+  const {
+    converterInput,
+    converterOutput,
+    converterError,
+    loadFileInto,
+    fillCurrentInboundsToConverter,
+    convertConfigFormat,
+  } = useConverter(shared)
+  const {
+    saveCustomConfig,
+    submitCustomConfig,
+    resetTemplateConfig,
+  } = useCustomConfig(shared)
+  const {
+    providerForm,
+    proxiesRaw,
+    submitAddProvider,
+    deleteProvider,
+    submitAddProxies,
+    deleteProxy,
+    masqueNodeName,
+    masqueYamlNamed,
+    addMasqueOutbound,
+    retryMasque,
+  } = useOutbounds(shared)
+  const {
+    PROTOCOLS,
+    DEFAULT_NAMES,
+    PROTOCOL_MAP,
+    inboundForm,
+    currentProtocol,
+    currentDefaultName,
+    PROTOCOL_HAS_OPTION,
+    sniEditable,
+    pendingAddReqId,
+    submitAddInbound,
+    resetInboundPassword,
+    deleteInbound,
+  } = useInbounds(shared)
+  const {
+    coreUpdate,
+    panelUpdate,
+    cgVersionTuple,
+    cgVersionNewer,
+    cgShowUpdate,
+    cgSlotAfterUpgrade,
+    upgradeInProgress,
+    panelHasUpdate,
+    coreHasUpdate,
+    versionLabel,
+    updateHint,
+    applyUpdateCheck,
+    mergeUpdateSlot,
+    confirmUpdateCore,
+    updateCoreDirect,
+    toggleVersionPanel,
+    checkUpdateAndPrompt,
+    resumeUpgradeIfRunning,
+    reloadPanelAfterUpgrade,
+  } = useUpdates(shared)
+  const {
+    showPasswordModal,
+    passwordForm,
+    openPasswordModal,
+    closePasswordModal,
+    submitChangePassword,
+    toggleCustomServer,
+    applyCustomServer,
+    toggleAutoUpdate,
+    setUpdateChannel,
+    applyUpdateChannel,
+  } = useSettings(shared)
 
   return (_panel = {
     boot,
@@ -2020,6 +1111,7 @@ export function usePanel() {
     converterError,
     certModeForm,
     certRegenLock,
+    certTaskElapsed,
     certModeValue,
     certModeLabel,
     certDomainDisplay,
@@ -2033,6 +1125,13 @@ export function usePanel() {
     submitCertMode,
     trafficDisplay,
     trafficDetail,
+    trafficUp,
+    trafficDown,
+    trafficRate,
+    coreTone,
+    nodesOnlineText,
+    uptimeText,
+    togglePendingDiff,
     updateCoreDirect,
     confirmUpdateCore,
     confirmCertRenew,
@@ -2045,6 +1144,7 @@ export function usePanel() {
     applyServerState,
     formatFetchError,
     postAction,
+    applyConfig,
     copyRaw,
     pendingAddReqId,
     submitAddInbound,

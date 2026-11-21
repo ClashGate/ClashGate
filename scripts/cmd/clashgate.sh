@@ -319,6 +319,9 @@ update_self() {
     assemble_config
     if validate_conf; then rm -f "$CONF.bak"; else mv -f "$CONF.bak" "$CONF"; warn "新模板生成的配置未通过校验，已保留原配置"; fi
     ( render_client ) >/dev/null 2>&1 || true   # subshell: keep the step counter of `update` intact
+    rm -f "$CS_ROOT/template_refresh"
+  else
+    : > "$CS_ROOT/template_refresh"   # the panel assembles it once the drafts are applied or discarded
   fi
   record_update_source || true
   local ch_label=正式
@@ -395,12 +398,38 @@ do_sub() {
   printf 'mihomo 订阅链接（链接即凭证，请勿外泄）：\n  %s\n' "$(sub_url)"
 }
 
+# A link change still waiting for the panel's 「应用配置」 would later replace the link set here.
+drop_panel_sub_draft() {
+  [[ -s $CS_ROOT/pending_reload.json ]] || return 0
+  python3 - "$CS_ROOT/pending_reload.json" "$CS_ROOT/pending_baseline.json" <<'PY' 2>/dev/null || true
+import json, os, sys
+path, baseline = sys.argv[1], sys.argv[2]
+d = json.load(open(path))
+if not isinstance(d, dict) or not d.get("sub_token"):
+    sys.exit(0)
+d["sub_token"] = ""
+d["items"] = [it for it in (d.get("items") or []) if not (isinstance(it, dict) and it.get("op") == "reset-sub")]
+if not (d["items"] or d.get("mihomo_secret")):
+    for p in (path, baseline):
+        if os.path.exists(p):
+            os.remove(p)
+    sys.exit(0)
+tmp = path + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(d, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+os.chmod(tmp, 0o600)
+os.replace(tmp, path)
+PY
+}
+
 do_reset_sub() {
   load_env
   [[ $MODE == auto-cert && -f $PANEL_CFG ]] || die "订阅链接仅在自动证书或手动证书模式下提供"
   PANEL_HASH=$(panel_cfg_get password_hash)
   SUB_TOKEN=$(new_sub_token)
   write_panel_cfg
+  drop_panel_sub_draft
   systemctl restart clashgate
   printf '新的订阅链接（旧链接已失效）：\n  %s\n' "$(sub_url)"
 }
@@ -456,7 +485,7 @@ do_lang() {
 do_menu() {
   require_installed; load_env
   has_tty || { usage; return 0; }
-  local items=() labels=() i c
+  local items=() labels=() i c item rc
   items+=(status info);          labels+=("查看运行状态" "查看节点配置")
   if [[ $MODE == auto-cert ]]; then
     items+=(sub reset-sub reset-password)
@@ -471,14 +500,23 @@ do_menu() {
     c=$(ask '请选择：' 0)
     [[ $c == 0 ]] && return 0
     if [[ $c =~ ^[0-9]+$ ]] && ((c >= 1 && c <= ${#items[@]})); then
+      item=${items[$((c - 1))]}; rc=0
       printf '\n'
-      if [[ ${items[$((c - 1))]} == lang ]]; then   # 换语言后用新语言重新打开菜单
+      if [[ $item == lang ]]; then   # 换语言后用新语言重新打开菜单
         ( do_lang ) && exec env -u CLASHGATE_LANG bash "$CS_HOME/scripts/cmd/clashgate.sh" menu
         continue
       fi
-      ( STEP=0; "do_${items[$((c - 1))]//-/_}" ) || true
-      [[ ${items[$((c - 1))]} == uninstall && ! -f $STATE ]] && return 0
+      if [[ $item == reset-sub ]] && [[ $(ask '旧订阅链接会立即失效，确定更换？[y/N]：' n) != [yY]* ]]; then
+        echo "已取消"; continue
+      fi
+      if [[ $item == reset-password ]] && [[ $(ask '确定重置面板密码？[y/N]：' n) != [yY]* ]]; then
+        echo "已取消"; continue
+      fi
+      ( STEP=0; "do_${item//-/_}" ) || rc=$?
+      [[ $item == uninstall && ! -f $STATE ]] && return 0
       ask '按回车返回菜单……' '' >/dev/null
+      # 更新后用新版本的脚本重新打开菜单（版本号、菜单项随之更新）
+      if [[ $item == update ]] && ((rc == 0)); then exec bash "$CS_HOME/scripts/cmd/clashgate.sh" menu; fi
     else
       printf '无效选项：%s\n' "$c"
     fi

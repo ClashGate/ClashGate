@@ -88,6 +88,7 @@ const {
   converterError,
   certModeForm,
   certRegenLock,
+  certTaskElapsed,
   certModeValue,
   certModeLabel,
   certDomainDisplay,
@@ -243,6 +244,7 @@ const {
               >
                 <CgIcon name="refresh" :size="14" />
                 <span>{{ busyKey === '/action/cert' ? t('正在申请证书…') : t('立即申请 / 续期') }}</span>
+                <span v-if="busyKey === '/action/cert' && certTaskElapsed" class="tabular-nums text-slate-500">{{ certTaskElapsed }}s</span>
               </button>
             </div>
 
@@ -403,7 +405,7 @@ const {
                           ? t('重新校验证书')
                           : t('校验并切换')
                       : certRegenLock || busyKey === '/action/cert-mode'
-                        ? t('正在重新生成证书…')
+                        ? t('正在重新生成证书…') + (certTaskElapsed ? ` ${certTaskElapsed}s` : '')
                         : t('切换并重新生成证书')
                   }}
                 </button>
