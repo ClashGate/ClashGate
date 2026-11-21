@@ -2177,6 +2177,52 @@ def discard_pending_reload():
     clear_pending_reload()
 
 
+def _yaml_lines(text: str) -> list:
+    """Non-blank, right-stripped lines: core.sh's awk and assemble_config() differ only in blank lines."""
+    return [l.rstrip() for l in (text or "").splitlines() if l.strip()]
+
+
+def reconcile_pending_with_live() -> bool:
+    """Drop draft entries that are already running. Before 1.35, `clashgate update` (panel Upgrade,
+    auto-update) re-assembled config.yaml from the draft files and restarted the core, so the drafts
+    went live while the panel still listed them as pending and kept serving the pre-draft subscription.
+
+    Only acts when config.yaml was rewritten outside the panel (its digest no longer matches the
+    baseline) and now equals what the drafts assemble to. A pending API secret / subscription token
+    is not part of the fragments that path used, so it stays pending. Caller holds LOCK."""
+    st = load_pending_reload()
+    if not (st["items"] or st["sub_token"] or st["mihomo_secret"]):
+        return False
+    try:
+        with open(PENDING_BASELINE_JSON) as f:
+            snap = json.load(f)
+        with open(CONF) as f:
+            live = f.read()
+    except (OSError, ValueError):
+        return False
+    base_digest = snap.get("conf_sha256") if isinstance(snap, dict) else ""
+    if not base_digest or base_digest == _conf_digest():
+        return False
+    if _yaml_lines(assemble_config()) != _yaml_lines(live):
+        return False
+    old_specs = collect_ufw_specs(*live_nodes_and_inbounds())   # baseline view: what the firewall was set for
+    keep = [it for it in st["items"] if it.get("op") in ("reset-secret", "reset-sub")]
+    if keep or st["sub_token"] or st["mihomo_secret"]:
+        st["items"] = keep
+        save_pending_reload(st)
+        try:
+            os.remove(PENDING_BASELINE_JSON)
+        except OSError:
+            pass
+        _ensure_pending_baseline()   # new baseline = the config that is live now
+    else:
+        clear_pending_reload()
+    sync_client_files()
+    sync_ufw(old_specs, collect_ufw_specs(read_nodes(), load_inbounds()))
+    sys.stderr.write("pending drafts already live (config rebuilt outside the panel); pending list cleared\n")
+    return True
+
+
 def record_pending_reload(op: str, name: str = "", port: int = None, kind: str = "", detail: str = "",
                           sub_token: str = None, mihomo_secret: str = None):
     st = load_pending_reload()

@@ -82,7 +82,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -934,6 +934,53 @@ class V121Test(unittest.TestCase):
             P.clear_pending_reload()
             with open(P.ENV_FILE, "w") as f:
                 f.write(env_before)
+
+    def test_drafts_made_live_outside_panel_leave_pending(self):
+        # Before 1.35 `clashgate update` assembled config.yaml from the drafts: the core ran them
+        # while the panel still listed them as pending and served the pre-draft subscription.
+        node, _ = write_default_state()
+        P.clear_pending_reload()
+        P.save_nodes([])
+        P.record_pending_reload(op="delete", kind="vless-reality", name=node["name"], port=node["port"],
+                                detail=f"- 删除节点「{node['name']}」")
+        P.record_pending_reload(op="reset-sub", kind="sub", name="sub", sub_token="N" * 24)
+        live = read(P.CONF)
+        try:
+            self.assertFalse(P.reconcile_pending_with_live())   # not live yet: keep the drafts
+            self.assertEqual(len(P.load_pending_reload()["items"]), 2)
+            P.atomic_write(P.CONF, live + "# hand edit\n", 0o640)
+            self.assertFalse(P.reconcile_pending_with_live())   # changed, but not to the drafts
+            self.assertEqual(P.live_nodes_and_inbounds()[0][0]["name"], node["name"])
+            P.atomic_write(P.CONF, P.assemble_config(), 0o640)  # what update_self used to do
+            self.assertTrue(P.reconcile_pending_with_live())
+            st = P.load_pending_reload()
+            self.assertEqual([it["op"] for it in st["items"]], ["reset-sub"])   # token is not in config.yaml
+            self.assertEqual(st["sub_token"], "N" * 24)
+            self.assertEqual(P.live_nodes_and_inbounds()[0], [])
+            self.assertFalse(P.reconcile_pending_with_live())
+        finally:
+            P.clear_pending_reload()
+
+    def test_update_keeps_live_config_while_drafts_pending(self):
+        sh = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))
+        body = sh[sh.index("update_self() {"):sh.index("do_status() {")]
+        guard = body.index("if ! has_panel_drafts; then")
+        self.assertLess(guard, body.index("assemble_config"))
+        self.assertLess(guard, body.index("render_client"))
+        fn = sh[sh.index("has_panel_drafts() {"):sh.index("update_self() {")]
+        start = fn.index("\n", fn.index("<<'PY'")) + 1
+        script = fn[start:fn.index("\nPY\n")]
+        cases = (
+            ({"items": [{"op": "delete", "name": "x"}], "sub_token": "", "mihomo_secret": ""}, 0),
+            ({"items": [], "sub_token": "T" * 24, "mihomo_secret": ""}, 0),
+            ({"items": [], "sub_token": "", "mihomo_secret": ""}, 1),
+        )
+        for data, want in cases:
+            p = os.path.join(tempfile.mkdtemp(), "pending_reload.json")
+            with open(p, "w") as f:
+                json.dump(data, f)
+            r = subprocess.run([sys.executable, "-", p], input=script, text=True, capture_output=True)
+            self.assertEqual(r.returncode, want, data)
 
     def test_uninstall_leaves_cluster_first(self):
         un = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))

@@ -277,6 +277,17 @@ do_update() {
   return 0
 }
 
+# Unapplied panel drafts: the fragments on disk already hold them, and only the panel's
+# 「应用配置」 may make them live (it also clears the pending list and syncs the subscription).
+has_panel_drafts() {
+  [[ -s $CS_ROOT/pending_reload.json ]] || return 1
+  python3 - "$CS_ROOT/pending_reload.json" <<'PY' 2>/dev/null
+import json, sys
+d = json.load(open(sys.argv[1]))
+sys.exit(0 if isinstance(d, dict) and (d.get("items") or d.get("sub_token") or d.get("mihomo_secret")) else 1)
+PY
+}
+
 update_self() {
   log "更新 ClashGate 脚本与面板"
   local tmp
@@ -299,12 +310,16 @@ update_self() {
     systemctl restart clashgate-cert.timer || true   # 让新的触发规则立即生效
   fi
   # 用新模板重新组装配置；校验失败则回滚
-  cp -a "$CONF" "$CONF.bak"
+  # With unapplied panel drafts keep the live config.yaml and client files as they are:
+  # the next 「应用配置」 assembles them with the new template.
   render_controller
   save_env
-  assemble_config
-  if validate_conf; then rm -f "$CONF.bak"; else mv -f "$CONF.bak" "$CONF"; warn "新模板生成的配置未通过校验，已保留原配置"; fi
-  ( render_client ) >/dev/null 2>&1 || true   # subshell: keep the step counter of `update` intact
+  if ! has_panel_drafts; then
+    cp -a "$CONF" "$CONF.bak"
+    assemble_config
+    if validate_conf; then rm -f "$CONF.bak"; else mv -f "$CONF.bak" "$CONF"; warn "新模板生成的配置未通过校验，已保留原配置"; fi
+    ( render_client ) >/dev/null 2>&1 || true   # subshell: keep the step counter of `update` intact
+  fi
   record_update_source || true
   local ch_label=正式
   [[ ${UPDATE_CHANNEL:-} == test || ( -z ${UPDATE_CHANNEL:-} && ${REPO_BRANCH:-main} == test ) ]] && ch_label=测试

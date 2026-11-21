@@ -274,6 +274,7 @@ read_env
 read_nodes
 reality_client
 reality_keypair
+reconcile_pending_with_live
 record_core_check
 record_panel_check
 record_pending_reload

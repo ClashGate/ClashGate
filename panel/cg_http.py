@@ -267,9 +267,11 @@ class Panel(BaseHTTPRequestHandler):
 
         pending_st = load_pending_reload()
         pending_items = list(pending_st["items"])
-        pending_reset_names = {
+        # A node is "pending" only when the draft list says so (added / new password, not applied yet);
+        # a port that is not listening for another reason shows as not running.
+        pending_node_names = {
             it.get("name") for it in pending_items
-            if it.get("op") == "reset-password" and it.get("name")
+            if it.get("op") in ("add", "reset-password") and it.get("name")
         }
 
         inbound_items = []
@@ -277,14 +279,14 @@ class Panel(BaseHTTPRequestHandler):
         for n in nodes:
             proxy = reality_client(n, env)
             all_proxies.append(proxy)
-            is_pending = (n["port"] not in listening and st["active"] == "active") or (n["name"] in pending_reset_names)
+            is_pending = n["name"] in pending_node_names
             inbound_items.append({
                 "key": f"node:{n['name']}",
                 "name": n["name"],
                 "kind": "vless-reality",
                 "kind_label": KIND_ZH["vless-reality"],
                 "port": n["port"],
-                "listening": n["port"] in listening and (n["name"] not in pending_reset_names),
+                "listening": n["port"] in listening and not is_pending,
                 "pending_reload": is_pending,
                 "can_reset_password": True,
                 "reset_url": f"/nodes/{quote(n['name'])}/reset-password",
@@ -296,14 +298,14 @@ class Panel(BaseHTTPRequestHandler):
             proxy = i["client"]
             all_proxies.append(proxy)
             can_reset = can_reset_inbound_password(i)
-            is_pending = (i["port"] not in listening and st["active"] == "active") or (i["name"] in pending_reset_names)
+            is_pending = i["name"] in pending_node_names
             inbound_items.append({
                 "key": f"inb:{i['id']}",
                 "name": i["name"],
                 "kind": i["kind"],
                 "kind_label": KIND_ZH.get(i["kind"], i["kind"]),
                 "port": i["port"],
-                "listening": i["port"] in listening and (i["name"] not in pending_reset_names),
+                "listening": i["port"] in listening and not is_pending,
                 "pending_reload": is_pending,
                 "can_reset_password": can_reset,
                 "reset_url": f"/inbounds/{i['id']}/reset-password" if can_reset else "",
@@ -1550,7 +1552,7 @@ class Panel(BaseHTTPRequestHandler):
             removed = [i for i in cur if i["id"] == iid]
             new = [i for i in cur if i["id"] != iid]
             if len(new) == len(cur):
-                return self.respond_mutation(s, "节点删除成功，应用配置后生效", True)
+                return self.respond_mutation(s, "入站节点不存在", False)
             try:
                 save_inbounds(new)
                 for rm in removed:
@@ -1572,7 +1574,7 @@ class Panel(BaseHTTPRequestHandler):
             removed = [n for n in cur if n["name"] == name]
             new = [n for n in cur if n["name"] != name]
             if len(new) == len(cur):
-                return self.respond_mutation(s, "已删除", True)
+                return self.respond_mutation(s, "入站节点不存在", False)
             try:
                 save_nodes(new)
                 for rm in removed:
@@ -2013,6 +2015,11 @@ def serve(cfg_path):
     Panel.cfg_path = cfg_path
     Panel.sessions = _load_sessions_file()
     cluster_instance_id()   # create it before any request can race for it
+    try:
+        with LOCK:
+            reconcile_pending_with_live()   # before the Snell migration, which waits for no drafts
+    except Exception as e:
+        sys.stderr.write(f"pending reconcile failed: {e}\n")
     start_traffic_poller(30)
     refresh_update_check_for_version()
     start_weekly_update_check()

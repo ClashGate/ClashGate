@@ -960,10 +960,13 @@ export function usePanel() {
           if (data.mihomo_version) state.mihomo_version = data.mihomo_version
           if (data.pending_reload_count !== undefined) {
             state.pending_reload_count = Number(data.pending_reload_count || 0)
+            if (state.pending_reload_count === 0) showPendingDiff.value = false
           }
           if (Array.isArray(data.pending_reload_items)) {
             state.pending_reload_items = data.pending_reload_items
           }
+          // Node status (running / pending) changes when a config is applied elsewhere.
+          if (Array.isArray(data.inbounds)) state.inbounds = data.inbounds
           if (data.status) {
             Object.assign(state.status, data.status)
             if (data.status.mihomo_version) state.mihomo_version = data.status.mihomo_version
