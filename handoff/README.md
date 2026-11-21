@@ -1,153 +1,154 @@
-# ClashGate 智能体交接文档
+# ClashGate Agent Handoff Guide
 
-本文档面向后续接手开发的智能体，说明产品原则、仓库结构、发布流程与必须遵守的约定，以便无缝接管后续版本。当前版本 **1.31**，下一版本号为 **1.32**。公开仓库：https://github.com/ClashGate/ClashGate
-
----
-
-## 1. 项目定位与产品原则
-
-ClashGate 是给小白用的 Mihomo 代理服务端，重点是简单，不追求 100% 功能。
-
-- **替用户做选择**。不要自行增加选项、子命令、解释性旁白或额外职责范围。事情越多，bug 越多。
-- **对外输出与文档保持最少**。不要解释“为什么”；解释过多是错误。
-- **安装时一次性装好所有依赖**（包括地理数据 `geoip.metadb`、`GeoSite.dat`、`ASN.mmdb`），不能等到用户用到某功能才报错。
-- **更新必须自动修好已有安装**，不能要求用户再执行手工步骤。
-- **UI 粗糙处直接改**，不必先问。卡片与表单保持对称。强调色 `#1d6fe0`。品牌图标为猫。
-- **管理面板语言**：中文 / English / Русский / فارسی，默认中文。安装程序与命令行：中文 / English / Русский（`clashgate lang` 或 `CLASHGATE_LANG`）。
-- 许可证：MIT。
+This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.31**. Next version number: **1.32**. Public repository: https://github.com/ClashGate/ClashGate
 
 ---
 
-## 2. 架构与目录
+## 1. Product positioning and principles
 
-统一安装目录是 `/etc/clashgate`。管理命令是 `/usr/local/bin/clashgate`（指向已安装的 `scripts/cmd/clashgate.sh`）。内核二进制是 `/etc/clashgate/mihomo`，以 `mihomo` 用户运行。面板在证书模式下自行提供 HTTPS（与内核共用 `/etc/clashgate/certs`），**不用 Caddy，也不用反向代理**。
+ClashGate is a Mihomo proxy server for beginners. Simplicity matters more than 100% feature coverage.
 
-### 安装模式
+- **Make choices for users.** Do not add options, subcommands, explanatory asides, or extra scope on your own. The more you take on, the more bugs you get.
+- **Keep user-facing output and docs minimal.** Do not explain “why”; over-explaining is a mistake.
+- **The installer must set up every dependency up front** (including geo data `geoip.metadb`, `GeoSite.dat`, and `ASN.mmdb`). Users must not hit errors later when they first use a feature.
+- **Updates must fix existing installs automatically.** Do not require a manual step.
+- **Fix rough UI spots directly**; do not ask first. Keep cards and forms symmetric. Accent color is `#1d6fe0`. The brand icon is a cat.
+- **Panel languages:** Chinese / English / Русский / فارسی, default Chinese. Installer and CLI: Chinese / English / Русский (`clashgate lang` or `CLASHGATE_LANG`).
+- **Development language** (dev docs, code comments, commit messages) is English. User-facing content is currently mainly Chinese, with i18n in progress.
+- License: MIT.
 
-- **无证书模式**（`MODE=no-cert`）：只生成 VLESS Reality 节点，安装后输出客户端配置。
-- **自动证书模式**（`MODE=auto-cert`）：需要域名；用 Let's Encrypt 申请并续期证书，提供 HTTPS 管理面板和订阅链接。
-- **手动证书模式**（`MODE=auto-cert` 且 `CERT_MODE=manual`）：使用用户自备证书，校验通过后同样提供面板和订阅。
+---
 
-证书方式（`CERT_MODE`，均可在面板「HTTPS 证书」页切换）：
+## 2. Architecture and layout
 
-| 值 | 名称 | 说明 |
+The unified install directory is `/etc/clashgate`. The management command is `/usr/local/bin/clashgate` (a symlink to the installed `scripts/cmd/clashgate.sh`). The core binary is `/etc/clashgate/mihomo`, running as the `mihomo` user. In certificate modes the panel serves HTTPS itself (sharing `/etc/clashgate/certs` with the core). **Do not use Caddy or a reverse proxy.**
+
+### Install modes
+
+- **No-certificate mode** (`MODE=no-cert`): generates only VLESS Reality nodes and prints a client config after install.
+- **Automatic-certificate mode** (`MODE=auto-cert`): requires a domain; obtains and renews a Let's Encrypt certificate, and provides the HTTPS admin panel and a subscription URL.
+- **Manual-certificate mode** (`MODE=auto-cert` and `CERT_MODE=manual`): uses a certificate the user supplies; after validation, the panel and subscription are provided the same way.
+
+Certificate methods (`CERT_MODE`; all can be switched on the panel's 「HTTPS 证书」 (HTTPS certificate) page):
+
+| Value | Name | Notes |
 | --- | --- | --- |
-| `port` | 端口模式（默认） | 申请/续期时临时占用 80 端口 |
-| `dns` | DNS API 模式 | Cloudflare API Token，不必开放 80，支持 `*.` 泛域名 |
-| `manual` | 手动证书 | 用户把证书放到 `/etc/clashgate/certs/`，不申请、不续期 |
+| `port` | 端口模式 (port mode, default) | Temporarily binds port 80 during issue/renew |
+| `dns` | DNS API 模式 (DNS API mode) | Cloudflare API Token; port 80 not required; supports `*.` wildcards |
+| `manual` | 手动证书 (manual certificate) | User places the cert in `/etc/clashgate/certs/`; no issue or renew |
 
-默认证书来源是 Let's Encrypt 正式环境（`TLS=production`）。不要给用户签发“正式自签证书”当生产方案。申请失败时 `certctl.sh` 可写入临时自签证书，只为让面板和内核先起来；`TLS=internal` 仅开发用，不走 ACME。
+The default certificate source is the Let's Encrypt production environment (`TLS=production`). Do not issue a “production self-signed certificate” as the user-facing solution. If issuance fails, `certctl.sh` may write a temporary self-signed certificate only so the panel and core can start; `TLS=internal` is for development only and does not use ACME.
 
-订阅地址：`https://<域名>:<面板端口>/sub/<token>/mihomo.yaml`（文件名 `mihomo.yaml` 可以保留）。
+Subscription URL: `https://<domain>:<panel-port>/sub/<token>/mihomo.yaml` (the filename `mihomo.yaml` is allowed).
 
-入站协议（面板可添加）：VLESS Reality、Shadowsocks、Hysteria2、Snell v6、AnyTLS、TUIC、TrustTunnel、ShadowQUIC、Mieru、Sudoku、HTTP、SOCKS5。
+Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snell v6, AnyTLS, TUIC, TrustTunnel, ShadowQUIC, Mieru, Sudoku, HTTP, SOCKS5.
 
-### systemd 服务
+### systemd units
 
-| 单元 | 作用 |
+| Unit | Role |
 | --- | --- |
-| `mihomo.service` | 内核。启动前执行 `mihomo -t -d /etc/clashgate -f /etc/clashgate/config.yaml` |
-| `clashgate.service` | 管理面板（仅证书模式）。`python3 /etc/clashgate/panel/panel.py serve --config /etc/clashgate/panel.json` |
-| `clashgate-cert.service` / `clashgate-cert.timer` | 每小时调用 `certctl.sh renew` |
+| `mihomo.service` | Core. Runs `mihomo -t -d /etc/clashgate -f /etc/clashgate/config.yaml` before start |
+| `clashgate.service` | Admin panel (certificate modes only). `python3 /etc/clashgate/panel/panel.py serve --config /etc/clashgate/panel.json` |
+| `clashgate-cert.service` / `clashgate-cert.timer` | Calls `certctl.sh renew` hourly |
 
-### 仓库目录（源码）
+### Repository layout (source)
 
-| 路径 | 作用 |
+| Path | Role |
 | --- | --- |
-| `install.sh` | 一键安装入口。`curl\|bash` 时从 GitHub 下载对应分支 tarball，再交给 `scripts/cmd/clashgate.sh` 执行安装。语言：`CLASHGATE_LANG=zh\|en\|ru` 或交互选择，写入 `/etc/clashgate/clashgate.env` |
-| `uninstall.sh` | 等同于 `clashgate uninstall` |
-| `scripts/cmd/clashgate.sh` | CLI 与安装/更新/卸载主流程 |
-| `scripts/lib/common.sh` | 版本常量、路径、环境持久化、`install_files`、更新通道 |
-| `scripts/lib/core.sh` | 依赖、下载内核、`ensure_geodata`、渲染配置、systemd、本机防火墙放行（若启用了 ufw/firewalld） |
-| `scripts/lib/cert.sh` | 证书预检、DNS 检查、手动证书、调用 acme 申请 |
-| `scripts/lib/acme.sh` | 固定版本安装 acme.sh（3.1.6，目录 `/etc/clashgate/acme.sh`） |
-| `scripts/lib/panel.sh` | 面板 unit、订阅 URL、面板密码 |
-| `scripts/lib/i18n.sh`、`i18n.en.tsv`、`i18n.ru.tsv` | 安装程序与 CLI 的翻译 |
-| `scripts/certctl.sh` | `issue` / `renew` / `deploy`；面板调用时输出固定为中文，便于解析失败原因。CLI 语言随 `CLASHGATE_LANG` |
-| `scripts/init/` | 上述三个 systemd 单元（及 cert timer）的模板 |
-| `panel/panel.py` | 面板入口（Python 3.9+，只用标准库）。子命令：`serve`、`hash-password`、`cluster-leave`（卸载时退出集群） |
-| `panel/cg_http.py` | HTTPS 服务与 API（含 `do_check_update`） |
-| `panel/cg_config.py` | 节点/入站/配置生成、`ensure_geodata`、`validate_config`（`mihomo -t`） |
-| `panel/cg_update.py` | 流量统计、内核更新、面板自升级、通道检查 |
-| `panel/cg_cluster.py` | 集群协议 |
-| `panel/cg_cert.py` | 把配置里的证书路径改写到本项目证书 |
-| `panel/cg_yaml.py` | YAML 读写 |
-| `panel/cg_masque.py` | Cloudflare MASQUE 注册 |
-| `panel/cg_qr.py` | 二维码 |
-| `panel/routing_mgr.py` | 服务端分流：`/etc/clashgate/routing/` + `routing.json`，组装进模板 |
-| `panel/i18n_en.py` | 服务端 API 文案英译（源字符串保持中文） |
-| `panel/web/` | Vue 3 + Tailwind 前端源码（`package.json` 的 version 为 `1.31.0`） |
-| `panel/dist/` | **已提交的构建产物**。改前端后必须 `cd panel/web && npm ci && npm run build`，并把 `panel/dist` 的变更一并提交（CI 用 `git diff --exit-code -- panel/dist` 校验） |
-| `resources/server.yaml.tpl`、`resources/client.yaml.tpl` | 服务端 / 客户端配置模板 |
-| `resources/routing/` | 默认分流组（节点选择、漏网之鱼） |
-| `resources/brand/logo.png` | 品牌图标 |
-| `tests/` | 测试（见第 7 节） |
-| `.github/workflows/ci.yml` | 每次 push / PR 跑 `tests/run.sh` |
-| `handoff/` | 本交接文档。不列入 `CS_TREE_PARTS`，不会安装到机器上 |
+| `install.sh` | One-click install entry. When run via `curl\|bash`, downloads the branch tarball from GitHub, then hands off to `scripts/cmd/clashgate.sh` to install. Language: `CLASHGATE_LANG=zh\|en\|ru` or an interactive prompt, saved to `/etc/clashgate/clashgate.env` |
+| `uninstall.sh` | Same as `clashgate uninstall` |
+| `scripts/cmd/clashgate.sh` | CLI and the main install / update / uninstall flow |
+| `scripts/lib/common.sh` | Version constants, paths, env persistence, `install_files`, update channels |
+| `scripts/lib/core.sh` | Dependencies, core download, `ensure_geodata`, config rendering, systemd, opening the host firewall if ufw/firewalld is enabled |
+| `scripts/lib/cert.sh` | Certificate preflight, DNS check, manual certs, ACME issuance |
+| `scripts/lib/acme.sh` | Pins and installs acme.sh 3.1.6 under `/etc/clashgate/acme.sh` |
+| `scripts/lib/panel.sh` | Panel unit, subscription URL, panel password |
+| `scripts/lib/i18n.sh`, `i18n.en.tsv`, `i18n.ru.tsv` | Installer and CLI translations |
+| `scripts/certctl.sh` | `issue` / `renew` / `deploy`. When the panel invokes it, output is fixed to Chinese so failure reasons can be parsed. CLI language follows `CLASHGATE_LANG` |
+| `scripts/init/` | Templates for the systemd units above (including the cert timer) |
+| `panel/panel.py` | Panel entry point (Python 3.9+, stdlib only). Subcommands: `serve`, `hash-password`, `cluster-leave` (leave the cluster on uninstall) |
+| `panel/cg_http.py` | HTTPS server and API (including `do_check_update`) |
+| `panel/cg_config.py` | Node / inbound / config generation, `ensure_geodata`, `validate_config` (`mihomo -t`) |
+| `panel/cg_update.py` | Traffic stats, core updates, panel self-upgrade, channel checks |
+| `panel/cg_cluster.py` | Cluster protocol |
+| `panel/cg_cert.py` | Rewrites certificate paths in a config to this project's certificates |
+| `panel/cg_yaml.py` | YAML read/write |
+| `panel/cg_masque.py` | Cloudflare MASQUE registration |
+| `panel/cg_qr.py` | QR codes |
+| `panel/routing_mgr.py` | Server-side routing: `/etc/clashgate/routing/` + `routing.json`, assembled into the template |
+| `panel/i18n_en.py` | English translations of server API messages (source strings stay Chinese) |
+| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.31.0`) |
+| `panel/dist/` | **Committed build output.** After frontend changes, run `cd panel/web && npm ci && npm run build` and commit the `panel/dist` updates (CI checks `git diff --exit-code -- panel/dist`) |
+| `resources/server.yaml.tpl`, `resources/client.yaml.tpl` | Server / client config templates |
+| `resources/routing/` | Default routing groups (节点选择 / node select, 漏网之鱼 / final / unmatched) |
+| `resources/brand/logo.png` | Brand icon |
+| `tests/` | Tests (see section 7) |
+| `.github/workflows/ci.yml` | Runs `tests/run.sh` on every push and pull request |
+| `handoff/` | This handoff guide. Not in `CS_TREE_PARTS`, so it is not installed onto machines |
 
-`install_files` 只会原子替换这些顶层项（`CS_TREE_PARTS`）：`install.sh`、`uninstall.sh`、`panel`、`resources`、`scripts`。配置、证书、内核二进制和地理数据会保留。
+`install_files` atomically replaces only these top-level items (`CS_TREE_PARTS`): `install.sh`, `uninstall.sh`, `panel`, `resources`, `scripts`. Config, certificates, the core binary, and geo data are kept.
 
-### 运行时重要路径（均在 `/etc/clashgate`）
+### Important runtime paths (all under `/etc/clashgate`)
 
-`config.yaml`（当前服务端配置）、`custom_config.yaml`（用户自定义整份配置）、`clashgate.env`、`panel.json`、`certs/fullchain.pem` 与 `privkey.pem`、`client/`、`nodes.tsv`、各类 `*.yaml` 片段（controller / listeners / proxies / routing / cluster）、`inbounds.json`、`cluster.json`、`routing.json`、`routing/`、地理数据文件。
+`config.yaml` (current server config), `custom_config.yaml` (user-supplied full server config), `clashgate.env`, `panel.json`, `certs/fullchain.pem` and `privkey.pem`, `client/`, `nodes.tsv`, various `*.yaml` fragments (controller / listeners / proxies / routing / cluster), `inbounds.json`, `cluster.json`, `routing.json`, `routing/`, and the geo data files.
 
 ---
 
-## 3. 当前 CLI 命令（v1.31）
+## 3. Current CLI commands (v1.31)
 
-不带参数：已安装则打开管理菜单，未安装则进入安装。`clashgate help` 查看全部子命令。
+With no argument: opens the management menu if already installed, otherwise starts install. `clashgate help` lists every subcommand.
 
-| 命令 | 说明 |
+| Command | Description |
 | --- | --- |
-| `clashgate status` | 查看运行状态 |
-| `clashgate info` | 查看节点配置 |
-| `clashgate log` | 查看最近日志 |
-| `clashgate restart` | 校验配置后重启内核 |
-| `clashgate sub` | 查看订阅链接（仅证书模式） |
-| `clashgate reset-sub` | 更换订阅链接，旧链接立即失效（仅证书模式） |
-| `clashgate reset-password` | 随机重置面板密码（仅证书模式） |
-| `clashgate update` | 同时更新内核、脚本与面板（面板「升级」与自动更新也调用它） |
-| `clashgate lang [zh\|en\|ru]` | 切换并保存命令行语言（不带参数则从列表选择） |
-| `clashgate install` | 重新安装（按提示选择模式） |
-| `clashgate uninstall` | 卸载：若在集群中则先退出集群，然后删除安装。**不管防火墙端口**（不要再加关闭放行端口的逻辑） |
-| `clashgate help` | 帮助 |
+| `clashgate status` | Show running status |
+| `clashgate info` | Show node configuration |
+| `clashgate log` | Show recent logs |
+| `clashgate restart` | Validate the config, then restart the core |
+| `clashgate sub` | Show the subscription URL (certificate modes only) |
+| `clashgate reset-sub` | Rotate the subscription URL; the old URL stops working immediately (certificate modes only) |
+| `clashgate reset-password` | Reset the panel password to a random value (certificate modes only) |
+| `clashgate update` | Update the core, scripts, and panel together (the panel's 「升级」 (Upgrade) action and auto-update also call this) |
+| `clashgate lang [zh\|en\|ru]` | Switch and save the CLI language (no argument: choose from a list) |
+| `clashgate install` | Reinstall (choose the mode when prompted) |
+| `clashgate uninstall` | Uninstall: leave the cluster first if linked, then delete the install. **Do not touch firewall ports** (do not add logic that closes ports that were opened) |
+| `clashgate help` | Help |
 
-已删除、不要加回来：`clashgate passwd`、`clashgate reset-secret`、`clashgate cert`，以及拆开的 `update core` / `update self`。改面板密码、重置 Zashboard 密钥、管理证书，都在面板里完成。
+Removed; do not add them back: `clashgate passwd`, `clashgate reset-secret`, `clashgate cert`, and the split `update core` / `update self` commands. Changing the panel password, resetting the Zashboard secret, and managing certificates are all done in the panel.
 
-开发/测试用隐藏参数（不要写入用户文档）：`--domain`、`--cert-mode port|dns|manual`、`--cf-token`、`--panel-port`、`--controller-port`、`--staging` / `--tls-staging`、`--production`、`--tls-internal`。测试证书时用 staging 或复用已有证书，**禁止在测试中向 Let's Encrypt 正式环境重新签发**。
-
----
-
-## 4. Mihomo 相关约定
-
-- 遵循 [Mihomo 官方文档](https://wiki.metacubex.one/en/)。
-- **下游名称不要出现 “mihomo”**（用户可见的产品名是 ClashGate）。订阅文件名 `mihomo.yaml` 可以保留；内核二进制、`mihomo.service`、内核家目录属于内核自身，不在此列。
-- **禁止** 在下发的客户端配置里写 `skip-cert-verify`（生成时会删掉该字段；测试也会检查源码中不得出现 `skip-cert-verify: true`）。
-- **不要做 CDN 模式**。
-- Mihomo v1.19 使用 `geoip.metadb`（不是只依赖旧的 `country.mmdb`）。安装和 `clashgate update` 都会调用 `ensure_geodata`，用系统 curl 预先下载 `geoip.metadb`、`GeoSite.dat`、`ASN.mmdb` 到 `/etc/clashgate`。面板启动和 `validate_config` 也会补齐缺失文件。
-- 面板与脚本做 `mihomo -t` 时，必须在临时目录里**链接**这些地理数据（以及 certs、ruleset 等），不能让内核在校验阶段自己下载（它的内置 DNS 此时可能解析失败）。
-
-测试套件钉死的内核版本见 `tests/run.sh` 中的 `MIHOMO_VERSION`（当前 `v1.19.34`）。
+Hidden flags for development and testing (do not put these in user docs): `--domain`, `--cert-mode port|dns|manual`, `--cf-token`, `--panel-port`, `--controller-port`, `--staging` / `--tls-staging`, `--production`, `--tls-internal`. For certificate tests, use staging or reuse an existing certificate. **Do not re-issue certificates against the Let's Encrypt production environment in tests.**
 
 ---
 
-## 5. 分支与发布流程
+## 4. Mihomo conventions
 
-仓库默认对外分支是 `main`（正式）。`test` 是测试通道。
+- Follow the [official Mihomo docs](https://wiki.metacubex.one/en/).
+- **Do not put “mihomo” in downstream names** (the user-visible product name is ClashGate). The subscription filename `mihomo.yaml` is allowed; the core binary, `mihomo.service`, and the core's home directory belong to the core itself and are out of scope.
+- **Never** put `skip-cert-verify` in issued client configs (generation strips the field; tests also check that sources must not contain `skip-cert-verify: true`).
+- **Do not add a CDN mode.**
+- Mihomo v1.19 uses `geoip.metadb` (do not rely only on the older `country.mmdb`). Install and `clashgate update` both call `ensure_geodata`, which pre-downloads `geoip.metadb`, `GeoSite.dat`, and `ASN.mmdb` into `/etc/clashgate` with system curl. Panel startup and `validate_config` also fill in any missing files.
+- When the panel or scripts run `mihomo -t`, they must **symlink** these geo files (and certs, ruleset, and similar) into the temporary directory. The core must not download them during validation (its built-in DNS may fail to resolve at that point).
 
-1. 在 `test` 上开发并推送。**每次推到 `test` 的功能/修复都必须升版本号**（文字或文档-only 改动除外，见下）。
-2. 项目负责人在真实机器上验收（负责人自己在面板点「检查更新」）。
-3. **只有负责人明确同意后，才能推 `main`。** 未验收通过的版本号作废，不得复用。
+The core version pinned by the test suite is `MIHOMO_VERSION` in `tests/run.sh` (currently `v1.19.34`).
 
-版本号按**每一段的整数**比较（`parse_version_tuple`）：`1.09 < 1.10 < 1.31`。**永远不要写成 `1.1` 或 `1.2`**（会排在 `1.09` 前面）。下一个是 `1.32`、`1.33`，依此类推。
+---
 
-提交说明用英文。**禁止 force push。**
+## 5. Branches and release process
 
-**文字或文档-only 改动**：不跑测试、不等 CI，可以直接推。`test` 与 `main` 已经分叉，不要用合并来带文档；在两个分支上分别提交同一文件。此类改动**不要升版本号**。本次 `handoff/` 即按此规则处理。
+The public default branch is `main` (stable). `test` is the test channel.
 
-### 把已验收的 `test` 合入 `main`（分支已分叉，不能快进）
+1. Develop and push on `test`. **Every feature or fix pushed to `test` must bump the version** (copy- or docs-only changes are the exception; see below).
+2. The project owner verifies on a real machine (the owner clicks 「检查更新」 (Check for updates) in the panel).
+3. **Push to `main` only after the owner explicitly agrees.** A version that fails acceptance is retired and must not be reused.
 
-在 `origin/main` 上建 worktree，然后：
+Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.31`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.32`, `1.33`, and so on.
+
+Commit messages are in English. **Never force push.**
+
+**Copy- or docs-only changes:** do not run tests, do not wait for CI, and push directly. `test` and `main` have already diverged, so do not merge just to carry a doc; commit the same file separately on each branch. These changes **must not bump the version.** The `handoff/` directory follows this rule.
+
+### Merging an accepted `test` into `main` (the branches have diverged; a fast-forward is not possible)
+
+Create a worktree on `origin/main`, then:
 
 ```bash
 git merge --no-ff --no-commit -s ours origin/test
@@ -155,92 +156,92 @@ git read-tree -m -u origin/test
 git checkout origin/main -- .github
 ```
 
-再把默认分支改回 `main`：
+Then set the default branch back to `main`:
 
-- `install.sh` 头部 URL：`.../ClashGate/main/install.sh`
-- `install.sh` 中 `${REPO_BRANCH:-main}`
-- `scripts/lib/common.sh` 中 `REPO_BRANCH=${REPO_BRANCH:-main}`
+- `install.sh` header URL: `.../ClashGate/main/install.sh`
+- `install.sh`: `${REPO_BRANCH:-main}`
+- `scripts/lib/common.sh`: `REPO_BRANCH=${REPO_BRANCH:-main}`
 
-（`test` 分支上这三处默认值是 `test`，合入时必须改回来，否则正式安装会去拉 `test`。）
+(On the `test` branch these three defaults are `test`. They must be changed back on merge, or a stable install will pull from `test`.)
 
-然后 commit，`git push origin HEAD:main`。不要 force push。
+Then commit and `git push origin HEAD:main`. Do not force push.
 
-`test` 与 `main` 的内容差异通常只有上述默认分支，以及 `.github`（保留 `main` 上的工作流历史）。
+The usual content difference between `test` and `main` is only those default-branch values, plus `.github` (keep the workflow history that is already on `main`).
 
 ---
 
-## 6. 版本号修改位置与检查更新
+## 6. Version bump locations and the update check
 
-升版本时必须同时改下列位置（以 1.31 为例）：
+When bumping a version, update all of the following at the same time (1.31 as the example):
 
-| 位置 | 写法 |
+| Location | Form |
 | --- | --- |
-| `README.md`、`README.en.md` 的 version badge | `v1.31` |
-| `panel/panel.py` 文件头 docstring 与 `VERSION` | `v1.31` / `"1.31"` |
-| `panel/routing_mgr.py` 文件头 docstring | `1.31` |
-| `panel/web/package.json` 与 `package-lock.json` | `1.31.0`（三段） |
-| `scripts/lib/common.sh` 的 `CS_VERSION` | `1.31` |
-| 同文件 `CS_SOURCE_SHA` | `YYYYMMDD-vX.YY`（如 `20261120-v1.31`） |
-| `tests/test_panel.py` 的版本顺序列表 | 把新版本追加进 `order` |
-| `tests/golden/subscription.yaml` 首行注释 | `Generated by ClashGate v1.31...` |
+| Version badges in `README.md` and `README.en.md` | `v1.31` |
+| `panel/panel.py` file-header docstring and `VERSION` | `v1.31` / `"1.31"` |
+| `panel/routing_mgr.py` file-header docstring | `1.31` |
+| `panel/web/package.json` and `package-lock.json` | `1.31.0` (three segments) |
+| `CS_VERSION` in `scripts/lib/common.sh` | `1.31` |
+| `CS_SOURCE_SHA` in the same file | `YYYYMMDD-vX.YY` (e.g. `20261120-v1.31`) |
+| Version order list in `tests/test_panel.py` | Append the new version to `order` |
+| First-line comment in `tests/golden/subscription.yaml` | `Generated by ClashGate v1.31...` |
 
-`common.sh` 与 `panel.py` 顶部的版本比较注释也要跟着改到新版本，并写明下一个版本号。
+Also update the version-comparison comments at the top of `common.sh` and `panel.py` to the new version, and name the next version number.
 
-### 面板「检查更新」机制
+### Panel 「检查更新」 (Check for updates) mechanism
 
-`panel/cg_update.py` 的 `fetch_channel_tip()`：
+`fetch_channel_tip()` in `panel/cg_update.py`:
 
-1. 按当前通道解析仓库与分支：正式 → `ClashGate/ClashGate@main`，测试 → `ClashGate/ClashGate@test`。
-2. 先请求 GitHub commits API 取该分支 tip SHA，再读取该 commit 上的 `scripts/lib/common.sh` 原文（避免 raw 按分支名读取时被缓存约 5 分钟）。失败则回退到按分支名读取。
-3. 从文件中解析 `CS_VERSION`（以及 `CS_SOURCE_SHA`）。
-4. `check_panel_update()` 用 `parse_version_tuple` 比较，只有**严格更新**的版本才算有更新。
+1. Resolve the repo and branch for the active channel: 正式 (stable) → `ClashGate/ClashGate@main`; 测试 (test) → `ClashGate/ClashGate@test`.
+2. First call the GitHub commits API for that branch's tip SHA, then read `scripts/lib/common.sh` at that commit (raw reads by branch name can be cached for about five minutes). On failure, fall back to reading by branch name.
+3. Parse `CS_VERSION` (and `CS_SOURCE_SHA`) from the file.
+4. `check_panel_update()` compares with `parse_version_tuple`; only a **strictly newer** version counts as an update.
 
-`POST /action/check-update` 由 `cg_http.py` 的 `do_check_update` 处理；异常时返回 **400**，文案为「检查更新失败：无法连接 GitHub 获取最新版本（…）」。服务器必须能访问 GitHub。
+`POST /action/check-update` is handled by `do_check_update` in `cg_http.py`. On exception it returns **400** with the message 「检查更新失败：无法连接 GitHub 获取最新版本（…）」 (Update check failed: cannot reach GitHub for the latest version (…)). The server must be able to reach GitHub.
 
-面板升级实际执行的是脱离面板进程的 `clashgate update`（更新会重启面板服务本身，不能在请求内同步跑完）。
+A panel upgrade actually runs `clashgate update` detached from the panel process (the update restarts the panel service itself, so it cannot finish synchronously inside the request).
 
 ---
 
-## 7. 测试
+## 7. Tests
 
-本地一次性跑完全部测试：
+Run the full local suite in one shot:
 
 ```bash
-tests/run.sh            # 全量（含前端构建校验）
-tests/run.sh --no-build # 跳过前端构建
+tests/run.sh            # everything (including the frontend build check)
+tests/run.sh --no-build # skip the frontend build
 ```
 
-流程：`bash -n` 全部脚本 → `shellcheck`（警告级，排除 SC2034；CI 中没有 shellcheck 则失败）→ 如无 `MIHOMO_BIN` 则下载钉死版本的内核到 `tests/.cache` → 预下载地理数据到 `tests/.cache/geo` → `python3 -m unittest discover -s tests -v` → `python3 tests/cluster_e2e.py` → 前后端 i18n 对账 → 前端 `npm run build` 且 `panel/dist` 必须与提交内容一致。
+Flow: `bash -n` on every script → `shellcheck` (warning level, excluding SC2034; missing shellcheck is a failure in CI) → if `MIHOMO_BIN` is unset, download the pinned core into `tests/.cache` → pre-download geo data into `tests/.cache/geo` → `python3 -m unittest discover -s tests -v` → `python3 tests/cluster_e2e.py` → frontend and shell i18n parity checks → frontend `npm run build`, and `panel/dist` must match what is committed.
 
-主要测试文件：`tests/test_panel.py`（假的 `/etc/clashgate` 树 + `mihomo -t`）、`tests/test_seed_load.py`（脚本 import 面板的路径）、`tests/cluster_e2e.py`（本机多面板 HTTPS 集群，使用一次性 CA，不申请真实证书）、`tests/check_i18n.py`、`tests/check_shell_i18n.py`。`tests/node-check.sh` 是发版前用订阅在本地客户端测节点，不是 CI 的一部分。
+Main test files: `tests/test_panel.py` (a throw-away `/etc/clashgate` tree + `mihomo -t`), `tests/test_seed_load.py` (script paths that import the panel), `tests/cluster_e2e.py` (multi-panel HTTPS cluster on one machine, using a throw-away CA; no real certificates are issued), `tests/check_i18n.py`, `tests/check_shell_i18n.py`. `tests/node-check.sh` is a pre-release check that imports a subscription into a local client; it is not part of CI.
 
-CI：`.github/workflows/ci.yml`，`ubuntu-24.04`，Node 24，每次 push 和 pull request 执行 `tests/run.sh`。修改 `.github` 需要带 `workflow` 权限的 token；若 `git push` 被拒，改用 GitHub 网页编辑该文件。
+CI: `.github/workflows/ci.yml`, `ubuntu-24.04`, Node 24, runs `tests/run.sh` on every push and pull request. Editing `.github` needs a token with the `workflow` scope; if `git push` is rejected, edit the file in the GitHub web UI.
 
-测试**不得**向 Let's Encrypt 正式环境重新签发证书：用 `--staging` / 复用已有证书 / 测试夹具中的一次性 CA。重装会保留 acme.sh 账户和已签发证书，避免触发频率限制。
+Tests **must not** re-issue certificates against the Let's Encrypt production environment: use `--staging`, reuse an existing certificate, or the throw-away CA in the test fixtures. A reinstall keeps the acme.sh account and already-issued certificates, which avoids rate limits.
 
 ---
 
-## 8. 版本历史摘要（近期）
+## 8. Recent version history
 
-| 版本 | 要点 |
+| Version | Highlights |
 | --- | --- |
-| 1.24 | 安装程序与 CLI 语言 zh/en/ru，新增 `clashgate lang` |
-| 1.25 | `certctl` 输出跟随 CLI 语言；面板调用时固定中文以便解析 |
-| 1.26 | README「常用命令」改为分组表格 |
-| 1.27 | 删除「系统要求」；「一键安装」只保留命令本身 |
-| 1.28 | 只保留 `clashgate update`，去掉 `update core` / `update self` |
-| 1.29 | 删除 CLI 的 `passwd`、`reset-secret`、`cert`；卸载只负责退出集群，不再关闭防火墙端口 |
-| 1.30 | 安装过程检查步骤默认只打标题，失败才输出细节；结尾摘要缩短 |
-| 1.31 | 安装/更新预下载地理数据；校验临时目录链接地理文件；面板补齐缺失文件；Reality SNI 随机池去掉 yahoo |
+| 1.24 | Installer and CLI languages zh/en/ru; added `clashgate lang` |
+| 1.25 | `certctl` output follows the CLI language; when the panel invokes it, output is fixed to Chinese so it can be parsed |
+| 1.26 | README 「常用命令」 (Common commands) rewritten as grouped tables |
+| 1.27 | Removed 「系统要求」 (System requirements); 「一键安装」 (One-click install) keeps only the command itself |
+| 1.28 | Only `clashgate update` remains; dropped `update core` / `update self` |
+| 1.29 | Removed the CLI `passwd`, `reset-secret`, and `cert` commands; uninstall only leaves the cluster and no longer closes firewall ports |
+| 1.30 | Install checks print only the step header unless a check fails; the final summary is shorter |
+| 1.31 | Pre-download geo data on install/update; the validation temp dir links geo files; the panel fills in missing files; yahoo removed from the Reality SNI pool |
 
-下一版本：**1.32**。
+Next version: **1.32**.
 
 ---
 
-## 9. 暂缓 / 不要做
+## 9. Deferred / do not
 
-- **AI 配置助手**：已暂缓，除非负责人明确要求，否则不要做。
-- **根目录 README / README.en.md 禁止提及历史测试仓库或其它内部仓库名。** 代码里对旧测试仓库安装有兼容逻辑，不要删，但不要写进用户文档。
-- 不要主动加功能、加选项、加子命令或扩大职责。没被要求的事不要做。
-- 不要改用户文档的语气去“讲清楚原理”；保持短。本交接文档是给智能体的，不要把其中的流程说明搬进 README。
-- 本仓库是公开的：不要把私人服务器地址、域名、密码、账号或内部工具细节写进仓库。
+- **AI config assistant:** deferred. Do not build it unless the owner explicitly asks.
+- **The root `README.md` / `README.en.md` must not mention the historical test repository or any other internal repository name.** Compatibility logic for older installs from that repository exists in the code; do not delete it, but do not put it in user docs.
+- Do not add features, options, subcommands, or extra scope on your own. Do not do work that was not requested.
+- Do not rewrite user docs to “explain the design”; keep them short. This handoff guide is for agents; do not copy its process notes into the README.
+- This repository is public: do not put private server addresses, domains, passwords, accounts, or internal tooling details in the repo.
