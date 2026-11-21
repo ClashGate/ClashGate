@@ -1,0 +1,447 @@
+/* ClashGate "Airmail" skin — international airmail, sorting offices and postmarks.
+   Active only on <html data-theme="airmail">. The default skin stays untouched.
+   Brand blue #1d6fe0 stays the action colour; airmail red carries danger and
+   the envelope stripe; gold carries warnings. All decoration is pure CSS. */
+
+/* Self-hosted faces for the Latin UI (Cyrillic falls back to IBM Plex Sans, CJK to the system stack). */
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/public-sans/files/public-sans-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/public-sans/files/public-sans-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/public-sans/files/public-sans-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/public-sans/files/public-sans-latin-700-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/public-sans/files/public-sans-latin-800-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spline Sans Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/spline-sans-mono/files/spline-sans-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spline Sans Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/spline-sans-mono/files/spline-sans-mono-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spline Sans Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../node_modules/@fontsource/spline-sans-mono/files/spline-sans-mono-latin-600-normal.woff2") format("woff2");
+}
+
+html[data-theme="airmail"] {
+  /* Paper-and-ink neutral ramp (replaces the default slate). */
+  --color-slate-50: #f5f7fa;
+  --color-slate-100: #edf0f5;
+  --color-slate-200: #dfe4ec;
+  --color-slate-300: #c9d1dd;
+  --color-slate-400: #8d99aa;
+  --color-slate-500: #64707f;
+  --color-slate-600: #4d5967;
+  --color-slate-700: #394454;
+  --color-slate-800: #232f3d;
+  --color-slate-900: #16202c;
+  --color-slate-950: #0d141d;
+  /* Airmail red for danger. */
+  --color-rose-50: #fdf1ef;
+  --color-rose-100: #fbe2de;
+  --color-rose-200: #f3c2bb;
+  --color-rose-300: #e89b90;
+  --color-rose-500: #d0412f;
+  --color-rose-600: #c0392b;
+  --color-rose-700: #9c2c20;
+  --color-rose-950: #4a120c;
+  /* Postmark gold for warnings. */
+  --color-amber-50: #fdf8ec;
+  --color-amber-100: #f8ecd3;
+  --color-amber-200: #f0d9a8;
+  --color-amber-300: #e7c274;
+  --color-amber-400: #dba844;
+  --color-amber-500: #c18a2c;
+  --color-amber-700: #8a5a00;
+  --color-amber-800: #6b4600;
+  --color-amber-900: #4d3200;
+  --color-amber-950: #2b1c00;
+  /* Success green for live/ok states. */
+  --color-teal-50: #eaf5ef;
+  --color-teal-500: #1f7a4d;
+  --color-teal-600: #17613c;
+  --color-green-600: #1f7a4d;
+  /* Sky/violet used by cluster + external rules: keep them quiet ink cousins. */
+  --color-sky-50: #eef4fb;
+  --color-sky-100: #dce9f6;
+  --color-sky-200: #c3d8ee;
+  --color-sky-400: #5b8fc6;
+  --color-sky-700: #1f5f9e;
+  --color-sky-800: #17497c;
+  --color-sky-900: #123a63;
+  --color-violet-50: #f3f0f9;
+  --color-violet-200: #ddd2ee;
+  --color-violet-700: #5b4a8a;
+
+  --font-sans: "Public Sans", "IBM Plex Sans", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  --cgx-blue: #1d6fe0;
+  --cgx-blue-deep: #1558b8;
+  --cgx-red: #c0392b;
+  --cgx-gold: #b7791f;
+  --cgx-ink: #16202c;
+  --cgx-paper: #f5f7fa;
+  --cgx-paper-2: #eef1f6;
+  --cgx-rule: #dfe4ec;
+}
+
+html[data-theme="airmail"] body {
+  background-color: var(--cgx-paper);
+  background-image:
+    radial-gradient(1000px 480px at 100% -6%, rgba(29, 111, 224, 0.07), transparent 62%),
+    radial-gradient(820px 440px at -4% 0%, rgba(192, 57, 43, 0.05), transparent 58%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  background-attachment: fixed;
+  color: var(--cgx-ink);
+}
+
+html[data-theme="airmail"] ::selection {
+  background-color: rgba(29, 111, 224, 0.2);
+  color: #0f3d7a;
+}
+
+/* ---- typography: a grotesque workhorse with a mono for codes/numbers ---- */
+html[data-theme="airmail"] .cg-wordmark,
+html[data-theme="airmail"] .cg-page-title,
+html[data-theme="airmail"] .cg-app h2 {
+  font-family: "Public Sans", "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+html[data-theme="airmail"] .cg-wordmark {
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+html[data-theme="airmail"] .cg-page-title {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+html[data-theme="airmail"] .cg-app h2 {
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+html[data-theme="airmail"] .cg-kicker,
+html[data-theme="airmail"] .cg-nav-label,
+html[data-theme="airmail"] .cg-side-foot,
+html[data-theme="airmail"] .cg-brand-sub {
+  font-family: "Spline Sans Mono", "IBM Plex Mono", ui-monospace, monospace;
+}
+html[data-theme="airmail"] code,
+html[data-theme="airmail"] pre,
+html[data-theme="airmail"] .font-mono,
+html[data-theme="airmail"] textarea.font-mono {
+  font-family: "Spline Sans Mono", ui-monospace, "IBM Plex Mono", Menlo, Consolas, monospace;
+}
+
+/* ---- shell ---- */
+html[data-theme="airmail"] .cg-side {
+  background: #fff;
+  border-inline-end: 1px solid var(--cgx-rule);
+  position: relative;
+}
+/* Sorting-directory serial numbers on the side nav. */
+html[data-theme="airmail"] .cg-side nav {
+  counter-reset: cgdir;
+}
+html[data-theme="airmail"] .cg-side nav .cg-nav::before {
+  counter-increment: cgdir;
+  content: counter(cgdir, decimal-leading-zero);
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: #9aa5b5;
+  width: 18px;
+  flex: none;
+}
+html[data-theme="airmail"] .cg-side nav .cg-nav.is-active::before {
+  color: #ffffff;
+  opacity: 0.8;
+}
+html[data-theme="airmail"] .cg-side nav .cg-nav {
+  font-family: "Public Sans", "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+html[data-theme="airmail"] .cg-logo {
+  border-radius: 10px;
+}
+
+html[data-theme="airmail"] .cg-top {
+  background: rgba(255, 255, 255, 0.82);
+  -webkit-backdrop-filter: saturate(1.3) blur(12px);
+  backdrop-filter: saturate(1.3) blur(12px);
+  border-bottom: 1px solid var(--cgx-rule);
+  box-shadow: 0 1px 0 #fff inset, 0 10px 26px -26px rgba(22, 48, 86, 0.5);
+}
+
+/* ---- cards: white paper, hairline rules, a slight offset depth ---- */
+html[data-theme="airmail"] .cg-surface,
+html[data-theme="airmail"] .cg-surface-emerald {
+  background-color: #ffffff;
+  border: 1px solid var(--cgx-rule);
+  box-shadow:
+    0 1px 1px rgba(22, 32, 44, 0.03),
+    0 14px 30px -28px rgba(22, 48, 86, 0.28);
+}
+html[data-theme="airmail"] .cg-surface-emerald {
+  background-image: linear-gradient(180deg, rgba(29, 111, 224, 0.04), transparent 44%);
+}
+html[data-theme="airmail"] .cg-feature {
+  background-image:
+    linear-gradient(135deg, rgba(29, 111, 224, 0.05), transparent 48%),
+    linear-gradient(#ffffff, #ffffff);
+}
+
+/* ---- buttons & inputs ---- */
+html[data-theme="airmail"] .cg-btn-primary {
+  background: var(--cgx-blue);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 1px 2px rgba(21, 88, 184, 0.22),
+    0 8px 18px -12px rgba(29, 111, 224, 0.85);
+}
+html[data-theme="airmail"] .cg-btn-primary:hover:not(:disabled) {
+  background: var(--cgx-blue-deep);
+}
+html[data-theme="airmail"] .cg-btn-secondary {
+  background: #fff;
+  border: 1px solid var(--cgx-rule);
+  color: var(--cgx-ink);
+}
+html[data-theme="airmail"] .cg-btn-secondary:hover:not(:disabled) {
+  background: #f5f7fa;
+  border-color: #c9d1dd;
+}
+html[data-theme="airmail"] .cg-btn-danger {
+  background: #fff;
+  border: 1px solid #f3c2bb;
+  color: var(--cgx-red);
+}
+html[data-theme="airmail"] .cg-btn-danger:hover:not(:disabled) {
+  background: #fdf1ef;
+}
+
+html[data-theme="airmail"] .cg-input {
+  background-color: #fff;
+  border-color: #c9d1dd;
+}
+html[data-theme="airmail"] .cg-input:hover:not(:focus):not(:disabled) {
+  border-color: #a9b5c5;
+}
+html[data-theme="airmail"] .cg-input:focus {
+  border-color: var(--cgx-blue);
+  box-shadow: 0 0 0 3px rgba(29, 111, 224, 0.16);
+}
+html[data-theme="airmail"] .cg-input::placeholder {
+  color: #9aa5b5;
+}
+
+/* ---- nav / switch / tools ---- */
+html[data-theme="airmail"] .cg-nav.is-active,
+html[data-theme="airmail"] .cg-mobile-nav .cg-nav.is-active {
+  background: var(--cgx-blue);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 6px 14px -8px rgba(29, 111, 224, 0.7);
+}
+html[data-theme="airmail"] .cg-nav:hover {
+  background: rgba(29, 111, 224, 0.07);
+  color: var(--cgx-ink);
+}
+html[data-theme="airmail"] .cg-nav.is-active:hover { background: var(--cgx-blue); color: #fff; }
+html[data-theme="airmail"] .cg-nav.is-locked:hover { background: transparent; color: #a3adbb; }
+html[data-theme="airmail"] .cg-switch.is-on { background: var(--cgx-blue); box-shadow: inset 0 1px 2px rgba(21, 88, 184, 0.4); }
+html[data-theme="airmail"] .cg-tool.is-update {
+  background: var(--cgx-blue);
+  color: #fff;
+  border-color: var(--cgx-blue-deep);
+}
+html[data-theme="airmail"] .cg-lang-btn[aria-expanded="true"],
+html[data-theme="airmail"] .cg-lang-item.is-active {
+  border-color: #c3d8ee;
+  background: #eef4fb;
+  color: var(--cgx-blue-deep);
+}
+
+/* ---- status rail: a dispatch ledger with an airmail header ---- */
+html[data-theme="airmail"] .cg-rail {
+  background: #fff;
+  border: 1px solid var(--cgx-rule);
+  box-shadow: 0 1px 1px rgba(22, 32, 44, 0.03), 0 12px 28px -26px rgba(22, 48, 86, 0.3);
+  position: relative;
+  padding-top: 6px;
+}
+html[data-theme="airmail"] .cg-rail::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 6px;
+  border-radius: 13px 13px 0 0;
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--cgx-blue) 0 9px,
+    #fff 9px 13px,
+    var(--cgx-red) 13px 22px,
+    #fff 22px 26px
+  );
+}
+html[data-theme="airmail"] .cg-rail-label {
+  font-family: "Spline Sans Mono", monospace;
+  letter-spacing: 0.06em;
+  color: #64707f;
+}
+
+/* ---- the subscription envelope is the centrepiece ---- */
+html[data-theme="airmail"] #sub-card {
+  position: relative;
+  overflow: hidden;
+}
+html[data-theme="airmail"] #sub-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 7px;
+  border-radius: 15px 15px 0 0;
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--cgx-blue) 0 10px,
+    #fff 10px 14px,
+    var(--cgx-red) 14px 24px,
+    #fff 24px 28px
+  );
+}
+html[data-theme="airmail"] #sub-card::after {
+  content: "";
+  position: absolute;
+  bottom: 14px;
+  inset-inline-end: 16px;
+  width: 72px;
+  height: 72px;
+  border: 2px solid rgba(29, 111, 224, 0.22);
+  border-radius: 50%;
+  transform: rotate(-9deg);
+  box-shadow:
+    inset 0 0 0 3px rgba(29, 111, 224, 0.08),
+    inset 0 0 0 7px rgba(192, 57, 43, 0.07);
+  pointer-events: none;
+  opacity: 0.7;
+}
+html[data-theme="airmail"] #sub-card > * { position: relative; z-index: 1; }
+
+/* Add-node form reads like a customs declaration: a dashed inner rule. */
+html[data-theme="airmail"] .cg-home-add {
+  box-shadow:
+    inset 0 0 0 1px #fff,
+    inset 0 0 0 2px #dfe4ec,
+    0 14px 30px -28px rgba(22, 48, 86, 0.28);
+}
+
+/* ---- node list: parcel serial numbers ---- */
+html[data-theme="airmail"] .cg-home-in .divide-y {
+  counter-reset: cgparcel;
+}
+html[data-theme="airmail"] .cg-home-in .divide-y > div {
+  position: relative;
+}
+html[data-theme="airmail"] .cg-home-in .divide-y > div::before {
+  counter-increment: cgparcel;
+  content: "CG-" counter(cgparcel, decimal-leading-zero);
+  font-family: "Spline Sans Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #8d99aa;
+  display: inline-block;
+  margin-inline-end: 10px;
+  padding-top: 2px;
+  flex: none;
+}
+
+/* ---- login card: a posted envelope ---- */
+html[data-theme="airmail"] .cg-login-card {
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--cgx-rule);
+  box-shadow: 0 24px 50px -32px rgba(22, 48, 86, 0.4);
+  overflow: hidden;
+}
+html[data-theme="airmail"] .cg-login-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 8px;
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--cgx-blue) 0 11px,
+    #fff 11px 15px,
+    var(--cgx-red) 15px 26px,
+    #fff 26px 30px
+  );
+}
+html[data-theme="airmail"] .cg-login-card::after {
+  content: none;
+}
+
+/* ---- motion: one authored entrance, a stamp settle; status dot breathes ---- */
+@keyframes cgAirmailSettle {
+  from { opacity: 0; transform: translateY(7px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+html[data-theme="airmail"] .cg-surface,
+html[data-theme="airmail"] .cg-surface-emerald,
+html[data-theme="airmail"] .cg-rail {
+  animation: cgAirmailSettle 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+html[data-theme="airmail"] #sub-card { animation-delay: 40ms; }
+html[data-theme="airmail"] .cg-home-add { animation-delay: 80ms; }
+
+@keyframes cgAirmailPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(31, 122, 77, 0.35); }
+  50% { box-shadow: 0 0 0 5px rgba(31, 122, 77, 0); }
+}
+html[data-theme="airmail"] .cg-live.is-ok { animation: cgAirmailPulse 2.4s ease-out infinite; }
+html[data-theme="airmail"] .cg-live.is-bad { animation: cgAirmailPulse 2.4s ease-out infinite; box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.35); }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="airmail"] .cg-surface,
+  html[data-theme="airmail"] .cg-surface-emerald,
+  html[data-theme="airmail"] .cg-rail,
+  html[data-theme="airmail"] .cg-live.is-ok,
+  html[data-theme="airmail"] .cg-live.is-bad {
+    animation: none;
+  }
+}

@@ -6,11 +6,11 @@
     <title>ClashGate</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="shortcut icon" href="/favicon.ico" />
-    <script>try{if(localStorage.getItem('clashgate_theme')==='christmas')document.documentElement.dataset.theme='christmas'}catch(e){}</script>
+    <script>try{var _ct=localStorage.getItem('clashgate_theme');if(_ct==='christmas'||_ct==='airmail'||_ct==='transit'||_ct==='gate')document.documentElement.dataset.theme=_ct}catch(e){}</script>
     <script type="module" crossorigin src="/assets/app.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/style.css">
   </head>
   <body class="antialiased">
-    <div id="app"></div>
+    <div id="app"></div>
   </body>
 </html>

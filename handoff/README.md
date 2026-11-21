@@ -1,6 +1,6 @@
 # ClashGate Agent Handoff Guide
 
-This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.31**. Next version number: **1.32**. Public repository: https://github.com/ClashGate/ClashGate
+This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.32**. Next version number: **1.33**. Public repository: https://github.com/ClashGate/ClashGate
 
 ---
 
@@ -140,7 +140,7 @@ The public default branch is `main` (stable). `test` is the test channel.
 2. The project owner verifies on a real machine (the owner clicks 「检查更新」 (Check for updates) in the panel).
 3. **Push to `main` only after the owner explicitly agrees.** A version that fails acceptance is retired and must not be reused.
 
-Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.31`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.32`, `1.33`, and so on.
+Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.32`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.33`, `1.34`, and so on.
 
 Commit messages are in English. **Never force push.**
 
@@ -233,8 +233,9 @@ Tests **must not** re-issue certificates against the Let's Encrypt production en
 | 1.29 | Removed the CLI `passwd`, `reset-secret`, and `cert` commands; uninstall only leaves the cluster and no longer closes firewall ports |
 | 1.30 | Install checks print only the step header unless a check fails; the final summary is shorter |
 | 1.31 | Pre-download geo data on install/update; the validation temp dir links geo files; the panel fills in missing files; yahoo removed from the Reality SNI pool |
+| 1.32 | Added three opt-in panel skins (Airmail, Metro map, Departures) under 设置 → 皮肤; the default skin is unchanged |
 
-Next version: **1.32**.
+Next version: **1.33**.
 
 ---
 
