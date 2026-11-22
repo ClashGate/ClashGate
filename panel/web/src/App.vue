@@ -406,7 +406,7 @@ const {
             {{ clusterTask.stage || t('正在准备…') }}
           </p>
           <div class="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
-            <span>{{ t('需要联系其他面板并重载内核，可能要一分钟左右。') }}</span>
+            <span>{{ t('要逐台联系其他面板，每台更新一次配置，一般一分钟以内。') }}</span>
             <span class="shrink-0 tabular-nums">{{ t('{s} 秒', { s: clusterTask.elapsed }) }}</span>
           </div>
         </div>

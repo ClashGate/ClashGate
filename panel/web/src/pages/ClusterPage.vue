@@ -139,6 +139,7 @@ const {
   listSep,
   syncCluster,
   leaveCluster,
+  dismissPending,
   loadFileInto,
   fillCurrentInboundsToConverter,
   convertConfigFormat,
@@ -193,9 +194,6 @@ const {
 
 <template>
 <div class="space-y-4">
-          <div v-if="state.custom_config_mode" class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-4 py-3 text-xs text-emerald-900 leading-relaxed">
-            {{ t('自定义服务端：集群成员会加入配置的 proxies，请在自己的 proxy-groups 中引用（例如 include-all: true）。') }}
-          </div>
           <div class="space-y-4">
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
               <div class="space-y-4 min-w-0">
@@ -277,7 +275,7 @@ const {
                         :class="clusterTouched.password && clusterPwErr ? 'border-rose-300' : 'border-slate-200'"
                       />
                       <p v-if="clusterTouched.password && clusterPwErr" class="text-xs text-rose-600 mt-1">{{ clusterPwErr }}</p>
-                      <p v-else class="text-xs text-slate-500 mt-1">{{ t('密码只用这一次，不会保存在任何一台面板上。') }}</p>
+                      <p v-else class="text-xs text-slate-500 mt-1">{{ t('密码只用这一次，不会保存在任何一台面板上；以后改面板密码也不影响已有的互联。') }}</p>
                     </div>
                     <button
                       type="submit"
@@ -344,13 +342,22 @@ const {
                         class="h-8 px-3 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer shrink-0"
                       >{{ busyKey === `cl-rm-${m.id}` ? t('移除中…') : t('移除') }}</button>
                     </div>
-                    <div v-for="p in state.cluster.pending" :key="'p-' + p.url + p.name" class="p-4 space-y-1">
-                      <div class="flex items-center gap-2 flex-wrap">
-                        <span class="font-bold text-sm text-slate-900 cg-wrap" dir="auto">{{ p.name }}</span>
-                        <span class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-slate-100 text-slate-700 border border-slate-200">{{ t('等待互联') }}</span>
+                    <div v-for="p in state.cluster.pending" :key="'p-' + p.id" class="p-4 flex items-center justify-between gap-3">
+                      <div class="space-y-1 min-w-0 flex-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="font-bold text-sm text-slate-900 cg-wrap" dir="auto">{{ p.name }}</span>
+                          <span class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-slate-100 text-slate-700 border border-slate-200">{{ t('等待互联') }}</span>
+                        </div>
+                        <div class="text-xs text-slate-500 font-mono cg-wrap" dir="ltr">{{ p.url }}</div>
+                        <p v-if="p.error" class="text-xs text-amber-700 cg-wrap">{{ p.error }}</p>
                       </div>
-                      <div class="text-xs text-slate-500 font-mono cg-wrap" dir="ltr">{{ p.url }}</div>
-                      <p v-if="p.error" class="text-xs text-amber-700 cg-wrap">{{ p.error }}</p>
+                      <button
+                        type="button"
+                        :disabled="!!busyKey"
+                        @click="dismissPending(p)"
+                        :title="t('只是不再显示这一条；下次点「检查」时还会再试')"
+                        class="h-8 px-3 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer shrink-0"
+                      >{{ t('忽略') }}</button>
                     </div>
                   </div>
                   <div v-if="state.cluster.members.length" class="flex justify-end">

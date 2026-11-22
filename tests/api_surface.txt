@@ -19,6 +19,7 @@ CUSTOM_CONF
 CUSTOM_SAVED
 ClusterError
 ClusterRemoteError
+ClusterTimeout
 DEFAULT_NODE_NAMES
 DNS_IPV6_ONLY
 ENV_FILE
@@ -88,6 +89,7 @@ UPGRADE_STATUS_JSON
 VERSION
 _CERT_FILE_EXT
 _CERT_SECTIONS
+_CLUSTER_BATCH
 _CLUSTER_OP_LOCK
 _CLUSTER_PORT_HOLD
 _CLUSTER_TASK
@@ -115,6 +117,7 @@ _TRACKED_DRAFT_FILES
 _WG_KEY_RE
 _all_tracked_draft_files
 _apply_auto_update
+_batching
 _beginner_routing_state
 _blank_update_slot
 _cf_json
@@ -153,6 +156,7 @@ _openssl
 _p256_keypair_b64
 _parse_node
 _parse_nodes_tsv
+_prune_pending
 _read_frag
 _reconstruct_draft_from_live_conf
 _remote_error
@@ -188,6 +192,7 @@ check_manual_cert
 check_panel_update
 check_reality_dest
 clear_pending_reload
+cluster_batch
 cluster_call
 cluster_hello
 cluster_http
@@ -197,6 +202,7 @@ cluster_leave_all
 cluster_listener_from_link
 cluster_members_view
 cluster_pair
+cluster_pending_id
 cluster_ports
 cluster_proxy_from_link
 cluster_proxy_names

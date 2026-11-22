@@ -83,7 +83,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -379,6 +379,198 @@ class ClusterTest(unittest.TestCase):
                 "out": {"server": "tokyo.example.com", "port": 31000, "uuid": "11111111-2222-4333-8444-555555555555",
                         "encryption": enc_out}}
         return {"instance": "c" * 32, "links": [link], "pending": [], "removed": {}}, dec_in, enc_out
+
+    def _two_members(self):
+        st, _, _ = self._state()
+        a = st["links"][0]
+        b = json.loads(json.dumps(a))
+        b.update(id="def456", instance="b" * 32, name="大阪", url="https://osaka.example.com:8443")
+        b["in"]["port"] = 31002
+        st["links"].append(b)
+        return st, a, b
+
+    def test_waiting_entries_go_with_the_members_that_reported_them(self):
+        """1.40: a 等待互联 entry stayed forever after the member that reported it was removed (and had
+        no button). It now goes with those members, and the page can dismiss it."""
+        st, a, b = self._two_members()
+        st["pending"] = [
+            {"instance": "e" * 32, "name": "硅谷", "url": "https://us.example.com:29535", "error": "x", "via": [a["instance"]]},
+            {"instance": "f" * 32, "name": "旧", "url": "", "error": "x"},   # written by 1.39 (no via)
+        ]
+        P.save_cluster(st)
+        self.assertEqual([p["name"] for p in P.load_cluster()["pending"]], ["硅谷", "旧"])
+        with mock.patch.dict(P._cluster_commit.__globals__, {"apply_cluster_live": lambda *a, **k: None}):
+            P._drop_links({a["instance"]})
+        self.assertEqual([p["name"] for p in P.load_cluster()["pending"]], ["旧"])   # only A knew 硅谷
+        with mock.patch.dict(P._cluster_commit.__globals__, {"apply_cluster_live": lambda *a, **k: None}):
+            P._drop_links({b["instance"]})
+        self.assertEqual(P.load_cluster()["pending"], [])   # no members left: nothing is waiting
+        self.assertEqual(P.public_cluster_state(False)["pending"], [])
+        # a file that still lists them (written before 1.40) shows nothing either
+        st["links"] = []
+        raw = {"instance": st["instance"], "links": [], "pending": st["pending"], "removed": {}}
+        with open(P.CLUSTER_JSON, "w") as f:
+            json.dump(raw, f)
+        self.assertEqual(P.load_cluster()["pending"], [])
+        # 检查 with no members says so and cleans the file too (the page showed 等待互联 next to that message)
+        h = object.__new__(P.Panel)
+        h.headers = {}
+        got = {}
+        h.respond_mutation = lambda s, msg, ok=True, detail="": got.update(ok=ok, msg=msg)
+        h.do_cluster_sync({}, {})
+        self.assertEqual(got, {"ok": True, "msg": "集群里还没有其他面板"})
+        self.assertEqual(json.loads(read(P.CLUSTER_JSON))["pending"], [])
+
+    def test_dismiss_a_waiting_entry(self):
+        st, a, b = self._two_members()
+        st["pending"] = [{"instance": "e" * 32, "name": "硅谷", "url": "https://us.example.com:29535", "error": "x",
+                          "via": [a["instance"]]}]
+        P.save_cluster(st)
+        pub = P.public_cluster_state(False)["pending"]
+        self.assertEqual(len(pub), 1)
+        self.assertNotIn("e" * 32, json.dumps(pub))   # the page gets an id, not the panel's instance id
+        h = object.__new__(P.Panel)
+        got = {}
+        h.respond_mutation = lambda s, msg, ok=True, detail="": got.update(ok=ok, msg=msg)
+        h.do_cluster_dismiss({}, {"id": pub[0]["id"]})
+        self.assertTrue(got["ok"], got)
+        self.assertIn("硅谷", got["msg"])
+        self.assertEqual(P.load_cluster()["pending"], [])
+        self.assertEqual(len(P.load_cluster()["links"]), 2)   # members untouched
+        h.do_cluster_dismiss({}, {"id": pub[0]["id"]})
+        self.assertEqual(got, {"ok": True, "msg": "这条等待互联的记录已经不在了"})
+
+    def test_one_reload_per_operation(self):
+        """1.40: adding a panel reloaded this core once per member it linked with; now once at the end."""
+        st, a, b = self._two_members()
+        st["links"] = [a]
+        P.save_cluster(st)
+        g = P._cluster_commit.__globals__
+        calls = []
+        with mock.patch.dict(g, {"apply_cluster_live": lambda *x, **k: calls.append(1)}):
+            with P.cluster_batch():
+                P._cluster_commit(lambda s: s["links"].append(json.loads(json.dumps(b))))
+                P._cluster_commit(lambda s: s["links"][0].update(name="东京-2"))
+                with P.cluster_batch():   # nested: still one reload
+                    P._cluster_commit(lambda s: None)
+                self.assertEqual(calls, [])
+                self.assertEqual(len(P.load_cluster()["links"]), 2)   # saved as they are made
+            self.assertEqual(calls, [1])
+            with P.cluster_batch():   # nothing changed: no reload
+                pass
+            self.assertEqual(calls, [1])
+        # Outside a batch every change still applies at once.
+        with mock.patch.dict(g, {"apply_cluster_live": lambda *x, **k: calls.append(2)}):
+            P._cluster_commit(lambda s: None)
+        self.assertEqual(calls, [1, 2])
+
+    def test_failed_batch_reload_undoes_its_links(self):
+        st, a, b = self._two_members()
+        st["links"] = [a]
+        P.save_cluster(st)
+        before = read(P.CLUSTER_JSON)
+        g = P._cluster_commit.__globals__
+        told = []
+
+        def bad_apply(*x, **k):
+            raise RuntimeError("配置校验失败（mihomo -t）：boom")
+
+        def fake_http(base, path, data=None, timeout=15):
+            told.append((base, path, dict(data or {})))
+            return 200, {"ok": True}, "clashgate"
+
+        with mock.patch.dict(g, {"apply_cluster_live": bad_apply, "cluster_http": fake_http}):
+            with self.assertRaises(P.ClusterError) as cm:
+                with P.cluster_batch():
+                    P._cluster_commit(lambda s: s["links"].append(json.loads(json.dumps(b))))
+                    P._CLUSTER_BATCH.state["new"].append(("https://osaka.example.com:8443", "c" * 32, "key-b"))
+        self.assertIn("已撤销", str(cm.exception))
+        self.assertEqual(read(P.CLUSTER_JSON), before)
+        self.assertEqual(told, [("https://osaka.example.com:8443", "/api/cluster/leave", {"instance": "c" * 32, "key": "key-b"})])
+        self.assertFalse(P._batching())
+
+    def _sync_with(self, introduce):
+        """cluster_sync where both members know 硅谷 (not linked here); introduce(link) answers for each."""
+        st, a, b = self._two_members()
+        P.save_cluster(st)
+        g = P.cluster_sync.__globals__
+        paired = []
+        us = {"instance": "e" * 32, "name": "硅谷", "url": "https://us.example.com:29535"}
+
+        def fake_call(l, path, extra=None, timeout=30, fallback=""):
+            if path == "/api/cluster/status":
+                others = [{"instance": x["instance"], "name": x["name"]} for x in (a, b) if x["instance"] != l["instance"]]
+                return {"ok": True, "name": l["name"], "members": [dict(us)] + others}
+            if path == "/api/cluster/introduce":
+                return introduce(l)
+            return {"ok": True}
+
+        def fake_pair(base, auth, expect_instance=""):
+            paired.append((base, auth, expect_instance))
+            def add(s):
+                l = json.loads(json.dumps(b))
+                l.update(id="aaa999", instance=expect_instance, name="硅谷", url=base)
+                l["in"]["port"] = 31003
+                s["links"].append(l)
+            s = P.load_cluster()
+            add(s)
+            P.save_cluster(s)
+            return s["links"][-1], []
+
+        with mock.patch.dict(g, {"cluster_call": fake_call, "cluster_pair": fake_pair,
+                                 "apply_cluster_live": lambda *x, **k: None}):
+            rep = P.cluster_sync()
+        return rep, paired
+
+    def test_sync_asks_the_next_member_when_one_cannot_reach_the_panel(self):
+        def introduce(l):
+            if l["name"] == "东京-1":
+                raise P.ClusterRemoteError("对方面板没有响应集群请求：连接对方面板超时，请检查地址、端口和对方防火墙",
+                                           "unreachable", "连接对方面板超时，请检查地址、端口和对方防火墙")
+            return {"ok": True, "ticket": "t-osaka", "url": "https://us.example.com:29535", "instance": "e" * 32}
+
+        rep, paired = self._sync_with(introduce)
+        self.assertEqual(rep["linked"], ["硅谷"])
+        self.assertEqual(paired, [("https://us.example.com:29535", {"ticket": "t-osaka"}, "e" * 32)])
+        self.assertEqual(P.load_cluster()["pending"], [])
+
+    def test_sync_names_the_members_that_cannot_reach_a_waiting_panel(self):
+        def introduce(l):
+            raise P.ClusterRemoteError("对方面板没有响应集群请求：连接对方面板超时，请检查地址、端口和对方防火墙",
+                                       "unreachable", "连接对方面板超时，请检查地址、端口和对方防火墙")
+
+        rep, paired = self._sync_with(introduce)
+        self.assertEqual((rep["linked"], paired, rep["failed"]), ([], [], ["硅谷"]))
+        (p,) = P.load_cluster()["pending"]
+        self.assertEqual(p["error"], "「东京-1、大阪」现在也连不上它：连接对方面板超时，请检查地址、端口和对方防火墙")
+        self.assertEqual(sorted(p["via"]), sorted(["a" * 32, "b" * 32]))
+
+    def test_ticket_request_retries_a_timeout_once(self):
+        st, a, b = self._two_members()
+        g = P.cluster_issue_ticket.__globals__
+        calls = []
+
+        def flaky(l, path, extra=None, timeout=30, fallback=""):
+            calls.append(dict(extra))
+            if len(calls) == 1:
+                raise P.ClusterTimeout("连接对方面板超时，请检查地址、端口和对方防火墙")
+            return {"ok": True}
+
+        with mock.patch.dict(g, {"cluster_call": flaky}):
+            ticket = P.cluster_issue_ticket(b, a)
+        self.assertTrue(ticket)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0], calls[1])   # the same ticket both times
+        calls.clear()
+
+        def down(l, path, extra=None, timeout=30, fallback=""):
+            calls.append(1)
+            raise P.ClusterTimeout("连接对方面板超时，请检查地址、端口和对方防火墙")
+
+        with mock.patch.dict(g, {"cluster_call": down}):
+            with self.assertRaises(P.ClusterTimeout):
+                P.cluster_issue_ticket(b, a)
+        self.assertEqual(len(calls), 2)   # one retry, not more
 
     def test_node_name_validation(self):
         for name in NODE_NAMES_OK:
