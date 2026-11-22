@@ -1,6 +1,6 @@
 # ClashGate Agent Handoff Guide
 
-This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.31**. Next version number: **1.32**. Public repository: https://github.com/ClashGate/ClashGate
+This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.36**. Next version number: **1.37**. Public repository: https://github.com/ClashGate/ClashGate
 
 ---
 
@@ -77,7 +77,7 @@ Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snel
 | `panel/cg_qr.py` | QR codes |
 | `panel/routing_mgr.py` | Server-side routing: `/etc/clashgate/routing/` + `routing.json`, assembled into the template |
 | `panel/i18n_en.py` | English translations of server API messages (source strings stay Chinese) |
-| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.31.0`) |
+| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.36.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
 | `panel/dist/` | **Committed build output.** After frontend changes, run `cd panel/web && npm ci && npm run build` and commit the `panel/dist` updates (CI checks `git diff --exit-code -- panel/dist`) |
 | `resources/server.yaml.tpl`, `resources/client.yaml.tpl` | Server / client config templates |
 | `resources/routing/` | Default routing groups (节点选择 / node select, 漏网之鱼 / final / unmatched) |
@@ -94,7 +94,7 @@ Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snel
 
 ---
 
-## 3. Current CLI commands (v1.31)
+## 3. Current CLI commands (v1.36)
 
 With no argument: opens the management menu if already installed, otherwise starts install. `clashgate help` lists every subcommand.
 
@@ -125,6 +125,8 @@ Hidden flags for development and testing (do not put these in user docs): `--dom
 - **Do not put “mihomo” in downstream names** (the user-visible product name is ClashGate). The subscription filename `mihomo.yaml` is allowed; the core binary, `mihomo.service`, and the core's home directory belong to the core itself and are out of scope.
 - **Never** put `skip-cert-verify` in issued client configs (generation strips the field; tests also check that sources must not contain `skip-cert-verify: true`).
 - **Do not add a CDN mode.**
+- **IPv6-only servers:** the installer prefers a public IPv4 and falls back to IPv6 (`SERVER_IP`). When `SERVER_IP` is IPv6, both `core.sh assemble_config` and the panel's `assemble_config()` rewrite `0.0.0.0` listeners / controller to `::` and replace the template's `dns:` block with `DNS_IPV6_ONLY` (system resolver, AAAA); the panel listens on `::`. Keep the two assemblers in sync. GitHub has no IPv6, so such servers need NAT64/DNS64 (or similar) to install.
+- **Firewall:** install and the panel only ever *open* ports in ufw / firewalld; nothing closes them (node deletion, cluster changes, uninstall).
 - Mihomo v1.19 uses `geoip.metadb` (do not rely only on the older `country.mmdb`). Install and `clashgate update` both call `ensure_geodata`, which pre-downloads `geoip.metadb`, `GeoSite.dat`, and `ASN.mmdb` into `/etc/clashgate` with system curl. Panel startup and `validate_config` also fill in any missing files.
 - When the panel or scripts run `mihomo -t`, they must **symlink** these geo files (and certs, ruleset, and similar) into the temporary directory. The core must not download them during validation (its built-in DNS may fail to resolve at that point).
 
@@ -140,7 +142,7 @@ The public default branch is `main` (stable). `test` is the test channel.
 2. The project owner verifies on a real machine (the owner clicks 「检查更新」 (Check for updates) in the panel).
 3. **Push to `main` only after the owner explicitly agrees.** A version that fails acceptance is retired and must not be reused.
 
-Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.31`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.32`, `1.33`, and so on.
+Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.36`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.37`, `1.38`, and so on.
 
 Commit messages are in English. **Never force push.**
 
@@ -233,8 +235,13 @@ Tests **must not** re-issue certificates against the Let's Encrypt production en
 | 1.29 | Removed the CLI `passwd`, `reset-secret`, and `cert` commands; uninstall only leaves the cluster and no longer closes firewall ports |
 | 1.30 | Install checks print only the step header unless a check fails; the final summary is shorter |
 | 1.31 | Pre-download geo data on install/update; the validation temp dir links geo files; the panel fills in missing files; yahoo removed from the Reality SNI pool |
+| 1.32 | Added three opt-in panel skins (Airmail, Metro map, Departures); rolled back in 1.34 |
+| 1.33 | Redesigned the opt-in skins (Bento, Console, Flow) and removed the duplicate copy button in the subscription QR modal; rolled back in 1.34 |
+| 1.34 | Reverts the opt-in panel skins to restore the 1.31 UI; keeps only the removal of the duplicate copy button in the subscription QR modal |
+| 1.35 | `clashgate update` keeps the live config while panel drafts are pending; the panel clears drafts that an older update already made live |
+| 1.36 | Node status counts only the core's own sockets; a manual inbound port held by another program is rejected; `/api/*` answers 401 when the session expired; certificate issue / mode switch runs as a background job the page polls (with elapsed time); `clashgate reset-sub` drops a pending panel link change; the CLI menu confirms link / password resets and reopens after `update`; the panel never closes firewall ports; an update that waited for panel drafts lands once they are applied or discarded; IPv6-only servers; 「应用配置」 asks first when nothing is pending; the global login cap spares sources that signed in before; `usePanel.js` split into per-page composables; home status rail redesigned (live nodes online + core uptime, pending count or 「已全部生效」, traffic split + speed between two refreshes, per-component update shortcuts); the page links `/assets/app.js` and `style.css` with a `?v=<content hash>` (cached for a year, ETag / 304 otherwise) instead of inlining ~450 kB on every visit |
 
-Next version: **1.32**.
+Next version: **1.37**.
 
 ---
 

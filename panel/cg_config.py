@@ -956,6 +956,20 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
         port = int(port_s)
         if port in used_ports(env):
             raise ValueError(f"端口 {port} 已被占用")
+        # Another program on this host: the apply would fail later with a bind error. Ports the
+        # running core still serves (e.g. a node deleted in this draft) are free once applied.
+        live_n, live_i = live_nodes_and_inbounds()
+        live_ports = {int(n["port"]) for n in live_n} | {int(i["port"]) for i in live_i}
+        if port not in live_ports:
+            for spec in sorted(ufw_specs_for_node(kind, port)):
+                stype = socket.SOCK_DGRAM if spec.endswith("/udp") else socket.SOCK_STREAM
+                probe = socket.socket(socket.AF_INET, stype)
+                try:
+                    probe.bind(("0.0.0.0", port))
+                except OSError:
+                    raise ValueError(f"端口 {port} 已被占用") from None
+                finally:
+                    probe.close()
     else:
         port = pick_port(env)
     existing_names = {n["name"] for n in read_nodes()} | {i["name"] for i in load_inbounds()}
@@ -1293,6 +1307,35 @@ def render_extra(inbounds: list) -> str:
     return "".join("  - " + json.dumps(i["listener"], ensure_ascii=False) + "\n" for i in inbounds)
 
 
+# IPv6-only servers (SERVER_IP is an IPv6 address): listen on "::" (both stacks) and resolve through
+# the system resolver with AAAA answers. The IPv4 public DNS in the template is unreachable there,
+# and the provider's resolver usually does DNS64, which also reaches IPv4-only sites through NAT64.
+# Keep in sync with scripts/lib/core.sh assemble_config.
+DNS_IPV6_ONLY = (
+    "dns:\n"
+    "  enable: true\n"
+    "  # 纯 IPv6 服务器：用本机系统 DNS 并解析 AAAA（服务商提供 DNS64 时也能访问只有 IPv4 的网站）\n"
+    "  ipv6: true\n"
+    "  enhanced-mode: redir-host\n"
+    "  respect-rules: false\n"
+    "  cache-algorithm: arc\n"
+    "  nameserver:\n"
+    "    - system\n"
+    "\n"
+)
+
+
+def ipv6_only(env: dict = None) -> bool:
+    env = read_env() if env is None else env
+    return ":" in (env.get("SERVER_IP") or "")
+
+
+def ipv6_listen(text: str) -> str:
+    """0.0.0.0 listeners / controller -> "::" (Linux binds both IPv6 and IPv4 there)."""
+    text = text.replace("listen: 0.0.0.0", 'listen: "::"').replace('"listen": "0.0.0.0"', '"listen": "::"')
+    return text.replace('external-controller-tls: "0.0.0.0:', 'external-controller-tls: "[::]:')
+
+
 def assemble_config() -> str:
     """Same logic as core.sh assemble_config: custom_config.yaml if active, else template."""
     if is_custom_config_mode():
@@ -1339,12 +1382,23 @@ def assemble_config() -> str:
         sys.stderr.write(f"routing seed warning: {e}\n")
     rp_block, pg_block, ru_block = get_routing().read_frags()
 
+    v6 = ipv6_only()
+    if v6:
+        ctrl, block = ipv6_listen(ctrl), ipv6_listen(block)
     out = []
+    skip_dns = False
     tpl_path = resolve_template_path("resources/server.yaml.tpl")
     with open(tpl_path) as f:
         for line in f:
             s = line.rstrip("\n")
-            if s == "@@CONTROLLER@@":
+            if skip_dns:
+                if not s or s[0].isspace():
+                    continue
+                skip_dns = False
+            if v6 and s == "dns:":
+                out.append(DNS_IPV6_ONLY)
+                skip_dns = True
+            elif s == "@@CONTROLLER@@":
                 out.append(ctrl)
             elif s == "@@PROXY_PROVIDERS@@":
                 if providers_block:
@@ -1823,30 +1877,23 @@ def collect_ufw_specs(nodes: list, inbounds: list) -> set:
 
 
 def sync_ufw(old_specs: set, new_specs: set):
-    """When ufw or firewalld is active, allow newly added node ports and delete removed node ports (including UDP)."""
-    env = read_env()
-    cport = get_controller_port(env)
-    protected = {"80/tcp", f"{env.get('PANEL_PORT') or 0}/tcp", f"{cport}/tcp"}
-    # Ports of current cluster links (cluster.json is saved before this runs) are never closed here.
-    protected |= cluster_ufw_specs()
+    """When ufw or firewalld is active, allow newly added node ports (including UDP).
+
+    Ports are never closed here: a removed node's port may also be one the user opened
+    for something else, so firewall rules are left as they are (same as uninstall)."""
+    added = sorted(set(new_specs) - set(old_specs))
+    if not added:
+        return
     rc, out = run([UFW_BIN, "status"])
     if rc == 0 and "Status: active" in out:
-        for spec in sorted(new_specs - old_specs):
+        for spec in added:
             run([UFW_BIN, "allow", spec])
-        for spec in sorted((old_specs - new_specs) - protected):
-            run([UFW_BIN, "delete", "allow", spec])
         return
     rc, _ = run([FIREWALL_CMD_BIN, "--state"])
     if rc == 0:
-        changed = False
-        for spec in sorted(new_specs - old_specs):
+        for spec in added:
             run([FIREWALL_CMD_BIN, "--permanent", f"--add-port={spec}"])
-            changed = True
-        for spec in sorted((old_specs - new_specs) - protected):
-            run([FIREWALL_CMD_BIN, "--permanent", f"--remove-port={spec}"])
-            changed = True
-        if changed:
-            run([FIREWALL_CMD_BIN, "--reload"])
+        run([FIREWALL_CMD_BIN, "--reload"])
 
 
 def sync_client_files():
@@ -2175,6 +2222,95 @@ def discard_pending_reload():
     (sys.modules.get("panel") or sys.modules["__main__"])._PENDING_UFW_BASELINE = None
     _RECENT_ADD_REQS.clear()
     clear_pending_reload()
+
+
+def _yaml_lines(text: str) -> list:
+    """Non-blank, right-stripped lines: core.sh's awk and assemble_config() differ only in blank lines."""
+    return [l.rstrip() for l in (text or "").splitlines() if l.strip()]
+
+
+def reconcile_pending_with_live() -> bool:
+    """Drop draft entries that are already running. Before 1.35, `clashgate update` (panel Upgrade,
+    auto-update) re-assembled config.yaml from the draft files and restarted the core, so the drafts
+    went live while the panel still listed them as pending and kept serving the pre-draft subscription.
+
+    Only acts when config.yaml was rewritten outside the panel (its digest no longer matches the
+    baseline) and now equals what the drafts assemble to. A pending API secret / subscription token
+    is not part of the fragments that path used, so it stays pending. Caller holds LOCK."""
+    st = load_pending_reload()
+    if not (st["items"] or st["sub_token"] or st["mihomo_secret"]):
+        return False
+    try:
+        with open(PENDING_BASELINE_JSON) as f:
+            snap = json.load(f)
+        with open(CONF) as f:
+            live = f.read()
+    except (OSError, ValueError):
+        return False
+    base_digest = snap.get("conf_sha256") if isinstance(snap, dict) else ""
+    if not base_digest or base_digest == _conf_digest():
+        return False
+    if _yaml_lines(assemble_config()) != _yaml_lines(live):
+        return False
+    old_specs = collect_ufw_specs(*live_nodes_and_inbounds())   # baseline view: what the firewall was set for
+    keep = [it for it in st["items"] if it.get("op") in ("reset-secret", "reset-sub")]
+    if keep or st["sub_token"] or st["mihomo_secret"]:
+        st["items"] = keep
+        save_pending_reload(st)
+        try:
+            os.remove(PENDING_BASELINE_JSON)
+        except OSError:
+            pass
+        _ensure_pending_baseline()   # new baseline = the config that is live now
+    else:
+        clear_pending_reload()
+    sync_client_files()
+    sync_ufw(old_specs, collect_ufw_specs(read_nodes(), load_inbounds()))
+    sys.stderr.write("pending drafts already live (config rebuilt outside the panel); pending list cleared\n")
+    return True
+
+
+def refresh_template_if_flagged() -> bool:
+    """`clashgate update` kept the live config.yaml because drafts were pending. Once no draft is
+    left (discarded, or cleared another way), assemble it with the new template now, so the update
+    still lands. Applying drafts assembles it anyway and only drops the flag. Caller holds LOCK."""
+    if not os.path.isfile(TEMPLATE_REFRESH_FLAG):
+        return False
+    st = load_pending_reload()
+    if st["items"] or st["sub_token"] or st["mihomo_secret"]:
+        return False
+    try:
+        os.remove(TEMPLATE_REFRESH_FLAG)
+    except OSError:
+        pass
+    backup = None
+    try:
+        with open(CONF) as f:
+            backup = f.read()
+    except OSError:
+        pass
+    try:
+        get_routing().ensure_seeded()
+        get_routing().regenerate_frags()
+        new_conf = assemble_config()
+    except Exception as e:
+        sys.stderr.write(f"template refresh skipped: {e}\n")
+        return False
+    if backup is not None and _yaml_lines(new_conf) == _yaml_lines(backup):
+        return False
+    atomic_write(CONF, new_conf, 0o640)
+    rc, out = validate_config()
+    if rc == 0:
+        rc, out = run([SYSTEMCTL, "reload", "mihomo"])
+    if rc != 0:
+        if backup is not None:
+            atomic_write(CONF, backup, 0o640)
+        run([SYSTEMCTL, "restart", "mihomo"])
+        sys.stderr.write(f"template refresh failed, kept the previous config: {(out or '')[-300:]}\n")
+        return False
+    sync_client_files()
+    wait_mihomo_ports()
+    return True
 
 
 def record_pending_reload(op: str, name: str = "", port: int = None, kind: str = "", detail: str = "",
@@ -2535,22 +2671,60 @@ def render_subscription(env: dict, live: bool = True) -> str:
     return "".join(out)
 
 
+_STATUS_CACHE = {}
+
+
+def _cached_by_file(kind: str, path: str, compute):
+    """compute() once per (kind, path, mtime, size): the state poll runs every 15 s per open page,
+    and `mihomo -v` / `openssl x509` only change when the binary / certificate file does."""
+    try:
+        st = os.stat(path)
+        key = (path, st.st_mtime_ns, st.st_size)
+    except OSError:
+        return compute()
+    hit = _STATUS_CACHE.get(kind)
+    if hit and hit[0] == key:
+        return hit[1]
+    val = compute()
+    if val:
+        _STATUS_CACHE[kind] = (key, val)
+    return val
+
+
 def mihomo_status() -> dict:
     rc, active = run([SYSTEMCTL, "is-active", "mihomo"])
     active = (active or "").strip().splitlines()[-1] if active else ""
     if rc == 127 or active not in STATE_ZH:
         active = "unknown"
-    _, show = run([SYSTEMCTL, "show", "mihomo", "-p", "ActiveEnterTimestamp,MainPID,NRestarts"])
+    _, show = run([SYSTEMCTL, "show", "mihomo", "-p", "ActiveEnterTimestamp,ActiveEnterTimestampMonotonic,MainPID,NRestarts"])
     props = dict(l.split("=", 1) for l in show.splitlines() if "=" in l)
-    _, ver = run([resolve_mihomo_bin(), "-v"])
-    _, ss = run(["ss", "-Hltun"])
-    listening = {int(m) for m in re.findall(r":(\d+)\s", ss + " ")}
+    uptime = None   # seconds since the core (re)started, for 「已运行」 on the home page
+    mono = (props.get("ActiveEnterTimestampMonotonic") or "").strip()
+    if active == "active" and mono.isdigit() and int(mono) > 0:
+        try:
+            with open("/proc/uptime") as f:
+                uptime = max(0, int(float(f.read().split()[0]) - int(mono) / 1e6))
+        except (OSError, ValueError, IndexError):
+            uptime = None
+    bin_path = resolve_mihomo_bin()
+    ver = _cached_by_file("version", bin_path, lambda: run([bin_path, "-v"])[1])
+    # Only sockets of the running core count: a port held by another program (or by another
+    # core on the same host) must not show a node as running.
+    _, ss = run(["ss", "-Hltunp"])
+    lines = (ss or "").splitlines()
+    pid = (props.get("MainPID") or "").strip()
+    if active in ("inactive", "failed"):
+        lines = []
+    elif pid.isdigit() and pid != "0" and any("users:(" in l for l in lines):
+        lines = [l for l in lines if f"pid={pid}," in l]
+    listening = {int(m) for m in re.findall(r":(\d+)\s", " ".join(l.split("users:(")[0] for l in lines) + " ")}
     cert = {}
     if certs_present():
         crt_file = (ROOT + CERT) if os.path.isfile(ROOT + CERT) else CERT
-        _, c = run(["openssl", "x509", "-noout", "-enddate", "-issuer", "-in", crt_file])
+        c = _cached_by_file("cert", crt_file,
+                            lambda: run(["openssl", "x509", "-noout", "-enddate", "-issuer", "-in", crt_file])[1])
         cert = {"info": c}
-    return {"active": active, "since": props.get("ActiveEnterTimestamp", ""),
+    return {"active": active, "since": props.get("ActiveEnterTimestamp", ""), "uptime": uptime,
             "pid": props.get("MainPID", ""), "restarts": props.get("NRestarts", ""),
             "version": ver.splitlines()[0] if ver else "", "listening": sorted(listening),
             "cert": cert}

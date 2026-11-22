@@ -112,6 +112,13 @@ const {
   submitCertMode,
   trafficDisplay,
   trafficDetail,
+  trafficUp,
+  trafficDown,
+  trafficRate,
+  coreTone,
+  nodesOnlineText,
+  uptimeText,
+  togglePendingDiff,
   updateCoreDirect,
   checkUpdateAndPrompt,
   statePollTimer,
@@ -119,6 +126,7 @@ const {
   applyServerState,
   formatFetchError,
   postAction,
+  applyConfig,
   copyRaw,
   pendingAddReqId,
   submitAddInbound,
@@ -199,6 +207,7 @@ const {
   masqueYamlNamed,
   addMasqueOutbound,
   retryMasque,
+  confirmUpdateCore,
 } = usePanel()
 </script>
 
@@ -530,13 +539,6 @@ const {
           <div class="flex items-center justify-end gap-2 pt-1">
             <button
               type="button"
-              @click="copyRaw(state.sub_url, 'sub-url-modal')"
-              class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
-            >
-              {{ copiedKey === 'sub-url-modal' ? t('已复制') : t('复制订阅链接') }}
-            </button>
-            <button
-              type="button"
               @click="showSubQrModal = false"
               class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition cursor-pointer"
             >
@@ -608,7 +610,7 @@ const {
           <button
             type="button"
             :disabled="busyKey === '/action/reload'"
-            @click="postAction('/action/reload', {}, '/action/reload')"
+            @click="applyConfig"
             class="px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50 transition cursor-pointer inline-flex items-center gap-1.5"
             :class="
               state.pending_reload_count > 0
@@ -619,7 +621,7 @@ const {
             <span>{{ busyKey === '/action/reload' ? t('应用中…') : t('应用配置') }}</span>
             <span
               v-if="state.pending_reload_count > 0"
-              class="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-amber-500 text-white tabular-nums"
+              class="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500 text-white tabular-nums"
             >
               {{ state.pending_reload_count }}
             </span>
@@ -673,64 +675,110 @@ const {
       <!-- Status strip: homepage only -->
       <div v-show="activeTab === 'inbounds'" class="space-y-3">
         <div class="cg-rail">
-          <div id="stat-card-status" class="cg-rail-cell">
-            <span class="cg-rail-label">{{ t('运行状态') }}</span>
-            <span class="cg-rail-value">
-              <span class="cg-state-pill">
-                <span
-                  class="cg-live"
-                  :class="state.status.state_cls === 'ok' ? 'is-ok' : state.status.state_cls === 'warn' ? 'is-warn' : 'is-bad'"
-                ></span>
-                <span>{{ t(state.status.state_txt || '未知') }}</span>
-              </span>
+          <!-- 运行状态: core state, nodes the core serves, uptime -->
+          <div id="stat-card-status" class="cg-rail-cell" :class="`tone-${coreTone}`">
+            <div class="cg-rail-head">
+              <span class="cg-rail-label">{{ t('运行状态') }}</span>
               <span
                 class="cg-stat-mode"
                 :title="state.custom_config_mode ? t('自定义服务端') : t('默认服务端模板')"
               >{{ state.custom_config_mode ? t('自定义') : t('默认模板') }}</span>
-            </span>
+            </div>
+            <div class="cg-rail-main">
+              <span class="cg-live" :class="`is-${coreTone}`"></span>
+              <span class="cg-rail-big">{{ t(state.status.state_txt || '未知') }}</span>
+            </div>
+            <div class="cg-rail-sub">
+              <span class="cg-rail-sub-key">{{ nodesOnlineText }}</span>
+              <span v-if="uptimeText" class="cg-rail-sep" aria-hidden="true"></span>
+              <span v-if="uptimeText" class="truncate">{{ uptimeText }}</span>
+            </div>
           </div>
 
+          <!-- 待应用: saved drafts that are not live yet -->
           <article
             id="stat-card-pending-reload"
-            role="button"
-            tabindex="0"
-            @click="showPendingDiff = !showPendingDiff"
-            @keydown.enter.prevent="showPendingDiff = !showPendingDiff"
-            class="cg-rail-cell is-action"
-            :class="{ 'is-pending': state.pending_reload_count > 0 }"
-            :aria-expanded="showPendingDiff ? 'true' : 'false'"
+            :role="state.pending_reload_count > 0 ? 'button' : undefined"
+            :tabindex="state.pending_reload_count > 0 ? 0 : undefined"
+            @click="togglePendingDiff"
+            @keydown.enter.prevent="togglePendingDiff"
+            class="cg-rail-cell"
+            :class="{ 'is-pending is-action': state.pending_reload_count > 0 }"
+            :aria-expanded="state.pending_reload_count > 0 ? (showPendingDiff ? 'true' : 'false') : undefined"
           >
-            <span class="cg-rail-label">{{ t('待应用') }}</span>
-            <span class="cg-rail-value">
-              <span id="pending-reload-count" class="cg-pending-count">{{ state.pending_reload_count }}</span>
-              <span v-if="state.pending_reload_count > 0" class="cg-rail-hint">
-                {{ showPendingDiff ? t('收起') : t('有修改，点开查看') }}
+            <div class="cg-rail-head">
+              <span class="cg-rail-label">{{ t('待应用') }}</span>
+              <span v-if="state.pending_reload_count > 0" class="cg-rail-chev" :class="{ 'is-open': showPendingDiff }">
+                <CgIcon name="chevron" :size="14" />
               </span>
-            </span>
+            </div>
+            <div class="cg-rail-main">
+              <template v-if="state.pending_reload_count > 0">
+                <span id="pending-reload-count" class="cg-rail-big tabular-nums">{{ state.pending_reload_count }}</span>
+                <span class="cg-rail-unit">{{ t('项修改') }}</span>
+              </template>
+              <template v-else>
+                <span class="cg-rail-okmark"><CgIcon name="check" :size="13" /></span>
+                <span class="cg-rail-big">{{ t('已全部生效') }}</span>
+              </template>
+            </div>
+            <div class="cg-rail-sub">
+              <span class="truncate">{{
+                state.pending_reload_count > 0
+                  ? (showPendingDiff ? t('收起明细') : t('点开查看，点顶部「应用配置」生效'))
+                  : t('没有待应用的修改')
+              }}</span>
+            </div>
           </article>
 
-          <article
-            id="stat-card-traffic"
-            role="button"
-            tabindex="0"
-            @click="showTrafficDetail = !showTrafficDetail"
-            @keydown.enter.prevent="showTrafficDetail = !showTrafficDetail"
-            class="cg-rail-cell is-action"
-            :aria-expanded="showTrafficDetail ? 'true' : 'false'"
-          >
-            <span class="cg-rail-label">{{ t('流量') }}</span>
-            <span class="cg-rail-value">
-              <bdi class="cg-rail-num" dir="ltr">{{ trafficDisplay }}</bdi>
-            </span>
-          </article>
+          <!-- 流量: total since install, the split, and the speed between two refreshes -->
+          <div id="stat-card-traffic" class="cg-rail-cell">
+            <div class="cg-rail-head">
+              <span class="cg-rail-label">{{ t('流量') }}</span>
+              <bdi v-if="trafficRate" class="cg-rail-rate" dir="ltr" :title="t('最近 15 秒的平均速度')">
+                ↓ {{ trafficRate.down }}/s · ↑ {{ trafficRate.up }}/s
+              </bdi>
+            </div>
+            <div class="cg-rail-main">
+              <bdi class="cg-rail-big tabular-nums" dir="ltr">{{ trafficDisplay }}</bdi>
+            </div>
+            <div class="cg-rail-sub tabular-nums">
+              <bdi dir="ltr"><span class="cg-rail-sub-key">↓</span> {{ trafficDown }}</bdi>
+              <span class="cg-rail-sep" aria-hidden="true"></span>
+              <bdi dir="ltr"><span class="cg-rail-sub-key">↑</span> {{ trafficUp }}</bdi>
+            </div>
+          </div>
 
+          <!-- 版本: core + panel, each with its own update shortcut -->
           <div id="stat-card-version" class="cg-rail-cell">
-            <span class="cg-rail-label">{{ t('版本') }}</span>
-            <span class="cg-rail-value">
-              <span class="cg-ver"><span class="cg-ver-k">{{ t('内核') }}</span><bdi dir="ltr">{{ versionLabel(state.mihomo_version) || '—' }}</bdi></span>
-              <span class="cg-ver"><span class="cg-ver-k">{{ t('面板') }}</span><bdi dir="ltr">{{ versionLabel(state.version) || '—' }}</bdi></span>
-              <span v-if="state.update_channel === 'test'" class="cg-chan">{{ t('测试') }}</span>
-            </span>
+            <div class="cg-rail-head">
+              <span class="cg-rail-label">{{ t('版本') }}</span>
+              <span v-if="state.update_channel === 'test'" class="cg-chan">{{ t('测试通道') }}</span>
+            </div>
+            <div class="cg-ver-row">
+              <span class="cg-ver-k">{{ t('内核') }}</span>
+              <bdi class="cg-ver-v" dir="ltr">{{ versionLabel(state.mihomo_version) || '—' }}</bdi>
+              <button
+                v-if="coreHasUpdate"
+                type="button"
+                class="cg-ver-up"
+                :disabled="!!busyKey"
+                :title="updateHint(coreUpdate.latest)"
+                @click="confirmUpdateCore"
+              ><CgIcon name="up" :size="12" /><bdi dir="ltr">{{ versionLabel(coreUpdate.latest) || t('可更新') }}</bdi></button>
+            </div>
+            <div class="cg-ver-row">
+              <span class="cg-ver-k">{{ t('面板') }}</span>
+              <bdi class="cg-ver-v" dir="ltr">{{ versionLabel(state.version) || '—' }}</bdi>
+              <button
+                v-if="panelHasUpdate"
+                type="button"
+                class="cg-ver-up"
+                :disabled="!!busyKey || upgradeInProgress"
+                :title="updateHint(panelUpdate.latest)"
+                @click="checkUpdateAndPrompt"
+              ><CgIcon name="up" :size="12" /><bdi dir="ltr">{{ versionLabel(panelUpdate.latest) || t('可更新') }}</bdi></button>
+            </div>
           </div>
         </div>
 
@@ -777,15 +825,6 @@ const {
           </div>
         </Transition>
 
-        <Transition name="cg-collapse">
-          <div
-            v-if="showTrafficDetail"
-            id="traffic-detail-panel"
-            class="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-sm text-slate-700 tabular-nums"
-          >
-            <bdi dir="ltr">{{ trafficDetail }}</bdi>
-          </div>
-        </Transition>
       </div>
 
       <nav class="cg-mobile-nav lg:hidden" aria-label="pages">

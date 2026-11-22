@@ -351,6 +351,7 @@ TABLE = [
     ("无法读取证书文件", "cannot read the certificate files"),
     ("Mihomo 无法读取私钥，请检查 /etc/clashgate/certs/ 的文件权限", "Mihomo cannot read the private key; check the file permissions in /etc/clashgate/certs/"),
     ("另一个证书任务正在运行，请稍后再试", "Another certificate job is running; try again later"),
+    ("证书任务失败：{}", "Certificate job failed: {}"),
     ("已切换为手动证书（颁发者：{}，到期：{}，剩余 {} 天）", "Switched to the manual certificate (issuer: {}, expires: {}, {} days left)"),
     ("手动证书校验通过，已重新加载（颁发者：{}，到期：{}，剩余 {} 天）", "Manual certificate checked and reloaded (issuer: {}, expires: {}, {} days left)"),
     ("重新生成证书失败：端口模式需要 socat，请先在服务器上安装 socat，或改用 Cloudflare DNS。", "Failed to regenerate the certificate: Port mode needs socat. Install socat on the server first, or use Cloudflare DNS."),

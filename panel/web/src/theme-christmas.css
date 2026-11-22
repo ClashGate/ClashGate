@@ -84,7 +84,10 @@ html[data-theme="christmas"] .cg-feature {
 }
 html[data-theme="christmas"] .cg-rail .cg-stat-mode { background: #e6f5ec; color: var(--cgx-green-hover); }
 html[data-theme="christmas"] .cg-live.is-ok { background: var(--cgx-green); }
-html[data-theme="christmas"] .cg-rail-cell.is-pending .cg-pending-count { background: var(--cgx-green); }
+html[data-theme="christmas"] .cg-rail-okmark { background: #e6f5ec; color: var(--cgx-green); }
+html[data-theme="christmas"] .cg-rail-rate,
+html[data-theme="christmas"] .cg-ver-up { background: #e6f5ec; border-color: #b2e0c3; color: var(--cgx-green-hover); }
+html[data-theme="christmas"] .cg-ver-up:hover:not(:disabled) { background: #d8f0e0; }
 html[data-theme="christmas"] .cg-rail-cell.is-action:focus-visible { outline-color: var(--cgx-green); }
 html[data-theme="christmas"] .cg-input:focus,
 html[data-theme="christmas"] select.cg-input:focus,

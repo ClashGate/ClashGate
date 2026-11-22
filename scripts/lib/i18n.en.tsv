@@ -134,7 +134,7 @@ apt-get update 失败，请检查软件源和网络	apt-get update failed; check
 下载失败：%s	Download failed: %s
 下载的 Mihomo 无法运行	The downloaded Mihomo cannot run
 已安装 %s -> %s	Installed %s -> %s
-无法自动探测公网 IP，请手动输入本机公网 IPv4：	Cannot detect the public IP automatically; enter this host's public IPv4: 
+无法自动探测公网 IP，请手动输入本机公网 IP（IPv4 或 IPv6）：	Cannot detect the public IP automatically; enter this host's public IP (IPv4 or IPv6): 
 无法探测公网 IP，请检查服务器网络	Cannot detect the public IP; check the server network
 生成 %s 个 VLESS Reality 节点	Generating %s VLESS Reality node(s)
 Reality 密钥对生成失败	Failed to generate the Reality key pair
@@ -242,3 +242,7 @@ DNS API 模式缺少 Cloudflare API Token	DNS API mode is missing the Cloudflare
 节点配置（粘贴到客户端的 proxies）：\n	Node config (paste into your client under proxies):\n
 运行 \033[1mclashgate\033[0m 打开菜单\n	Run \033[1mclashgate\033[0m to open the menu\n
 地理数据下载失败：%s（请确认服务器可以访问 jsDelivr 或 GitHub）	Failed to download geo data: %s (make sure the server can reach jsDelivr or GitHub)
+旧订阅链接会立即失效，确定更换？[y/N]：	The old subscription link stops working immediately. Change it? [y/N]: 
+确定重置面板密码？[y/N]：	Reset the panel password? [y/N]: 
+域名 %s 没有指向本机 %s 的 AAAA 记录。请添加 AAAA 记录指向本机（Cloudflare 请设为灰云 DNS only）	The domain %s has no AAAA record pointing to this host (%s). Add an AAAA record pointing here (on Cloudflare, use the grey cloud / DNS only)
+已取消。请先把域名 AAAA 记录指向 %s，再重新运行安装命令。\n	Cancelled. Point the domain AAAA record to %s first, then rerun the install command.\n

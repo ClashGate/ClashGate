@@ -262,5 +262,33 @@ echo "render-ok"
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class ShellIpv6RenderTest(unittest.TestCase):
+    def test_shell_assemble_ipv6_only_passes_mihomo_t(self):
+        """IPv6-only server: core.sh assemble_config listens on "::" and uses the system resolver."""
+        if not os.path.isfile(MIHOMO) or not os.access(MIHOMO, os.X_OK):
+            self.skipTest("mihomo binary not found at " + MIHOMO)
+        src = open(os.path.join(HERE, "test_seed_load.py"), encoding="utf-8").read()
+        body = src[src.index('f.write(r"""#!/usr/bin/env bash'):]
+        script_text = body[body.index('r"""') + 4:body.index('""")')]
+        script_text = script_text.replace("SERVER_IP=1.2.3.4", "SERVER_IP=2001:db8::10")
+        script_text = script_text.replace(': > "$FRAG_REALITY"\n',
+                                          'printf \'  - name: r\\n    type: vless\\n    port: 31555\\n    listen: 0.0.0.0\\n    users:\\n      - username: user\\n        uuid: 9d1c1c8e-4f1e-4d0b-9a57-2a1f0d6b7e11\\n        flow: xtls-rprx-vision\\n    reality-config:\\n      dest: www.apple.com:443\\n      private-key: aGVsbG8taGVsbG8taGVsbG8taGVsbG8taGVsbG8tMXI\\n      short-id:\\n        - 0123abcd\\n      server-names:\\n        - www.apple.com\\n\' > "$FRAG_REALITY"\n')
+        tmp = tempfile.mkdtemp(prefix="cg-render6-")
+        try:
+            prefix, cs = install_prefix(tmp)
+            script = os.path.join(tmp, "run.sh")
+            with open(script, "w") as f:
+                f.write(script_text)
+            env = snippet_env(prefix, cs, extra={"REPO": REPO, "CS": cs})
+            r = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
+            conf = open(os.path.join(cs, "config.yaml"), encoding="utf-8").read() if os.path.isfile(os.path.join(cs, "config.yaml")) else ""
+            self.assertEqual(r.returncode, 0, "stdout:\n%s\nstderr:\n%s\nconfig:\n%s" % (r.stdout, r.stderr, conf))
+            self.assertIn('listen: "::"', conf)
+            self.assertIn("    - system\n", conf)
+            self.assertNotIn("1.1.1.1", conf[conf.index("\ndns:"):conf.index("\ndns:") + 400])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

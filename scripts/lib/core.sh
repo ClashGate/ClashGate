@@ -60,14 +60,23 @@ install_core() {
   info "已安装 $tag -> $BIN"
 }
 
-detect_ip() {
+IPV4_RE='^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+IPV6_RE='^[0-9A-Fa-f:]*:[0-9A-Fa-f:]+$'
+
+detect_ip() { # 优先公网 IPv4；没有 IPv4 出口（纯 IPv6 服务器）时用公网 IPv6
   [[ -n "$SERVER_IP" ]] && return
+  local u ip
   for u in https://api.ipify.org https://ifconfig.me https://ipv4.icanhazip.com; do
-    SERVER_IP=$(curl -fsS -4 --max-time 5 "$u" 2>/dev/null | tr -d '[:space:]') && [[ -n "$SERVER_IP" ]] && return
+    ip=$(curl -fsS -4 --max-time 5 "$u" 2>/dev/null | tr -d '[:space:]') || continue
+    [[ $ip =~ $IPV4_RE ]] && { SERVER_IP=$ip; return; }
+  done
+  for u in https://api64.ipify.org https://ipv6.icanhazip.com https://ifconfig.co; do
+    ip=$(curl -fsS -6 --max-time 5 "$u" 2>/dev/null | tr -d '[:space:]') || continue
+    [[ $ip =~ $IPV6_RE ]] && { SERVER_IP=$ip; return; }
   done
   if has_tty; then
-    while [[ ! $SERVER_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; do
-      SERVER_IP=$(ask '无法自动探测公网 IP，请手动输入本机公网 IPv4：' '')
+    while [[ ! $SERVER_IP =~ $IPV4_RE && ! $SERVER_IP =~ $IPV6_RE ]]; do
+      SERVER_IP=$(ask '无法自动探测公网 IP，请手动输入本机公网 IP（IPv4 或 IPv6）：' '')
     done
     return
   fi
@@ -235,11 +244,38 @@ assemble_config() {
   [[ -f $FRAG_PROXIES ]] || : > "$FRAG_PROXIES"
   [[ -f $FRAG_PROVIDERS ]] || : > "$FRAG_PROVIDERS"
   seed_routing
+  # IPv6-only server (SERVER_IP is IPv6): listen on "::" and use the system resolver with AAAA
+  # (the IPv4 public DNS is unreachable there). Mirrors panel assemble_config() / DNS_IPV6_ONLY.
+  local v6=0
+  [[ ${SERVER_IP:-} == *:* ]] && v6=1
   awk -v c="$FRAG_CONTROLLER" -v pv="$FRAG_PROVIDERS" -v p="$FRAG_PROXIES" \
       -v rp="$FRAG_RULE_PROVIDERS" -v pg="$FRAG_PROXY_GROUPS" -v ru="$FRAG_RULES" \
       -v r="$FRAG_REALITY" -v e="$FRAG_EXTRA" \
-      -v cp="$FRAG_CLUSTER_PROXIES" -v cl="$FRAG_CLUSTER_LISTENERS" '
-    /^@@CONTROLLER@@$/ { while ((getline l < c) > 0) print l; next }
+      -v cp="$FRAG_CLUSTER_PROXIES" -v cl="$FRAG_CLUSTER_LISTENERS" -v v6="$v6" '
+    function v6fix(s) {
+      if (v6 == 1) {
+        gsub(/listen: 0\.0\.0\.0/, "listen: \"::\"", s)
+        gsub(/"listen": "0\.0\.0\.0"/, "\"listen\": \"::\"", s)
+        gsub(/external-controller-tls: "0\.0\.0\.0:/, "external-controller-tls: \"[::]:", s)
+      }
+      return s
+    }
+    skipdns { if ($0 == "" || $0 ~ /^[[:space:]]/) next; skipdns = 0 }
+    v6 == 1 && /^dns:$/ {
+      print "dns:"
+      print "  enable: true"
+      print "  # 纯 IPv6 服务器：用本机系统 DNS 并解析 AAAA（服务商提供 DNS64 时也能访问只有 IPv4 的网站）"
+      print "  ipv6: true"
+      print "  enhanced-mode: redir-host"
+      print "  respect-rules: false"
+      print "  cache-algorithm: arc"
+      print "  nameserver:"
+      print "    - system"
+      print ""
+      skipdns = 1
+      next
+    }
+    /^@@CONTROLLER@@$/ { while ((getline l < c) > 0) print v6fix(l); next }
     /^@@PROXY_PROVIDERS@@$/ {
       has = 0
       while ((getline l < pv) > 0) {
@@ -269,9 +305,9 @@ assemble_config() {
     /^@@RULES@@$/          { while ((getline l < ru) > 0) print l; next }
     /^@@LISTENERS@@$/  {
       buf = ""
-      while ((getline l < r) > 0) buf = buf l "\n"
-      while ((getline l < e) > 0) buf = buf l "\n"
-      while ((getline l < cl) > 0) buf = buf l "\n"
+      while ((getline l < r) > 0) buf = buf v6fix(l) "\n"
+      while ((getline l < e) > 0) buf = buf v6fix(l) "\n"
+      while ((getline l < cl) > 0) buf = buf v6fix(l) "\n"
       if (buf ~ /[^[:space:]]/) { print "listeners:"; printf "%s", buf }
       else print "listeners: []"
       next

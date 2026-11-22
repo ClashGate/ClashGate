@@ -82,7 +82,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -350,7 +350,8 @@ console.log(JSON.stringify(out))
         self.assertNotRegex(vue, r"(?:v-if|:class|:title)=\"[^\"]*(?:panelUpdate|coreUpdate)\.has_update")
         self.assertIn("'is-update': panelHasUpdate", vue)
         self.assertIn("'is-update': coreHasUpdate", vue)
-        body = vue[vue.index("async function reloadPanelAfterUpgrade"):vue.index("const createRoutingForm")]
+        upd = read(os.path.join(REPO, "panel/web/src/composables/useUpdates.js"))
+        body = upd[upd.index("async function reloadPanelAfterUpgrade"):]
         self.assertIn("if (!reloading) upgradeInProgress.value = false", body)
         for m in re.finditer(r"window\.location\.reload\(\)", body):
             self.assertIn("reloading = true", body[max(0, m.start() - 400):m.start()], "reload without keeping the upgrading state")
@@ -935,6 +936,364 @@ class V121Test(unittest.TestCase):
             with open(P.ENV_FILE, "w") as f:
                 f.write(env_before)
 
+    def test_drafts_made_live_outside_panel_leave_pending(self):
+        # Before 1.35 `clashgate update` assembled config.yaml from the drafts: the core ran them
+        # while the panel still listed them as pending and served the pre-draft subscription.
+        node, _ = write_default_state()
+        P.clear_pending_reload()
+        P.save_nodes([])
+        P.record_pending_reload(op="delete", kind="vless-reality", name=node["name"], port=node["port"],
+                                detail=f"- 删除节点「{node['name']}」")
+        P.record_pending_reload(op="reset-sub", kind="sub", name="sub", sub_token="N" * 24)
+        live = read(P.CONF)
+        try:
+            self.assertFalse(P.reconcile_pending_with_live())   # not live yet: keep the drafts
+            self.assertEqual(len(P.load_pending_reload()["items"]), 2)
+            P.atomic_write(P.CONF, live + "# hand edit\n", 0o640)
+            self.assertFalse(P.reconcile_pending_with_live())   # changed, but not to the drafts
+            self.assertEqual(P.live_nodes_and_inbounds()[0][0]["name"], node["name"])
+            P.atomic_write(P.CONF, P.assemble_config(), 0o640)  # what update_self used to do
+            self.assertTrue(P.reconcile_pending_with_live())
+            st = P.load_pending_reload()
+            self.assertEqual([it["op"] for it in st["items"]], ["reset-sub"])   # token is not in config.yaml
+            self.assertEqual(st["sub_token"], "N" * 24)
+            self.assertEqual(P.live_nodes_and_inbounds()[0], [])
+            self.assertFalse(P.reconcile_pending_with_live())
+        finally:
+            P.clear_pending_reload()
+
+    def test_update_keeps_live_config_while_drafts_pending(self):
+        sh = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))
+        body = sh[sh.index("update_self() {"):sh.index("do_status() {")]
+        guard = body.index("if ! has_panel_drafts; then")
+        self.assertLess(guard, body.index("assemble_config"))
+        self.assertLess(guard, body.index("render_client"))
+        fn = sh[sh.index("has_panel_drafts() {"):sh.index("update_self() {")]
+        start = fn.index("\n", fn.index("<<'PY'")) + 1
+        script = fn[start:fn.index("\nPY\n")]
+        cases = (
+            ({"items": [{"op": "delete", "name": "x"}], "sub_token": "", "mihomo_secret": ""}, 0),
+            ({"items": [], "sub_token": "T" * 24, "mihomo_secret": ""}, 0),
+            ({"items": [], "sub_token": "", "mihomo_secret": ""}, 1),
+        )
+        for data, want in cases:
+            p = os.path.join(tempfile.mkdtemp(), "pending_reload.json")
+            with open(p, "w") as f:
+                json.dump(data, f)
+            r = subprocess.run([sys.executable, "-", p], input=script, text=True, capture_output=True)
+            self.assertEqual(r.returncode, want, data)
+
+    def test_status_counts_only_core_sockets(self):
+        # A port held by another program (or another core) must not show a node as running.
+        g = P.mihomo_status.__globals__
+        with_users = ('tcp LISTEN 0 4096 0.0.0.0:30111 0.0.0.0:* users:(("mihomo",pid=4242,fd=7))\n'
+                      'udp UNCONN 0 0 0.0.0.0:30112 0.0.0.0:* users:(("mihomo",pid=4242,fd=8))\n'
+                      'tcp LISTEN 0 128 0.0.0.0:30113 0.0.0.0:* users:(("nginx",pid=99,fd=6))\n')
+        no_users = "tcp LISTEN 0 4096 0.0.0.0:30111 0.0.0.0:*\ntcp LISTEN 0 128 0.0.0.0:30113 0.0.0.0:*\n"
+
+        def fake(active, ss):
+            def run(cmd, **kw):
+                if cmd[:2] == [g["SYSTEMCTL"], "is-active"]:
+                    return (0 if active == "active" else 3), active + "\n"
+                if cmd[:2] == [g["SYSTEMCTL"], "show"]:
+                    return 0, "MainPID=%s\n" % ("4242" if active == "active" else "0")
+                if cmd and cmd[0] == "ss":
+                    return 0, ss
+                return 0, ""
+            return run
+
+        with mock.patch.dict(g, {"run": fake("active", with_users)}):
+            self.assertEqual(P.mihomo_status()["listening"], [30111, 30112])
+        with mock.patch.dict(g, {"run": fake("active", no_users)}):   # no process info: count all
+            self.assertEqual(P.mihomo_status()["listening"], [30111, 30113])
+        with mock.patch.dict(g, {"run": fake("inactive", with_users)}):
+            self.assertEqual(P.mihomo_status()["listening"], [])
+
+    def test_manual_port_held_by_other_program(self):
+        write_default_state()
+        env = P.read_env()
+        for stype in (socket.SOCK_STREAM, socket.SOCK_DGRAM):
+            holder = socket.socket(socket.AF_INET, stype)
+            port = None
+            for p in range(31200, 31400):
+                if p in P.used_ports(env):
+                    continue
+                try:
+                    holder.bind(("0.0.0.0", p))
+                    port = p
+                    break
+                except OSError:
+                    continue
+            self.assertIsNotNone(port, "could not bind a test port")
+            try:
+                with self.assertRaises(ValueError) as cm:
+                    P.build_inbound("shadowsocks", {"port": str(port), "name": "ss-busy"}, env)
+                self.assertIn(str(port), str(cm.exception))
+            finally:
+                holder.close()
+
+    def test_api_get_without_session_is_401(self):
+        h = object.__new__(P.Panel)
+        got = {}
+        h.send = lambda code, body, ctype="", headers=None, cache_key=None: got.update(code=code, ctype=ctype)
+        h.sessions = {}
+        for path, ajax, want in (("/api/state", False, 401), ("/api/upgrade-status", False, 401),
+                                 ("/", False, 303), ("/routing", True, 401)):
+            got.clear()
+            h.path = path
+            h.headers = {"Accept": "application/json"} if ajax else {}
+            h.do_GET()
+            self.assertEqual(got.get("code"), want, path)
+            if want == 401:
+                self.assertTrue(got["ctype"].startswith("application/json"), path)
+
+    def test_cli_reset_sub_drops_panel_link_draft(self):
+        # Otherwise the panel's older pending link replaces the one `clashgate reset-sub` printed.
+        sh = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))
+        body = sh[sh.index("do_reset_sub() {"):sh.index("do_reset_password() {")]
+        self.assertLess(body.index("write_panel_cfg"), body.index("drop_panel_sub_draft"))
+        fn = sh[sh.index("drop_panel_sub_draft() {"):sh.index("do_reset_sub() {")]
+        start = fn.index("\n", fn.index("<<'PY'")) + 1
+        script = fn[start:fn.index("\nPY\n")]
+        d = tempfile.mkdtemp()
+        p, b = os.path.join(d, "pending_reload.json"), os.path.join(d, "pending_baseline.json")
+
+        def run_case(data):
+            with open(p, "w") as f:
+                json.dump(data, f)
+            with open(b, "w") as f:
+                f.write("{}")
+            subprocess.run([sys.executable, "-", p, b], input=script, text=True, check=True)
+
+        run_case({"items": [{"op": "reset-sub", "name": "sub"}], "sub_token": "T" * 24, "mihomo_secret": ""})
+        self.assertFalse(os.path.exists(p))
+        self.assertFalse(os.path.exists(b))
+        run_case({"items": [{"op": "reset-sub"}, {"op": "delete", "name": "x"}], "sub_token": "T" * 24, "mihomo_secret": ""})
+        st = json.loads(read(p))
+        self.assertEqual(([it["op"] for it in st["items"]], st["sub_token"]), (["delete"], ""))
+        self.assertTrue(os.path.exists(b))
+        run_case({"items": [{"op": "delete", "name": "x"}], "sub_token": "", "mihomo_secret": ""})
+        self.assertEqual(json.loads(read(p))["items"], [{"op": "delete", "name": "x"}])
+
+    def test_menu_confirms_resets_and_reopens_after_update(self):
+        sh = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))
+        menu = sh[sh.index("do_menu() {"):sh.index("cluster_link_count()")]
+        run_at = menu.index('"do_${item//-/_}"')
+        for item in ("reset-sub", "reset-password"):
+            self.assertLess(menu.index(f"[[ $item == {item} ]] && [[ $(ask"), run_at)
+        self.assertIn("[[ $item == update ]] && ((rc == 0)); then exec bash", menu)
+
+    def test_firewall_is_only_opened_never_closed(self):
+        g = P.sync_ufw.__globals__
+        calls = []
+
+        def fake(cmd, **kw):
+            calls.append(list(cmd))
+            if cmd[:2] == [g["UFW_BIN"], "status"]:
+                return 0, "Status: active\n"
+            return 0, ""
+
+        with mock.patch.dict(g, {"run": fake}):
+            P.sync_ufw({"30001/tcp", "30002/tcp"}, {"30002/tcp", "30003/tcp", "30003/udp"})
+        changes = [c[1:] for c in calls if c[0] == g["UFW_BIN"] and c[1] != "status"]
+        self.assertEqual(changes, [["allow", "30003/tcp"], ["allow", "30003/udp"]])
+        calls.clear()
+        with mock.patch.dict(g, {"run": fake}):
+            P.sync_ufw({"30001/tcp"}, set())   # a node was deleted: its port stays open
+        self.assertEqual(calls, [])
+
+    def test_template_refresh_after_drafts_are_gone(self):
+        write_default_state()
+        P.clear_pending_reload()
+        good = P.assemble_config()
+        P.atomic_write(P.CONF, good + "# assembled by an older template\n", 0o640)
+        P.record_pending_reload(op="add", kind="shadowsocks", name="x", port=30999, detail="+ x")
+        open(P.TEMPLATE_REFRESH_FLAG, "w").close()
+        try:
+            self.assertFalse(P.refresh_template_if_flagged())   # drafts pending: wait for them
+            self.assertTrue(os.path.exists(P.TEMPLATE_REFRESH_FLAG))
+            P.clear_pending_reload()
+            self.assertTrue(P.refresh_template_if_flagged())
+            self.assertFalse(os.path.exists(P.TEMPLATE_REFRESH_FLAG))
+            self.assertEqual(read(P.CONF), good)
+            self.assertFalse(P.refresh_template_if_flagged())
+        finally:
+            P.clear_pending_reload()
+            if os.path.exists(P.TEMPLATE_REFRESH_FLAG):
+                os.remove(P.TEMPLATE_REFRESH_FLAG)
+        sh = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))
+        body = sh[sh.index("update_self() {"):sh.index("do_status() {")]
+        self.assertIn(': > "$CS_ROOT/template_refresh"', body[body.index("if ! has_panel_drafts; then"):])
+        http = read(os.path.join(REPO, "panel/cg_http.py"))
+        disc = http[http.index("def do_discard_pending"):http.index("def do_settings")]
+        self.assertLess(disc.index("discard_pending_reload()"), disc.index("refresh_template_if_flagged()"))
+
+    def test_ipv6_only_server_config(self):
+        env_before = read(P.ENV_FILE)
+        write_default_state(extra_kinds=("shadowsocks",))
+        try:
+            v4 = P.assemble_config()
+            self.assertNotIn('listen: "::"', v4)
+            with open(P.ENV_FILE, "w") as f:
+                f.write(env_before.replace('SERVER_IP="1.2.3.4"', 'SERVER_IP="2001:db8::10"'))
+            v6 = P.assemble_config()
+            self.assertIn('listen: "::"', v6)
+            self.assertIn('"listen": "::"', v6)
+            self.assertIn('external-controller-tls: "[::]:', v6)
+            self.assertNotIn("listen: 0.0.0.0", v6)
+            self.assertIn(P.DNS_IPV6_ONLY, v6)
+            self.assertNotIn("default-nameserver", v6)
+            P.atomic_write(P.CONF, v6, 0o640)
+            rc, out = P.validate_config()
+            self.assertEqual(rc, 0, out)
+        finally:
+            with open(P.ENV_FILE, "w") as f:
+                f.write(env_before)
+        # core.sh prints the same DNS block for the installer / `clashgate update`.
+        core = read(os.path.join(REPO, "scripts/lib/core.sh"))
+        awk = core[core.index('v6 == 1 && /^dns:$/ {'):core.index("skipdns = 1")]
+        printed = [json.loads(m) for m in re.findall(r'^\s*print ("(?:[^"\\]|\\.)*")$', awk, re.M)]
+        self.assertEqual("\n".join(printed) + "\n", P.DNS_IPV6_ONLY)
+
+    def test_cert_job_runs_in_background(self):
+        h = object.__new__(P.Panel)
+        h.headers = {"X-Requested-With": "fetch"}
+        sent = []
+        h.send = lambda code, body, ctype="", headers=None, cache_key=None: sent.append((code, json.loads(body)))
+        h.build_client_state = lambda s, *a: {"x": 1}
+        g = P.Panel.do_cert_action.__globals__
+
+        def slow_run(cmd, **kw):
+            time.sleep(0.3)
+            return 0, "certctl: ok\n"
+
+        with mock.patch.dict(g, {"run": slow_run}):
+            h.do_cert_action({}, {"async": "1"})
+            self.assertEqual(sent[-1], (200, {"ok": True, "running": True}))
+            got = {}
+            h.respond_mutation = lambda s, msg, ok=True, detail="": got.update(ok=ok, msg=msg)
+            h.do_cert_action({}, {"async": "1"})   # a second job while the first runs
+            self.assertEqual(got, {"ok": False, "msg": "另一个证书任务正在运行，请稍后再试"})
+            for _ in range(50):
+                h.cert_task_status({})
+                if not sent[-1][1]["running"]:
+                    break
+                time.sleep(0.05)
+        done = sent[-1][1]
+        self.assertEqual((done["running"], done["done"], done["ok"]), (False, True, True))
+        self.assertEqual(done["msg"], "证书检查 / 续期完成。")
+        self.assertEqual(done["state"], {"x": 1})
+
+    def test_global_login_cap_spares_trusted_sources(self):
+        h = object.__new__(P.Panel)
+        h.client_address = ("9.9.9.9", 1)
+        h.headers = {}
+        h.cfg = {"username": "admin", "password_hash": P.hash_password("correct-horse")}
+        h.cfg_path = None
+        sent = []
+        h.send = lambda code, body, ctype="", headers=None, cache_key=None: sent.append(code)
+        h.login_page = lambda err="": err
+        now = time.time()
+        fails, trusted = dict(P.Panel.fails), dict(P.Panel.trusted)
+        try:
+            P.Panel.fails.clear()
+            P.Panel.fails.update({f"10.0.{i // 250}.{i % 250}": [now] for i in range(P.LOGIN_MAX_FAILS_TOTAL)})
+            P.Panel.trusted.clear()
+            h.do_login({"username": "admin", "password": "correct-horse"})
+            self.assertEqual(sent[-1], 429)   # unknown source while many addresses are guessing
+            P.Panel.trusted["9.9.9.9"] = now - 60
+            h.do_login({"username": "admin", "password": "correct-horse"})
+            self.assertEqual(sent[-1], 303)   # signed in here before: still allowed
+        finally:
+            P.Panel.fails.clear()
+            P.Panel.fails.update(fails)
+            P.Panel.trusted.clear()
+            P.Panel.trusted.update(trusted)
+
+    def test_status_caches_version_and_cert(self):
+        g = P.mihomo_status.__globals__
+        binf = os.path.join(tempfile.mkdtemp(), "mihomo")
+        with open(binf, "w") as f:
+            f.write("x")
+        calls = []
+
+        def fake(cmd, **kw):
+            if cmd[:1] == [binf]:
+                calls.append("v")
+                return 0, "Mihomo Meta v1.19.34\n"
+            if cmd and cmd[0] == "openssl":
+                calls.append("cert")
+                return 0, "notAfter=Jan  1 00:00:00 2030 GMT\nissuer=CN = R11\n"
+            return 0, ""
+
+        with mock.patch.dict(g, {"run": fake, "resolve_mihomo_bin": lambda: binf}):
+            for _ in range(3):
+                st = P.mihomo_status()
+            self.assertEqual(st["version"], "Mihomo Meta v1.19.34")
+            self.assertEqual(calls.count("v"), 1)
+            self.assertLessEqual(calls.count("cert"), 1)
+            with open(binf, "w") as f:   # core updated: read the version again
+                f.write("xy")
+            P.mihomo_status()
+            self.assertEqual(calls.count("v"), 2)
+
+    def test_status_uptime_and_live_node_counts(self):
+        if not os.path.isfile("/proc/uptime"):
+            self.skipTest("no /proc/uptime")
+        g = P.mihomo_status.__globals__
+        boot = float(read("/proc/uptime").split()[0])
+        mono = int((boot - 3700) * 1e6)
+
+        def fake(cmd, **kw):
+            if cmd[:2] == [g["SYSTEMCTL"], "is-active"]:
+                return 0, "active\n"
+            if cmd[:2] == [g["SYSTEMCTL"], "show"]:
+                return 0, f"MainPID=0\nActiveEnterTimestampMonotonic={mono}\n"
+            return 0, ""
+
+        with mock.patch.dict(g, {"run": fake}):
+            up = P.mihomo_status()["uptime"]
+        self.assertTrue(3690 <= up <= 3800, up)
+        node, inbs = write_default_state(extra_kinds=("shadowsocks",))
+        P.clear_pending_reload()
+        counts = P.Panel._live_node_counts({node["port"]})
+        self.assertEqual(counts, {"live_total": 2, "live_up": 1})
+        # A node added as a draft is not live yet: it does not count as offline.
+        P._ensure_pending_baseline()
+        env = P.read_env()
+        P.save_inbounds(P.load_inbounds() + [P.build_inbound("shadowsocks", {"port": "30777", "name": "draft-ss"}, env)])
+        P.record_pending_reload(op="add", kind="shadowsocks", name="draft-ss", port=30777, detail="+")
+        try:
+            self.assertEqual(P.Panel._live_node_counts({node["port"]}), {"live_total": 2, "live_up": 1})
+        finally:
+            P.discard_pending_reload()
+
+    def test_page_links_cacheable_versioned_assets(self):
+        g = P.Panel.send.__globals__
+        page = P.render_spa_html("ClashGate", {"page": "dashboard"})
+        ver = g["asset_version"]("assets/app.js")
+        self.assertRegex(ver, r"^[0-9a-f]{12}$")
+        self.assertIn(f'<script src="/assets/app.js?v={ver}"></script>', page)
+        self.assertIn('<link rel=stylesheet href="/assets/style.css?v=', page)
+        self.assertLess(len(page), 20000)   # the bundles are no longer inlined
+        h = object.__new__(P.Panel)
+        sent = []
+        h.send = lambda code, body, ctype="", headers=None, cache_key=None: sent.append((code, headers or {}, body))
+        for path, inm, want_code, want_cc in (
+                (f"/assets/app.js?v={ver}", "", 200, "public, max-age=31536000, immutable"),
+                ("/assets/app.js?v=old", "", 200, "no-cache"),
+                ("/assets/app.js", "", 200, "no-cache"),
+                ("/assets/app.js", f'W/"{ver}"', 304, "no-cache"),
+                ("/assets/ibm-plex-sans-latin-400-normal.woff2", "", 200, "public, max-age=604800")):
+            h.path = path
+            h.headers = {"If-None-Match": inm} if inm else {}
+            h.do_GET()
+            code, hdrs, body = sent[-1]
+            self.assertEqual((code, hdrs.get("Cache-Control")), (want_code, want_cc), path)
+            self.assertTrue(hdrs.get("ETag", "").startswith('W/"'), path)
+            if code == 304:
+                self.assertEqual(body, b"")
+
     def test_uninstall_leaves_cluster_first(self):
         un = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))
         body = un[un.index("do_uninstall() {"):]
@@ -958,7 +1317,7 @@ class V121Test(unittest.TestCase):
     def test_frontend_1_21(self):
         js = frontend_script_text()
         app = read(os.path.join(REPO, "panel/web/src/App.vue"))
-        self.assertNotIn("confirmUpdateCore", app)   # the core update lives on the Settings page now
+        self.assertIn("confirmUpdateCore", app)   # 1.36 also puts the core update on the home status rail
         self.assertIn("settings-update-core", read(os.path.join(REPO, "panel/web/src/pages/SettingsPage.vue")))
         certs = read(os.path.join(REPO, "panel/web/src/pages/CertsPage.vue"))
         for needle in ('id="cert-renew"', 'id="cert-port-guide-card"', 'id="cf-token-eye"', "cfTokenRevealed ? 'text' : 'password'"):

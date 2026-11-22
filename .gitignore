@@ -17,3 +17,8 @@ serve.yaml
 # python & frontend build deps
 __pycache__/
 node_modules/
+
+# local AI tooling / working material — never publish
+.impeccable/
+.agents/
+skills-lock.json
