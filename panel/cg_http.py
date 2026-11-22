@@ -207,7 +207,8 @@ def public_cluster_state(locked: bool, lang: str = "zh") -> dict:
         "members": [{"id": l["id"], "name": l.get("name", ""), "url": l.get("url", ""), "version": l.get("version", ""),
                      "ok": l.get("ok", True), "error": tr(l.get("error", "")), "missing": list(l.get("missing") or []),
                      "created": l.get("created", 0), "seen": l.get("seen", 0)} for l in st["links"]],
-        "pending": [{"name": p.get("name", ""), "url": p.get("url", ""), "error": tr(p.get("error", ""))} for p in st["pending"]],
+        "pending": [{"id": cluster_pending_id(p), "name": p.get("name", ""), "url": p.get("url", ""), "error": tr(p.get("error", ""))}
+                    for p in st["pending"]],
     }
 
 
@@ -820,6 +821,8 @@ class Panel(BaseHTTPRequestHandler):
             return self.do_cluster_sync(s, form)
         if path == "/cluster/leave":
             return self.do_cluster_leave_ui(s, form)
+        if path == "/cluster/dismiss":
+            return self.do_cluster_dismiss(s, form)
         if path == "/proxies/add":
             return self.do_add_proxies(s, form)
         if path == "/proxies/delete":
@@ -1230,8 +1233,9 @@ class Panel(BaseHTTPRequestHandler):
             pw = str(form.get("password") or "")
             if not pw:
                 raise ClusterError("请填写对方面板密码")
-            link, _ = cluster_pair(base, {"password": pw})
-            rep = cluster_sync()
+            with cluster_batch():   # this core reloads once, after every link is made
+                link, _ = cluster_pair(base, {"password": pw})
+                rep = cluster_sync()
             msg = f"已和「{link['name']}」双向互联，双方都已把对方写入服务端出站并立即生效"
             extra = cluster_report_text(rep)
             return (f"{msg}；{extra}" if extra else msg), True
@@ -1240,8 +1244,11 @@ class Panel(BaseHTTPRequestHandler):
     def do_cluster_sync(self, s, form=None):
         def job():
             if not load_cluster()["links"]:
+                with LOCK:   # no members: nothing can be waiting either (load_cluster already drops them)
+                    save_cluster(load_cluster())
                 return "集群里还没有其他面板", True
-            rep = cluster_sync()
+            with cluster_batch():
+                rep = cluster_sync()
             return cluster_report_text(rep) or "集群成员都在线，互联完整", True
         return self._cluster_job(s, job, form, "sync")
 
@@ -1252,7 +1259,7 @@ class Panel(BaseHTTPRequestHandler):
             if not x:
                 return "集群成员不存在", False
             others = [l for l in st["links"] if l["instance"] != x["instance"]]
-            cluster_stage("本机正在删除互联并重载内核")
+            cluster_stage("本机正在删除互联")
             _drop_links({x["instance"]}, tombstone=True)
             missed = []
             for y in others:
@@ -1271,6 +1278,18 @@ class Panel(BaseHTTPRequestHandler):
                 return f"已把「{name}」移出集群；「{'、'.join(missed)}」暂时联系不上，恢复后在任意成员上点「检查」会自动清理", True
             return f"已把「{name}」移出集群，所有成员上和它的互联都已删除", True
         return self._cluster_job(s, job, form, "remove")
+
+    def do_cluster_dismiss(self, s, form):
+        """Hide a 等待互联 entry. Nothing changes on any panel; the next 检查 tries that panel again."""
+        pid = str(form.get("id") or "")
+        with LOCK:
+            st = load_cluster()
+            hit = [p for p in st["pending"] if cluster_pending_id(p) == pid]
+            if not hit:
+                return self.respond_mutation(s, "这条等待互联的记录已经不在了", True)
+            st["pending"] = [p for p in st["pending"] if cluster_pending_id(p) != pid]
+            save_cluster(st)
+        return self.respond_mutation(s, f"已忽略「{hit[0].get('name', '')}」；下次点「检查」时会再试着和它互联", True)
 
     def do_cluster_leave_ui(self, s, form=None):
         def job():

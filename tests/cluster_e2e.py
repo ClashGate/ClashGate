@@ -502,6 +502,15 @@ def main():
     r = a.post("/cluster/sync")
     check(r["ok"] and "完整" in r["msg"], f"检查 on a healthy cluster: {r['msg']}")
 
+    print("[a changed panel password does not touch the cluster (links use their own keys)]")
+    new_pw = PW["B"] + "-changed"
+    r = b.post("/action/change-password", current_password=PW["B"], new_password=new_pw, confirm_password=new_pw)
+    check(r["ok"], f"change B's panel password: {r.get('msg')}")
+    r = a.post("/cluster/sync")
+    check(r["ok"] and "完整" in r["msg"], f"检查 after B's password change: {r['msg']}")
+    check([m for m in state(a)["cluster"]["members"] if m["name"] == "B-Node"][0]["ok"] is not False, "A still reaches B")
+    PW["B"] = new_pw   # later steps sign in to B / add B with the new password
+
     print("[D joins while C is offline, 检查 completes the mesh later]")
     stop_panel("C")
     r = d.post("/cluster/add", url=url["A"], password=PW["A"])
@@ -509,6 +518,9 @@ def main():
     check(member_names(d) == ["A-Node", "B-Node"], "D is linked with A and B")
     check([p["name"] for p in d.state["cluster"]["pending"]] == ["C-Node"] and d.state["cluster"]["pending"][0]["error"],
           f"C shown as not linked yet: {d.state['cluster']['pending']}")
+    check("连不上" in d.state["cluster"]["pending"][0]["error"], "the reason names the member that cannot reach C")
+    r = d.post("/cluster/dismiss", id=d.state["cluster"]["pending"][0]["id"])
+    check(r["ok"] and not r["state"]["cluster"]["pending"], f"dismiss C's 等待互联 entry on D: {r['msg']}")
     r = a.post("/cluster/sync")
     check(r["ok"] and "C-Node" in r["msg"], f"检查 on A reports C offline: {r['msg']}")
     check([m for m in state(a)["cluster"]["members"] if m["name"] == "C-Node"][0]["ok"] is False, "A marks C offline")

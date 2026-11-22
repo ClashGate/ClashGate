@@ -1,6 +1,6 @@
 # ClashGate Agent Handoff Guide
 
-This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.39**. Next version number: **1.40**. Public repository: https://github.com/ClashGate/ClashGate
+This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.40**. Next version number: **1.41**. Public repository: https://github.com/ClashGate/ClashGate
 
 ---
 
@@ -79,7 +79,7 @@ Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snel
 | `panel/cg_qr.py` | QR codes |
 | `panel/routing_mgr.py` | Server-side routing: `/etc/clashgate/routing/` + `routing.json`, assembled into the template |
 | `panel/i18n_en.py` | English translations of server API messages (source strings stay Chinese) |
-| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.39.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
+| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.40.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
 | `panel/dist/` | **Committed build output.** After frontend changes, run `cd panel/web && npm ci && npm run build` and commit the `panel/dist` updates (CI checks `git diff --exit-code -- panel/dist`) |
 | `resources/server.yaml.tpl`, `resources/client.yaml.tpl` | Server / client config templates |
 | `resources/routing/` | Default routing groups (节点选择 / node select, 漏网之鱼 / final / unmatched) |
@@ -96,7 +96,7 @@ Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snel
 
 ---
 
-## 3. Current CLI commands (v1.39)
+## 3. Current CLI commands (v1.40)
 
 With no argument: opens the management menu if already installed, otherwise starts install. `clashgate help` lists every subcommand.
 
@@ -145,7 +145,7 @@ The public default branch is `main` (stable). `test` is the test channel.
 2. The project owner verifies on a real machine (the owner clicks 「检查更新」 (Check for updates) in the panel).
 3. **Push to `main` only after the owner explicitly agrees.** A version that fails acceptance is retired and must not be reused.
 
-Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.39`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.39`, `1.40`, and so on.
+Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.40`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.39`, `1.40`, and so on.
 
 Commit messages are in English. **Never force push.**
 
@@ -246,8 +246,9 @@ Tests **must not** re-issue certificates against the Let's Encrypt production en
 | 1.37 | Added `clashgate cert [domain]` (menu: 「更换域名证书」): change the domain; the new certificate comes first and a failure changes nothing; then the cluster is left, the inbound nodes are reset to one new VLESS Reality node and the subscription token / Zashboard secret are rotated. Panel UI: nodes deleted in the draft stay listed as 「待删除」 until applied; routing groups get up / down buttons (dragging does not work on touch screens); the four modals are real dialogs (focus moves in, Tab stays inside, focus returns; ✕ has a label); Zashboard card moved to the home page; Settings order: password, update channel, auto update, core, panel version (new, with 检查更新), skin, custom server last; the tab title shows the pending count; new opt-in 「深色」 skin (owner request); the cluster works in custom-server mode: `custom_conf_with_cluster` replaces only the cluster listeners / member outbounds in the user's file (on every cluster change and when a custom config is saved), the user's proxy-groups decide whether members are used; a change the user's file rejects (e.g. a group naming a member that renames) is rolled back |
 | 1.38 | DNS API mode checks before asking Let's Encrypt that the token can see the domain's Cloudflare zone (clear message instead of acme.sh's `invalid domain`); `clashgate status` counts only the core's sockets; the home page shows a certificate alert only when the certificate is temporary, missing, expired or under 14 days; a typed Reality SNI must answer TLS 1.3 from the server; the Settings 面板版本 card is gone (the home status rail has it); Content-Security-Policy: scripts only from the panel plus the hashed skin snippet, boot data is a JSON block read by `src/boot.js`; cluster members are exits only: each cluster inbound has `proxy: DIRECT`, so traffic from another panel never follows this server's rules and A -> B -> A cannot loop (Mihomo's loopback detector only catches a core dialing itself); existing links get it on the first panel start after the update (`refresh_cluster_fragments`), in custom-server mode too (the user's file gets it back on every cluster change / save even if it was deleted by hand) |
 | 1.39 | Installer and panel core update pick the Mihomo build by x86-64 level from `/proc/cpuinfo` (v3 / plain / v2 / v1 / compatible, best first) and silently try the next one when `-v` fails (no message: it is a one-click installer, the user only sees 「已安装」): the plain amd64 build needs an x86-64-v3 CPU and stopped installs on older VPS CPUs ("can only be run on AMD64 processors with v3 microarchitecture support"); the test scripts use the `amd64-compatible` build. Cluster add / check / remove / leave run in the background from the page (`async=1`, `/api/cluster-task-status`); a blocking overlay shows the current step (connecting, the other panel reloading, this panel reloading, notifying members) and the seconds, and comes back after a page reload; other panels and the CLI still get a blocking answer. A click while another action is running now says so instead of doing nothing |
+| 1.40 | Cluster: a 等待互联 entry (a panel the members know but this panel could not link with) records the members that reported it (`via`) and goes away with them (`_prune_pending`, also on load, so a stale entry from 1.39 disappears once its members are gone); the page can dismiss one (「忽略」, `/cluster/dismiss`; the next 检查 tries again). 检查 asks every member that knows a missing panel, not only the first, and says which member cannot reach it (「X 现在也连不上它：…」) instead of the generic 「对方面板没有响应集群请求」; asking a member for a ticket retries a timeout once (`ClusterTimeout`). The panel running add / 检查 reloads its core once at the end (`cluster_batch`) instead of once per link; each other panel still reloads once for its own new inbound; if that final reload fails, the links made in the operation are undone on both sides. Links authenticate with their own keys, so changing a panel password never drops them (now said under the password field; e2e covers it). The custom-server note on the cluster page is gone (owner request) |
 
-Next version: **1.40**.
+Next version: **1.41**.
 
 ---
 

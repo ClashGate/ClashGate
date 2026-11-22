@@ -66,6 +66,7 @@ def load_cluster() -> dict:
             out["links"] = [l for l in (raw.get("links") or []) if isinstance(l, dict) and l.get("id")
                             and isinstance(l.get("in"), dict) and isinstance(l.get("out"), dict)]
             out["pending"] = [p for p in (raw.get("pending") or []) if isinstance(p, dict)]
+            _prune_pending(out)
             now = time.time()
             out["removed"] = {k: v for k, v in (raw.get("removed") or {}).items()
                               if _INST_RE.fullmatch(str(k)) and isinstance(v, (int, float)) and now - v < CLUSTER_TOMBSTONE_TTL}
@@ -74,6 +75,26 @@ def load_cluster() -> dict:
     except (ValueError, OSError) as e:
         sys.stderr.write(f"cluster.json unreadable: {e}\n")
     return out
+
+
+def _prune_pending(st: dict):
+    """A 等待互联 entry is a panel our members know but we could not link with yet. It goes away with
+    the members that told us about it (`via`): once they are all removed it is no cluster of ours."""
+    links = {l.get("instance") for l in st["links"]}
+    keep = []
+    for p in st["pending"]:
+        via = p.get("via")
+        if not links or p.get("instance") in links:
+            continue
+        if isinstance(via, list) and not links.intersection(via):
+            continue
+        keep.append(p)
+    st["pending"] = keep
+
+
+def cluster_pending_id(p: dict) -> str:
+    """Id of a 等待互联 entry for the page (not the panel's instance id itself)."""
+    return hashlib.sha256(("pending:" + str(p.get("instance") or "")).encode()).hexdigest()[:12]
 
 
 def cluster_instance_id() -> str:
@@ -324,6 +345,10 @@ class ClusterError(Exception):
     """Error shown to the user as-is (Chinese source text, translated by i18n_en)."""
 
 
+class ClusterTimeout(ClusterError):
+    """The other panel did not answer in time (may be a passing network hiccup: safe calls retry once)."""
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -383,12 +408,12 @@ def cluster_http(base: str, path: str, data: dict = None, timeout: int = 15) -> 
         if isinstance(r, ssl.SSLError):
             raise ClusterError("和对方面板建立 HTTPS 连接失败（{}）".format(str(r)[:120]))
         if isinstance(r, (socket.timeout, TimeoutError)):
-            raise ClusterError("连接对方面板超时，请检查地址、端口和对方防火墙")
+            raise ClusterTimeout("连接对方面板超时，请检查地址、端口和对方防火墙")
         if isinstance(r, socket.gaierror):
             raise ClusterError("无法解析对方面板的域名，请检查地址")
         raise ClusterError("连接不上对方面板，请检查地址、端口和对方防火墙（{}）".format(str(r)[:120]))
     except (socket.timeout, TimeoutError):
-        raise ClusterError("连接对方面板超时，请检查地址、端口和对方防火墙")
+        raise ClusterTimeout("连接对方面板超时，请检查地址、端口和对方防火墙")
     except (ssl.SSLError, OSError) as e:
         raise ClusterError("连接不上对方面板，请检查地址、端口和对方防火墙（{}）".format(str(e)[:120]))
     try:
@@ -413,9 +438,10 @@ def cluster_hello(base: str) -> dict:
 
 
 class ClusterRemoteError(ClusterError):
-    def __init__(self, msg: str, code: str = ""):
+    def __init__(self, msg: str, code: str = "", remote_msg: str = ""):
         super().__init__(msg)
         self.code = code
+        self.remote_msg = remote_msg   # the other panel's own text, without our prefix
 
 
 def _remote_error(status: int, obj, fallback: str) -> ClusterError:
@@ -433,7 +459,7 @@ def _remote_error(status: int, obj, fallback: str) -> ClusterError:
         return ClusterRemoteError("集群邀请已失效，请点「检查」重试", code)
     if code in ("name_clash", "unreachable_back", "self", "bad_request", "left"):
         return ClusterRemoteError(msg or fallback, code)
-    return ClusterRemoteError(f"{fallback}：{msg}" if msg else f"{fallback}（HTTP {status}）", code)
+    return ClusterRemoteError(f"{fallback}：{msg}" if msg else f"{fallback}（HTTP {status}）", code, msg)
 
 
 def local_cluster_url() -> str:
@@ -482,8 +508,73 @@ def _cluster_new_inbound() -> dict:
     return {"port": port, "uuid": str(uuidlib.uuid4()), "decryption": dec, "_enc": enc}
 
 
+# One reload per operation on the panel that runs it. Adding a panel used to reload this core once for
+# every member it linked with (the first one, then each member found by 检查); inside cluster_batch()
+# the links are saved as they are made and the core reloads once at the end. The other panels still
+# reload once each: every one of them gets its own new inbound. Thread-local: a link another panel
+# makes with us meanwhile (its own request thread) is applied at once as before.
+_CLUSTER_BATCH = threading.local()
+
+
+class cluster_batch:
+    """with cluster_batch(): ... -> links made inside go live together when the block ends. If that
+    final reload fails, everything is put back here and the other side of each new link is told to drop it."""
+
+    def __enter__(self):
+        if getattr(_CLUSTER_BATCH, "state", None) is not None:   # nested: the outer block applies
+            self.outer = False
+            return self
+        self.outer = True
+        with LOCK:
+            st = load_cluster()
+            _CLUSTER_BATCH.state = {
+                "backup": _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS)),
+                "specs": cluster_ufw_specs(st), "names": {str(l.get("name") or "") for l in st["links"]},
+                "dirty": False, "new": []}
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if not self.outer:
+            return False
+        b, _CLUSTER_BATCH.state = _CLUSTER_BATCH.state, None
+        if not b["dirty"]:
+            return False
+        try:
+            cluster_stage("本机正在让集群配置生效")
+            with LOCK:
+                apply_cluster_live(b["specs"], b["names"])
+        except Exception as e:
+            with LOCK:
+                _restore_files(b["backup"])
+            for base, my_inst, key in b["new"]:   # do not leave half links on the other panels
+                try:
+                    cluster_http(base, "/api/cluster/leave", {"instance": my_inst, "key": key}, timeout=60)
+                except ClusterError:
+                    pass
+            if exc_type is None:
+                raise ClusterError(f"集群配置没能生效，已撤销这次添加的互联：{e}")
+        return False
+
+
+def _batching() -> bool:
+    return getattr(_CLUSTER_BATCH, "state", None) is not None
+
+
 def _cluster_commit(mutate) -> dict:
-    """Under LOCK: load, mutate(st) (may raise), save, apply live; restore everything on failure."""
+    """Under LOCK: load, mutate(st) (may raise), save, apply live; restore everything on failure.
+    Inside cluster_batch() the change is saved now and applied when the batch ends."""
+    if _batching():
+        with LOCK:
+            backup = _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS))
+            st = load_cluster()
+            try:
+                res = mutate(st)
+                save_cluster(st)
+            except Exception:
+                _restore_files(backup)
+                raise
+            _CLUSTER_BATCH.state["dirty"] = True
+            return res
     with LOCK:
         backup = _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS))
         st = load_cluster()
@@ -576,7 +667,7 @@ def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
     inb = _cluster_new_inbound()
     key = secrets.token_urlsafe(32)
     try:
-        cluster_stage(f"「{rname}」正在创建集群节点并重载内核")
+        cluster_stage(f"「{rname}」正在创建集群节点并让配置生效")
         status, obj, _ = cluster_http(base, "/api/cluster/join", {
             **auth, "instance": my_inst, "name": local_node_name(), "url": self_url, "version": VERSION,
             "key": key, "port": inb["port"], "uuid": inb["uuid"], "encryption": inb["_enc"]}, timeout=120)
@@ -602,8 +693,11 @@ def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
             st["pending"] = [p for p in st["pending"] if p.get("instance") != r_inst]
             st["removed"].pop(r_inst, None)
         try:
-            cluster_stage("本机正在写入集群配置并重载内核")
+            if not _batching():
+                cluster_stage("本机正在让集群配置生效")
             _cluster_commit(add)
+            if _batching():
+                _CLUSTER_BATCH.state["new"].append((base, my_inst, key))
         except Exception as e:
             try:   # do not leave a half link on the other side
                 cluster_http(base, "/api/cluster/leave", {"instance": my_inst, "key": key}, timeout=60)
@@ -623,8 +717,12 @@ def cluster_issue_ticket(target: dict, joiner: dict) -> str:
     """Ask `target` (a linked panel) to accept one pairing from `joiner` (another link of ours); returns
     the ticket. `since` (when we linked with the joiner) lets target see that an old removal is over."""
     ticket = secrets.token_urlsafe(24)
-    cluster_call(target, "/api/cluster/expect", {"from_instance": joiner["instance"], "since": int(joiner.get("created") or 0),
-                                                  "ticket_hash": hashlib.sha256(ticket.encode()).hexdigest()})
+    form = {"from_instance": joiner["instance"], "since": int(joiner.get("created") or 0),
+            "ticket_hash": hashlib.sha256(ticket.encode()).hexdigest()}
+    try:
+        cluster_call(target, "/api/cluster/expect", form)
+    except ClusterTimeout:   # the same ticket again is harmless: retry a passing timeout once
+        cluster_call(target, "/api/cluster/expect", form)
     return ticket
 
 
@@ -634,6 +732,7 @@ def _drop_links(instances: set, tombstone: bool = False) -> list:
         gone = [l for l in st["links"] if l.get("instance") in instances]
         st["links"] = [l for l in st["links"] if l.get("instance") not in instances]
         st["pending"] = [p for p in st["pending"] if p.get("instance") not in instances]
+        _prune_pending(st)   # panels only the removed members knew about
         if tombstone:
             for i in instances:
                 st["removed"][i] = int(time.time())
@@ -661,7 +760,7 @@ def cluster_leave_all(notify: bool = True) -> tuple:
                 cluster_call(l, "/api/cluster/leave", timeout=30)
             except ClusterError:
                 unreachable.append(l.get("name", ""))
-    cluster_stage("本机正在删除互联并重载内核")
+    cluster_stage("本机正在删除互联")
     _drop_links({l["instance"] for l in links})
     return len(links), unreachable
 
@@ -750,26 +849,53 @@ def cluster_sync() -> dict:
                 st["removed"].pop(i, None)
             save_cluster(st)
 
-    # 2. link this panel with panels it does not know yet
-    pending = {}
-    for holder, mem in list(views.items()):
+    # 2. link this panel with panels it does not know yet. Every member that knows one can vouch for us:
+    #    when the first cannot reach it (offline, firewall), the next one is asked.
+    unknown = {}
+    for holder, mem in views.items():
         for m in mem:
             inst = m["instance"]
-            if inst == me or _link_by(load_cluster(), instance=inst) or inst in pending:
+            if inst == me or _link_by(load_cluster(), instance=inst):
                 continue
-            name = str(m.get("name") or "")
+            u = unknown.setdefault(inst, {"name": str(m.get("name") or ""), "url": str(m.get("url") or ""), "via": []})
+            u["via"].append(holder)
+    pending = {}
+    for inst, u in unknown.items():
+        if _link_by(load_cluster(), instance=inst):   # it linked with us meanwhile
+            continue
+        error, cut_off = "", []
+        for holder in u["via"]:
             broker = _link_by(load_cluster(), instance=holder)
             if not broker:
                 continue
+            bname = broker.get("name", "")
+            cluster_stage(f"正在通过「{bname}」和「{u['name']}」互联")
             try:
                 obj = cluster_call(broker, "/api/cluster/introduce", {"target": inst}, timeout=60)
+            except ClusterRemoteError as e:
+                if e.code == "unreachable":   # the member we asked cannot reach it either
+                    cut_off.append(bname)
+                    error = "「{}」现在也连不上它：{}".format("、".join(cut_off), e.remote_msg or str(e))
+                else:
+                    error = str(e)
+                continue
+            except ClusterError as e:
+                error = str(e)
+                continue
+            try:
                 link, theirs = cluster_pair(normalize_panel_url(str(obj.get("url") or "")), {"ticket": str(obj.get("ticket") or "")},
                                             expect_instance=inst)
-                views[inst] = theirs
-                rep["linked"].append(link["name"])
             except ClusterError as e:
-                pending[inst] = {"instance": inst, "name": name, "url": str(m.get("url") or ""), "error": str(e)}
-                rep["failed"].append(name)
+                error = str(e)   # this panel cannot reach it: another member's ticket would not help
+                break
+            views[inst] = theirs
+            rep["linked"].append(link["name"])
+            error = ""
+            break
+        if error or not _link_by(load_cluster(), instance=inst):
+            pending[inst] = {"instance": inst, "name": u["name"], "url": u["url"], "via": list(u["via"]),
+                             "error": error or "集群成员不存在"}
+            rep["failed"].append(u["name"])
 
     # 3. link members with each other
     links = [l for l in load_cluster()["links"] if l["instance"] in views]

@@ -180,6 +180,11 @@ export function useCluster(p) {
     return runClusterTask('/cluster/sync', {}, 'cluster-sync', 'sync')
   }
 
+  // Hide a 等待互联 entry; the next 检查 tries that panel again.
+  function dismissPending(p) {
+    return postAction('/cluster/dismiss', { id: p.id }, `cl-dm-${p.id}`)
+  }
+
   function leaveCluster() {
     openConfirmDialog({
       title: t('退出集群'),
@@ -209,5 +214,6 @@ export function useCluster(p) {
     clusterTask,
     taskTitle,
     resumeClusterTaskIfRunning,
+    dismissPending,
   }
 }
