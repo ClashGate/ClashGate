@@ -206,12 +206,27 @@ export function useCluster(p) {
   }
 
   // Opening the cluster page checks once by itself (quietly, the button shows 「检查中…」), at most
-  // every 30 seconds and never while something else runs.
-  let lastAutoCheck = 0
+  // every 30 minutes (1.45, was 30 s; remembered across reloads) and never while something else runs.
+  const AUTO_CHECK_MS = 30 * 60 * 1000
+  const AUTO_CHECK_KEY = 'clashgate_cluster_autocheck'
+  function readLastAutoCheck() {
+    try {
+      return Number(localStorage.getItem(AUTO_CHECK_KEY)) || 0
+    } catch {
+      return 0
+    }
+  }
+  let lastAutoCheck = readLastAutoCheck()
   function autoCheckCluster() {
     if (busyKey.value || clusterBusy.value || document.hidden) return null
-    if (Date.now() - lastAutoCheck < 30000) return null
-    lastAutoCheck = Date.now()
+    const now = Date.now()
+    if (now - Math.max(lastAutoCheck, readLastAutoCheck()) < AUTO_CHECK_MS) return null
+    lastAutoCheck = now
+    try {
+      localStorage.setItem(AUTO_CHECK_KEY, String(now))
+    } catch {
+      /* private mode: in-memory only */
+    }
     return runClusterTask('/cluster/sync', {}, 'cluster-sync', 'sync', { quiet: true })
   }
 

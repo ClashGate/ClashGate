@@ -18,9 +18,24 @@ export function useInbounds(p) {
       { key: 'vless_enc', desc: 'VLESS Encryption', options: [{ value: '', desc: '开启（默认）' }, { value: 'off', desc: '关闭' }] },
       { key: 'reality_key', desc: 'Reality 私钥', wide: true },
     ],
+    'vless-enc': [{ key: 'uuid', desc: 'UUID', wide: true }],
+    // 1.45: plain options; blank host = this server's domain, blank path = random
+    'vless-xhttp': [
+      { key: 'host', desc: 'Host' },
+      { key: 'path', desc: '路径' },
+      {
+        key: 'mode',
+        desc: 'XHTTP 模式',
+        options: [{ value: '', desc: 'auto（默认）' }].concat(
+          ['stream-one', 'stream-up', 'packet-up'].map((v) => ({ value: v, desc: v }))
+        ),
+      },
+      { key: 'vless_enc', desc: 'VLESS Encryption', options: [{ value: '', desc: '开启（默认）' }, { value: 'off', desc: '关闭' }] },
+      { key: 'uuid', desc: 'UUID', wide: true },
+    ],
     hysteria2: [
       { ...PW, wide: true },
-      { key: 'obfs', desc: '混淆', options: [{ value: '', desc: 'Salamander（默认）' }, { value: 'off', desc: '关闭' }] },
+      { key: 'obfs', desc: '混淆', options: [{ value: '', desc: '关闭（默认）' }, { value: 'salamander', desc: 'Salamander' }] },
       { key: 'obfs_password', desc: '混淆密码' },
     ],
     shadowsocks: [
@@ -58,11 +73,27 @@ export function useInbounds(p) {
       lockedNote: '已锁定安全默认：默认启用 VLESS Encryption (vless-x25519)。SNI 可自填，留空从内置域名池随机抽取',
     },
     {
+      value: 'vless-enc',
+      label: 'VLESS Encryption',
+      defaultName: 'VlessEnc',
+      desc: '用来替代 SS 的新一代裸奔协议',
+      lockedNote: '已锁定安全默认：后量子加密 (mlkem768x25519plus) 与 XTLS Vision，UUID 与密钥自动生成，支持 UDP',
+    },
+    {
+      // 1.45: listed only with the custom server mode on (customOnly)
+      value: 'vless-xhttp',
+      label: 'VLESS XHTTP',
+      defaultName: 'VlessXhttp',
+      desc: 'XHTTP 传输的 VLESS，内置 VLESS Encryption，支持 CDN',
+      lockedNote: '仅在自定义服务端模式下可用，需要证书',
+      customOnly: true,
+    },
+    {
       value: 'hysteria2',
       label: 'Hysteria2',
       defaultName: 'Hysteria2',
       desc: '新一代 UDP 协议',
-      lockedNote: '已锁定安全默认：混淆密码 (Salamander) 默认随机生成，不可手动关闭',
+      lockedNote: '已启用安全默认：密码随机生成，不开启混淆，保持标准 HTTP/3 外观',
     },
     {
       value: 'shadowsocks',
@@ -90,7 +121,7 @@ export function useInbounds(p) {
       label: 'ShadowQUIC',
       defaultName: 'ShadowQUIC',
       desc: '免证书的新一代 QUIC 协议，内置随机 JLS 伪装',
-      lockedNote: '已锁定安全默认：伪装地址 (JLS) 可自填，留空从内置域名池随机抽取，拥塞控制默认 bbr',
+      lockedNote: '已锁定安全默认：伪装地址 (JLS) 可自填，留空从内置域名池随机抽取，拥塞控制默认 bbr，关闭 0-RTT',
     },
     {
       value: 'sudoku',
@@ -101,10 +132,10 @@ export function useInbounds(p) {
     },
     {
       value: 'tuic',
-      label: 'TUIC v5',
-      defaultName: 'TUICv5',
-      desc: '基于 QUIC 的低延迟零握手机制 UDP 协议',
-      lockedNote: '已启用安全默认：UUID 与密码随机生成，开启 0-RTT 与 native UDP 转发',
+      label: 'TUIC',
+      defaultName: 'TUIC',
+      desc: '基于 QUIC 的低延迟 UDP 协议',
+      lockedNote: '已启用安全默认：UUID 与密码随机生成，关闭 0-RTT（防重放），native UDP 转发',
     },
     {
       value: 'trusttunnel',
@@ -125,14 +156,14 @@ export function useInbounds(p) {
       label: 'HTTP',
       defaultName: 'HTTP',
       desc: '通用 HTTP / HTTPS 代理协议',
-      lockedNote: '已启用安全默认：鉴权密码自动随机生成',
+      lockedNote: '已启用安全默认：鉴权密码自动随机生成，有证书时默认开启 TLS',
     },
     {
       value: 'socks',
       label: 'SOCKS5',
       defaultName: 'SOCKS5',
       desc: '通用 SOCKS5 代理协议，支持 UDP 转发',
-      lockedNote: '已启用安全默认：鉴权密码自动随机生成，默认开启 UDP',
+      lockedNote: '已启用安全默认：鉴权密码自动随机生成，默认开启 UDP，有证书时默认开启 TLS',
     },
   ]
 
@@ -146,8 +177,9 @@ export function useInbounds(p) {
     tuic_cc: 'bbr',
     tt_cc: 'bbr',
     mieru_transport: 'TCP',
-    http_tls: '0',
-    socks_tls: '0',
+    // 1.45: TLS on by default when there is a certificate (else the password goes over the wire in clear)
+    http_tls: state.certs_present ? '1' : '0',
+    socks_tls: state.certs_present ? '1' : '0',
     sni: '',
     adv: {},
   })
@@ -169,6 +201,22 @@ export function useInbounds(p) {
         inboundForm.name = newDefault
       }
       inboundForm.adv = {}   // the optional fields belong to one protocol
+    }
+  )
+
+  watch(
+    () => state.certs_present,
+    (has) => {
+      inboundForm.http_tls = has ? '1' : '0'
+      inboundForm.socks_tls = has ? '1' : '0'
+    }
+  )
+
+  // A custom-only protocol (VLESS XHTTP) leaves the form when the custom server mode is turned off.
+  watch(
+    () => state.custom_server_enabled,
+    (on) => {
+      if (!on && (PROTOCOL_MAP[inboundForm.kind] || {}).customOnly) inboundForm.kind = 'vless-reality'
     }
   )
 

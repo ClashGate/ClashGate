@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.44" src="https://img.shields.io/badge/version-v1.44-1d6fe0" />
+  <img alt="Version: v1.45" src="https://img.shields.io/badge/version-v1.45-1d6fe0" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -18,7 +18,7 @@
   - 无证书模式：只要一台服务器，自动生成 VLESS Reality 节点，最快上手；
   - 自动证书模式：再准备一个域名，自动申请并续期 Let's Encrypt 证书，额外提供 HTTPS 管理面板和订阅链接。
 - **三种证书方式**：端口模式（通过 80 端口验证）、Cloudflare DNS（不用开放 80 端口）、手动上传自己的证书，都能在面板里随时切换。
-- **多种协议**：VLESS Reality、Shadowsocks、Hysteria2、Snell v6、AnyTLS、TUIC、TrustTunnel、ShadowQUIC、Mieru、Sudoku，在面板里点几下即可添加。
+- **多种协议**：VLESS Reality、VLESS Encryption、Shadowsocks、Hysteria2、Snell v6、AnyTLS、TUIC、TrustTunnel、ShadowQUIC、Mieru、Sudoku，在面板里点几下即可添加。
 - **订阅链接**：Mihomo / Clash 系客户端直接导入，节点有变动时客户端更新订阅即可，不用手动拼配置。
 - **服务端分流**：在面板中按规则把不同网站分到不同出口；高级用户也可以换成自己的服务端配置。
 - **集群**：把多台 ClashGate 服务器连在一起，一个订阅链接同时包含所有服务器的节点。

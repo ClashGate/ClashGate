@@ -1,6 +1,6 @@
 # ClashGate Agent Handoff Guide
 
-This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.44**. Next version number: **1.45**. Public repository: https://github.com/ClashGate/ClashGate
+This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.45**. Next version number: **1.46**. Public repository: https://github.com/ClashGate/ClashGate
 
 ---
 
@@ -43,7 +43,7 @@ The default certificate source is the Let's Encrypt production environment (`TLS
 
 Subscription URL: `https://<domain>:<panel-port>/sub/<token>/mihomo.yaml` (the filename `mihomo.yaml` is allowed).
 
-Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snell v6, AnyTLS, TUIC, TrustTunnel, ShadowQUIC, Mieru, Sudoku, HTTP, SOCKS5.
+Inbound protocols the panel can add: VLESS Reality, VLESS Encryption, Shadowsocks, Hysteria2, Snell v6, AnyTLS, TUIC, TrustTunnel, ShadowQUIC, Mieru, Sudoku, HTTP, SOCKS5. Custom server mode also offers VLESS XHTTP (`CUSTOM_ONLY_TYPES`).
 
 ### systemd units
 
@@ -79,7 +79,7 @@ Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snel
 | `panel/cg_qr.py` | QR codes |
 | `panel/routing_mgr.py` | Server-side routing: `/etc/clashgate/routing/` + `routing.json`, assembled into the template |
 | `panel/i18n_en.py` | English translations of server API messages (source strings stay Chinese) |
-| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.44.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
+| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.45.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
 | `panel/dist/` | **Committed build output.** After frontend changes, run `cd panel/web && npm ci && npm run build` and commit the `panel/dist` updates (CI checks `git diff --exit-code -- panel/dist`) |
 | `resources/server.yaml.tpl`, `resources/client.yaml.tpl` | Server / client config templates |
 | `resources/routing/` | Default routing groups (节点选择 / node select, 漏网之鱼 / final / unmatched) |
@@ -96,7 +96,7 @@ Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snel
 
 ---
 
-## 3. Current CLI commands (v1.44)
+## 3. Current CLI commands (v1.45)
 
 With no argument: opens the management menu if already installed, otherwise starts install. `clashgate help` lists every subcommand.
 
@@ -145,7 +145,7 @@ The public default branch is `main` (stable). `test` is the test channel.
 2. The project owner verifies on a real machine (the owner clicks 「检查更新」 (Check for updates) in the panel).
 3. **Push to `main` only after the owner explicitly agrees.** A version that fails acceptance is retired and must not be reused.
 
-Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.44`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.39`, `1.40`, and so on.
+Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.45`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.39`, `1.40`, and so on.
 
 Commit messages are in English. **Never force push.**
 
@@ -252,13 +252,18 @@ Tests **must not** re-issue certificates against the Let's Encrypt production en
 | 1.43 | Fewer core restarts: `reload_core` sends `systemctl reload` (SIGHUP; Mihomo applies the file in place: unchanged listeners keep their connections, the controller is rebuilt, new connections wait during the switch) and waits for the expected ports before judging; it restarts only when the reload is refused (core not running) or the ports never come up. 应用配置 used to check the ports right after the signal, before the core had applied the file, so adding an inbound nearly always ended in a restart. Hot reload now also for the cluster, custom server save / off, 恢复默认服务端模板, the template refresh, the Snell migration and `clashgate update` when the core binary did not change. Still a restart: a new core binary, renewed certificates (listeners keep the certificate they loaded), `clashgate restart`, a failed reload's rollback. `clashgate update` checks the core version first (`update_core`): already the latest, no download; the version could not be fetched (API tried twice, then the releases/latest redirect) or the download failed: the panel update goes on, a warning at the end and `core_update_failed`, which `/api/upgrade-status` reports (`core_failed`) so the page says the core was not updated. The panel's 更新内核 gets the same retry / redirect fallback and tries the next build when one download fails. The cluster page's 检查 is shown with no members too (another panel may have added this one), and opening the page runs it once by itself (`autoCheckCluster`: quiet, no toast, at most every 30 s, not while something else runs) |
 | 1.44 | Custom server: the add-node form shows the options the safe defaults lock as optional fields (`ADV_FIELDS` in `useInbounds.js`: passwords, usernames, Shadowsocks cipher, UUID / Short ID / Reality key / VLESS Encryption on-off, Hysteria2 obfs, Snell PSK, Sudoku AEAD / table), sent as `adv_*`; `build_inbound(..., advanced=True)` uses them only in custom mode, validates them, and keeps the defaults for blank ones. The 安全默认策略 badge and the 已锁定安全默认 notes are hidden in custom mode. Settings: turning custom server off always asks; with a custom config in use the message says it restores the default server template. 退出集群 is clickable during 检查 / 重试 and takes over: `_cluster_job` sets `_CLUSTER_CANCEL` instead of refusing, the check stops at its next step / change (`ClusterCancelled`, staged changes are not applied, the leave applies once) and does not overwrite the leave's status. New loading visuals: `CgSpinner.vue`, the cluster add overlay has a progress bar and lists the steps done so far. New 关于 page (`/about`, from Settings): version, a short changelog (`CHANGELOG` in `AboutPage.vue`: one line per version, newest first; add the new version there on every release), credits mihomo and Xray with their GitHub links. Home page: Zashboard on the right with 添加节点 under it (without a certificate 添加节点 moves up) |
 
-Next version: **1.45**.
+| 1.45 | New inbound `vless-enc` (VLESS Encryption on plain TCP, the minimal config: one user with `flow: xtls-rprx-vision` and an ML-KEM-768 `decryption` from `mihomo generate vless-mlkem768`; UDP via XUDP inside the TCP stream; firewall TCP only). Custom server only: `vless-xhttp` (VLESS over XHTTP with the certificate and VLESS Encryption; plain optional fields: host (blank = the panel domain), path (blank = random), mode, VLESS Encryption on/off, UUID; the panel does not set up a CDN for the user). `listener_to_inbound` keeps the stored client of an unchanged `vless-enc` / `vless-xhttp` node (the ML-KEM client key cannot be rebuilt from the listener), and `derive_vless_encryption` derives the client key of an ML-KEM seed with `mihomo generate vless-mlkem768 <seed>`. New nodes only: TUIC drops `reduce-rtt`, ShadowQUIC sets `zero-rtt: false` and drops `quic-version-probe` / `max-idle-time` / `disable-mtu-discovery`, HTTP / SOCKS5 default to TLS when a certificate exists, Hysteria2 has no Salamander obfuscation by default (standard HTTP/3 with the real certificate; reset keeps the node's choice). TUIC is labelled without “v5”. The cluster page checks by itself at most every 30 minutes (was 30 s; the time is kept in localStorage). Settings: the 关于 card has no subtitle. |
+
+Next version: **1.46**.
 
 ---
 
 ## 9. Deferred / do not
 
 - **Keep the 关于 changelog short and current.** On every version bump add one line at the top of `CHANGELOG` in `panel/web/src/pages/AboutPage.vue` (tests check that it starts with `VERSION`) and keep at most 8 entries.
+- **Shadowsocks keeps `aes-256-gcm` as its default** (owner: it is for old clients). New bare (no TLS) nodes should be VLESS Encryption, not SS. No 0-RTT defaults on new protocols.
+- **VLESS XHTTP stays in the custom server mode, as plain fields.** Do not add CDN wizards, hints or auto-filled CDN settings (owner: advanced users set it up themselves).
+- **Hysteria2 obfuscation stays off by default** (Salamander drops the HTTP/3 cover); it is an option in custom server mode.
 - **Do not restart the core to apply a config.** Use `reload_core` (hot reload, waits for the ports). Restart only for a new binary or new certificates.
 - **One cluster inbound per panel.** Do not go back to an inbound per link; a new member is a user in `cg-cluster-in`. Key rotation is not built in (owner: not needed); if it is ever added, rotate the shared keys and send every member its new node with `/api/cluster/node`.
 - **Do not write one-JSON-object-per-line entries into config.yaml or its fragments.** Use `dump_yaml_proxies` / `dump_yaml_map`; tests compare parsed entries (`_section_items`, `_conf_cluster_entries`), not text.

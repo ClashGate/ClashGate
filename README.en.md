@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.44" src="https://img.shields.io/badge/version-v1.44-1d6fe0" />
+  <img alt="Version: v1.45" src="https://img.shields.io/badge/version-v1.45-1d6fe0" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -18,7 +18,7 @@
   - No-certificate mode: just a server; VLESS Reality nodes are generated for you. The quickest start.
   - Auto-certificate mode: add a domain and get a Let's Encrypt certificate that renews itself, plus an HTTPS admin panel and a subscription link.
 - **Three ways to get the certificate**: port mode (validated over port 80), Cloudflare DNS (no port 80 needed), or upload your own. Switch any time in the panel.
-- **Many protocols**: VLESS Reality, Shadowsocks, Hysteria2, Snell v6, AnyTLS, TUIC, TrustTunnel, ShadowQUIC, Mieru and Sudoku, added in a few clicks.
+- **Many protocols**: VLESS Reality, VLESS Encryption, Shadowsocks, Hysteria2, Snell v6, AnyTLS, TUIC, TrustTunnel, ShadowQUIC, Mieru and Sudoku, added in a few clicks.
 - **Subscription link**: import it into Mihomo / Clash clients; when nodes change, clients just refresh the subscription.
 - **Server-side routing**: send different sites through different exits with rules in the panel; advanced users can swap in their own server config.
 - **Cluster**: link several ClashGate servers so one subscription link carries the nodes of all of them.

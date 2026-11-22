@@ -389,6 +389,13 @@ TABLE = [
     ("已切换为手动证书（颁发者：{}，到期：{}，剩余 {} 天）", "Switched to the manual certificate (issuer: {}, expires: {}, {} days left)"),
     ("手动证书校验通过，已重新加载（颁发者：{}，到期：{}，剩余 {} 天）", "Manual certificate checked and reloaded (issuer: {}, expires: {}, {} days left)"),
     ("重新生成证书失败：端口模式需要 socat，请先在服务器上安装 socat，或改用 Cloudflare DNS。", "Failed to regenerate the certificate: Port mode needs socat. Install socat on the server first, or use Cloudflare DNS."),
+    ("VLESS XHTTP 只在自定义服务端模式下可用（「设置」→「自定义服务端」）", "VLESS XHTTP is only available in custom server mode (Settings → Custom server)"),
+    ("路径无效：以 / 开头，只能有字母、数字及 . _ ~ / -", "Invalid path: it must start with / and contain only letters, digits and . _ ~ / -"),
+    ("VLESS XHTTP 只在自定义服务端模式下可用（「设置」→「自定义服务端」）", "VLESS XHTTP is only available in custom server mode (Settings → Custom server)"),
+    ("路径无效：以 / 开头，只能有字母、数字及 . _ ~ / -", "Invalid path: it must start with / and contain only letters, digits and . _ ~ / -"),
+    ("Host 无效，请填写域名", "Invalid host; enter a domain"),
+    ("不支持的 XHTTP 模式", "Unsupported XHTTP mode"),
+    ("不支持的混淆方式", "Unsupported obfuscation"),
 ]
 
 _COMPILED = []
