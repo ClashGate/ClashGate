@@ -83,7 +83,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -870,6 +870,126 @@ class ClusterTest(unittest.TestCase):
         h.do_cluster_node({"port": "x"})
         self.assertEqual(sent[-1][0], 400)
 
+    def test_reload_core_waits_before_restarting(self):
+        """1.43: `systemctl reload` only sends SIGHUP; the core applies the file afterwards. The panel
+        used to check the ports right away and restart (dropping every connection) when a new port was
+        not up yet. reload_core waits for the ports and restarts only if they never come up."""
+        g = P.reload_core.__globals__
+        calls, up = [], {"after": 3}
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd[1])
+            return (1, "refused") if fake_run.refuse and cmd[1] == "reload" else (0, "")
+        fake_run.refuse = False
+
+        def fake_status():
+            up["after"] -= 1
+            return {"active": "active", "listening": [1000, 2000] if up["after"] <= 0 else [1000],
+                    "pid": "1", "version": "", "since": "", "restarts": "", "cert": {}, "uptime": 1}
+
+        with mock.patch.dict(g, {"run": fake_run, "mihomo_status": fake_status}):
+            self.assertEqual(P.reload_core({1000, 2000}, timeout=5)[0], 0)
+            self.assertEqual(calls, ["reload"])   # the new port came up a moment later: no restart
+            calls.clear()
+            up["after"] = 10 ** 6
+            rc, out = P.reload_core({1000, 2000}, timeout=0.3)
+            self.assertEqual((calls, rc), (["reload", "restart"], 1))
+            self.assertIn("监听", out)
+            calls.clear()
+            fake_run.refuse = True   # core not running: reload refused, start it
+            up["after"] = 0
+            self.assertEqual(P.reload_core({1000}, timeout=1)[0], 0)
+            self.assertEqual(calls, ["reload", "restart"])
+
+    def test_config_changes_reload_instead_of_restart(self):
+        """Only a new core binary and renewed certificates still restart the core."""
+        h = read(os.path.join(REPO, "panel/cg_http.py"))
+        act = h[h.index("def do_action"):]
+        act = act[:act.index("\n    def ", 10)]
+        self.assertIn("reload_core(", act)
+        self.assertNotIn("mihomo_status()", act)   # no port check right after the signal
+        cfg = read(os.path.join(REPO, "panel/cg_config.py"))
+        for fn in ("def apply_custom_config", "def disable_custom_config", "def reset_to_template_config",
+                   "def refresh_template_if_flagged"):
+            body = cfg[cfg.index(fn):]
+            body = body[:body.index("\ndef ", 10)]
+            self.assertIn("reload_core(", body, fn)
+            self.assertNotIn('rc, out = run([SYSTEMCTL, "restart", "mihomo"])', body, fn)
+        cl = read(os.path.join(REPO, "panel/cg_cluster.py"))
+        live = cl[cl.index("def apply_cluster_live"):]
+        live = live[:live.index("\ndef ", 10)]
+        self.assertIn("reload_core(", live)
+        up = read(os.path.join(REPO, "panel/cg_update.py"))
+        snell = up[up.index("def migrate_snell_to_v6"):]
+        snell = snell[:snell.index("\ndef ", 10)]
+        self.assertIn("reload_core()", snell)
+
+    def test_update_skips_a_current_core_and_survives_a_failed_download(self):
+        """1.43: `clashgate update` compares the core version first; when the version cannot be fetched
+        or the download fails, the panel update goes on and the failure is reported at the end."""
+        d = tempfile.mkdtemp(prefix="cg-core-")
+        self.addCleanup(shutil.rmtree, d, True)
+        fake = os.path.join(d, "mihomo")
+        with open(fake, "w") as f:
+            f.write("#!/bin/sh\necho 'Mihomo Meta v1.19.34 linux amd64 with go1.25'\n")
+        os.chmod(fake, 0o755)
+
+        def run_case(body):
+            script = (f'log() {{ :; }}; info() {{ :; }}; arch() {{ echo amd64; }}; source scripts/lib/core.sh; '
+                      f'CS_ROOT={d}; BIN={fake}; {body}; update_core; '
+                      f'echo "UPDATED=$CORE_UPDATED"; echo "NOTE=$CORE_NOTE"; cat {d}/core_update_failed 2>/dev/null; true')
+            r = subprocess.run(["bash", "-c", script], cwd=REPO, capture_output=True, text=True, timeout=30)
+            return r.stdout + r.stderr
+
+        out = run_case("core_latest() { return 1; }")
+        self.assertIn("UPDATED=0", out)
+        self.assertIn("无法获取最新版本信息", out)
+        self.assertIn("fetch\tv1.19.34", out)
+        out = run_case('core_latest() { CORE_TAG=v1.19.34; }; core_download() { echo DOWNLOADED; }')
+        self.assertIn("UPDATED=0", out)
+        self.assertIn("NOTE=\n", out + "\n")
+        self.assertNotIn("DOWNLOADED", out)   # already the latest: nothing downloaded
+        self.assertFalse(os.path.exists(os.path.join(d, "core_update_failed")))
+        out = run_case('core_latest() { CORE_TAG=v1.19.40; }; core_download() { CORE_ERR=download; return 1; }')
+        self.assertIn("UPDATED=0", out)
+        self.assertIn("下载失败", out)
+        self.assertIn("download\tv1.19.34\tv1.19.40", out)
+        out = run_case('core_latest() { CORE_TAG=v1.19.40; }; core_download() { return 0; }')
+        self.assertIn("UPDATED=1", out)
+        self.assertFalse(os.path.exists(os.path.join(d, "core_update_failed")))
+        sh = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))
+        upd = sh[sh.index("do_update() {"):]
+        upd = upd[:upd.index("\n}\n")]
+        self.assertIn("update_core", upd)
+        self.assertNotIn("install_core", upd)
+        self.assertIn("systemctl reload mihomo", upd)   # same binary: hot reload
+        self.assertIn('warn "$CORE_NOTE"', upd)
+
+    def test_cluster_page_checks_by_itself(self):
+        """1.43: 检查 is there with no members too (another panel may have added this one), and opening
+        the cluster page runs it once, quietly and at most every 30 s."""
+        src = os.path.join(REPO, "panel/web/src")
+        page = read(os.path.join(src, "pages/ClusterPage.vue"))
+        btn = page[:page.index("t('检查中…')")]
+        btn = btn[btn.rindex("<button"):]
+        self.assertNotIn("v-if", btn)
+        cl = read(os.path.join(src, "composables/useCluster.js"))
+        auto = cl[cl.index("function autoCheckCluster"):]
+        auto = auto[:auto.index("\n  }\n")]
+        self.assertIn("{ quiet: true }", auto)
+        self.assertIn("30000", auto)
+        self.assertIn("busyKey.value || clusterBusy.value", auto)
+        panel = read(os.path.join(src, "composables/usePanel.js"))
+        self.assertRegex(panel, r"watch\(activeTab, \(tab\) => \{ if \(tab === 'cluster'[^}]*autoCheckCluster\(\)")
+        self.assertIn("if (activeTab.value === 'cluster') autoCheckCluster()", panel)   # opened on /cluster
+        h = object.__new__(P.Panel)
+        h.headers = {}
+        got = {}
+        h.respond_mutation = lambda s, msg, ok=True, detail="": got.update(ok=ok, msg=msg)
+        P.save_cluster({"instance": "c" * 32, "links": [], "pending": [], "removed": {}})
+        h.do_cluster_sync({}, {})
+        self.assertEqual(got, {"ok": True, "msg": "集群里还没有其他面板"})   # answers at once, with fresh state
+
     def test_node_name_validation(self):
         for name in NODE_NAMES_OK:
             self.assertEqual(P.validate_node_name(name), name.strip(), name)
@@ -1240,7 +1360,7 @@ class ClusterTest(unittest.TestCase):
             self.assertEqual(U.mihomo_asset_candidates("amd64", tag, level=lvl)[-1], "mihomo-linux-amd64-compatible-v1.19.34.gz")
         self.assertEqual(U.mihomo_asset_candidates("arm64", tag), ["mihomo-linux-arm64-v1.19.34.gz"])
         core = read(os.path.join(REPO, "scripts/lib/core.sh"))
-        body = core[core.index("install_core() {"):]
+        body = core[core.index("core_download() {"):]
         body = body[:body.index("\n}\n")]
         self.assertIn("core_asset_candidates", body)
         self.assertNotIn('mihomo-linux-${a}-${tag}.gz" \'.assemblies[]', body)

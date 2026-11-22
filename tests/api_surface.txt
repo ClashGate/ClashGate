@@ -16,6 +16,7 @@ CLUSTER_STAGE_TTL
 CLUSTER_TICKET_TTL
 CLUSTER_TOMBSTONE_TTL
 CONF
+CORE_UPDATE_FAILED
 CS_ROOT
 CUSTOM_CONF
 CUSTOM_SAVED
@@ -182,6 +183,7 @@ _tr_msg
 _update_due
 _update_link
 _upgrade_log_tail
+_wait_core_ports
 _write_template_state
 _x
 _x25519_public_b64
@@ -226,6 +228,7 @@ cluster_stage
 cluster_sync
 cluster_ufw_specs
 collect_ufw_specs
+core_expected_ports
 custom_conf_with_cluster
 default_node_name
 derive_vless_encryption
@@ -314,6 +317,7 @@ refresh_cluster_fragments
 refresh_template_if_flagged
 refresh_update_check_for_version
 register_cloudflare_masque
+reload_core
 remember_session
 render_cluster_listeners
 render_cluster_proxies

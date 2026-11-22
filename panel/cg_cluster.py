@@ -365,16 +365,9 @@ def apply_cluster_live(old_specs: set, old_names: set = None):
         restore()
         raise RuntimeError("配置校验失败（mihomo -t）：" + out[-300:])
     st = load_cluster()
-    rc, out = run([SYSTEMCTL, "reload", "mihomo"])
-    if rc == 0:
-        want = cluster_ports(st)
-        if want and not _wait_cluster_ports(want):
-            # Reload can return before the new inbound is bound, or bind can fail
-            # (port already taken). Restart once, then fail rather than report success.
-            rc, out = run([SYSTEMCTL, "restart", "mihomo"])
-            if rc == 0 and not _wait_cluster_ports(want):
-                rc = 1
-                out = (out or "") + "集群入站端口未能在重载后开始监听"
+    # Hot reload; the cluster ports are awaited (reload returns before they are bound), and only if
+    # they never come up the core is restarted once (reload_core).
+    rc, out = reload_core(cluster_ports(st), wait=_wait_cluster_ports)
     if rc != 0:
         restore()
         run([SYSTEMCTL, "restart", "mihomo"])
