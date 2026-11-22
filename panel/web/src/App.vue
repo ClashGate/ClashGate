@@ -161,7 +161,6 @@ const {
   syncCluster,
   leaveCluster,
   clusterTask,
-  taskTitle,
   loadFileInto,
   fillCurrentInboundsToConverter,
   convertConfigFormat,
@@ -400,15 +399,10 @@ const {
         >
           <div class="flex items-center gap-3">
             <span class="cg-spin" aria-hidden="true"></span>
-            <h3 id="cluster-task-title" class="text-base font-bold text-slate-900 tracking-tight">{{ taskTitle(clusterTask.kind) }}</h3>
+            <h3 id="cluster-task-title" class="flex-1 text-base font-bold text-slate-900 tracking-tight">{{ t('正在添加到集群') }}</h3>
+            <span class="shrink-0 text-xs text-slate-500 tabular-nums">{{ t('{s} 秒', { s: clusterTask.elapsed }) }}</span>
           </div>
-          <p id="cluster-task-stage" class="mt-3 min-h-[20px] text-sm text-slate-700 cg-wrap" aria-live="polite">
-            {{ clusterTask.stage || t('正在准备…') }}
-          </p>
-          <div class="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
-            <span>{{ t('要逐台联系其他面板，每台更新一次配置，一般一分钟以内。') }}</span>
-            <span class="shrink-0 tabular-nums">{{ t('{s} 秒', { s: clusterTask.elapsed }) }}</span>
-          </div>
+          <p id="cluster-task-stage" class="mt-2 min-h-[20px] ps-8 text-sm text-slate-600 cg-wrap" aria-live="polite">{{ clusterTask.stage }}</p>
         </div>
       </div>
     </Transition>

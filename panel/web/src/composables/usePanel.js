@@ -976,9 +976,10 @@ export function usePanel() {
     syncCluster,
     leaveCluster,
     clusterTask,
-    taskTitle,
+    clusterBusy,
     resumeClusterTaskIfRunning,
     dismissPending,
+    retryClusterMember,
   } = useCluster(shared)
   const {
     converterInput,
@@ -1206,8 +1207,9 @@ export function usePanel() {
     syncCluster,
     leaveCluster,
     clusterTask,
-    taskTitle,
+    clusterBusy,
     dismissPending,
+    retryClusterMember,
     loadFileInto,
     fillCurrentInboundsToConverter,
     convertConfigFormat,

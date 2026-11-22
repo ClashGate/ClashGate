@@ -373,7 +373,7 @@ render_server() {
       dest: $sni:443
       private-key: $priv
       short-id:
-        - $sid
+        - \"$sid\"
       server-names:
         - $sni
 "

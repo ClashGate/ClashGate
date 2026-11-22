@@ -310,6 +310,12 @@ def parse_mihomo_proxies(raw: str) -> list:
     return out
 
 
+_YAML_NON_STRING = re.compile(
+    r"[-+]?(?:\d[\d_]*(?:\.[\d_]*)?(?:[eE][-+]?\d+)?|\.\d[\d_]*(?:[eE][-+]?\d+)?"
+    r"|0[xX][0-9a-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|\.(?:inf|Inf|INF)|\d+(?::[0-5]?\d)+(?:\.\d*)?)"
+    r"|\.(?:nan|NaN|NAN)")
+
+
 def yaml_scalar(v, key: str = "") -> str:
     if isinstance(v, bool):
         return "true" if v else "false"
@@ -321,10 +327,15 @@ def yaml_scalar(v, key: str = "") -> str:
     if s == "":
         return '""'
     if (key in STR_KEYS and re.fullmatch(r"0\d+|-?\d+(\.\d+)?", s)) or s.lower() in (
-        "true", "false", "null", "yes", "no", "on", "off", "~"
+        "true", "false", "null", "yes", "no", "on", "off", "~", "y", "n"
     ):
         return json.dumps(s, ensure_ascii=False)
-    if re.fullmatch(r"[A-Za-z0-9._/+@-]+", s) and not s.startswith("-"):
+    # A string a YAML reader would take as a number (1e5, 0x1f, 0o17, .inf, 1:30 ...) stays a string:
+    # the same value written as one JSON line before 1.41 was always a string.
+    if isinstance(v, str) and _YAML_NON_STRING.fullmatch(s):
+        return json.dumps(s, ensure_ascii=False)
+    # Plain only for safe text; `@` and backtick are reserved as a first character.
+    if re.fullmatch(r"[A-Za-z0-9_./][A-Za-z0-9._/+@-]*", s):
         return s
     return json.dumps(s, ensure_ascii=False)
 
@@ -349,8 +360,10 @@ def dump_yaml_map(d: dict, indent: int = 4, first_dash: bool = False) -> list:
             else:
                 lines.append(f"{prefix}{ks}:")
                 for elem in v:
-                    if isinstance(elem, dict):
+                    if isinstance(elem, dict) and elem:
                         lines.extend(dump_yaml_map(elem, indent + 4, True))
+                    elif isinstance(elem, (dict, list)):   # {} or a nested list: flow form
+                        lines.append(" " * (indent + 2) + "- " + json.dumps(elem, ensure_ascii=False))
                     else:
                         lines.append(" " * (indent + 2) + "- " + yaml_scalar(elem, k))
         else:
@@ -364,6 +377,29 @@ def dump_yaml_proxies(proxies: list) -> str:
     for p in proxies:
         lines.extend(dump_yaml_map(p, indent=4, first_dash=True))
     return "\n".join(lines) + ("\n" if lines else "")
+
+
+def expand_flow_items(raw: str, sections=None) -> str:
+    """1.41: rewrite `  - {"name": ...}` list items (one JSON object per line, how listeners and the
+    cluster entries were written before) as multi-line YAML, in the given top-level sections (None:
+    every line, for a fragment). Everything else stays byte for byte."""
+    out, sec = [], None
+    for line in (raw or "").splitlines(keepends=True):
+        s = line.rstrip("\r\n")
+        if s and s[0] not in " \t-#":
+            m = re.match(r"([A-Za-z0-9_-]+)\s*:", s)
+            sec = m.group(1) if m else None
+        m = re.fullmatch(r"( *)- (\{.*\})\s*", s)
+        if m and (sections is None or sec in sections):
+            try:
+                obj = json.loads(m.group(2))
+            except ValueError:
+                obj = None
+            if isinstance(obj, dict) and obj:
+                out.append("\n".join(dump_yaml_map(obj, indent=len(m.group(1)) + 2, first_dash=True)) + "\n")
+                continue
+        out.append(line)
+    return "".join(out)
 
 
 def dump_yaml_providers(providers: dict) -> str:

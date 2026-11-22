@@ -775,6 +775,10 @@ class Panel(BaseHTTPRequestHandler):
             return self.do_cluster_connect(form)
         if path == "/api/cluster/forget":
             return self.do_cluster_forget(form)
+        if path == "/api/cluster/apply":
+            return self.do_cluster_apply(form)
+        if path == "/api/cluster/node":
+            return self.do_cluster_node(form)
         tok, s = self.session()
         if not s:
             if self.is_ajax():
@@ -823,6 +827,8 @@ class Panel(BaseHTTPRequestHandler):
             return self.do_cluster_leave_ui(s, form)
         if path == "/cluster/dismiss":
             return self.do_cluster_dismiss(s, form)
+        if path == "/cluster/retry":
+            return self.do_cluster_retry(s, form)
         if path == "/proxies/add":
             return self.do_add_proxies(s, form)
         if path == "/proxies/delete":
@@ -1041,7 +1047,7 @@ class Panel(BaseHTTPRequestHandler):
         link = {"id": secrets.token_hex(6), "instance": inst, "name": peer_name, "url": url, "key": key,
                 "version": str(form.get("version") or "")[:16], "created": int(time.time()), "seen": int(time.time()),
                 "ok": True, "error": "", "missing": [],
-                "in": {k: inb[k] for k in ("port", "uuid", "decryption")},
+                "in": {"uuid": inb["uuid"]},   # a user in the shared cluster inbound (1.42)
                 "out": {"server": urlparse(url).hostname, **node}}
 
         def add(st):
@@ -1052,6 +1058,9 @@ class Panel(BaseHTTPRequestHandler):
             st["pending"] = [p for p in st["pending"] if p.get("instance") != inst]
             st["removed"].pop(inst, None)
             return cluster_members_view(st, skip=inst)
+        # defer=1 (1.40): the calling panel is still exchanging with others; it sends /api/cluster/apply
+        # when every panel has its links, so this core reloads once instead of in the middle.
+        _CLUSTER_BATCH.defer = 1 if form.get("defer") == "1" else 0
         try:
             members = _cluster_commit(add)
         except ClusterError as e:
@@ -1060,6 +1069,7 @@ class Panel(BaseHTTPRequestHandler):
             sys.stderr.write(f"cluster join failed: {e}\n")
             return self._cjson(500, {"ok": False, "code": "apply_failed", "msg": str(e)[:300]})
         finally:
+            _CLUSTER_BATCH.defer = 0
             _CLUSTER_PORT_HOLD.discard(inb["port"])
         sys.stderr.write(f"cluster: panel '{peer_name}' linked, inbound port {inb['port']}\n")
         return self._cjson(200, {"ok": True, "version": VERSION, "name": local_node_name(),
@@ -1149,11 +1159,50 @@ class Panel(BaseHTTPRequestHandler):
         target = str(form.get("target_instance") or "")
         if _link_by(load_cluster(), instance=target):
             return self._cjson(200, {"ok": True, "already": True})
+        _CLUSTER_BATCH.defer = 1 if form.get("defer") == "1" else 0   # both sides stage; the caller applies
         try:
             url = normalize_panel_url(str(form.get("target_url") or ""))
             cluster_pair(url, {"ticket": str(form.get("ticket") or "")}, expect_instance=target)
         except ClusterError as e:
             return self._cjson(502, {"ok": False, "code": "unreachable", "msg": str(e)})
+        finally:
+            _CLUSTER_BATCH.defer = 0
+        return self._cjson(200, {"ok": True})
+
+    def do_cluster_node(self, form):
+        """1.42: a member moved our link to its shared cluster inbound: point our outbound at it."""
+        link, err = self._cluster_link_auth(form)
+        if not link:
+            return err
+        try:
+            node = _parse_node(form)
+        except ClusterError:
+            return self._cjson(400, {"ok": False, "code": "bad_request", "msg": "集群请求参数无效"})
+
+        def upd(st):
+            x = _link_by(st, instance=link["instance"])
+            if x:
+                x["out"] = {**(x.get("out") or {}), **node}
+        _CLUSTER_BATCH.defer = 1 if form.get("defer") == "1" else 0   # the caller applies when done
+        try:
+            _cluster_commit(upd)
+        except Exception as e:
+            sys.stderr.write(f"cluster node update failed: {e}\n")
+            return self._cjson(500, {"ok": False, "code": "apply_failed", "msg": str(e)[:300]})
+        finally:
+            _CLUSTER_BATCH.defer = 0
+        return self._cjson(200, {"ok": True})
+
+    def do_cluster_apply(self, form):
+        """A member finished exchanging links with every panel: make our staged cluster changes live."""
+        link, err = self._cluster_link_auth(form)
+        if not link:
+            return err
+        try:
+            cluster_apply_staged()
+        except Exception as e:
+            sys.stderr.write(f"cluster apply failed: {e}\n")
+            return self._cjson(500, {"ok": False, "code": "apply_failed", "msg": str(e)[:300]})
         return self._cjson(200, {"ok": True})
 
     def do_cluster_forget(self, form):
@@ -1233,11 +1282,13 @@ class Panel(BaseHTTPRequestHandler):
             pw = str(form.get("password") or "")
             if not pw:
                 raise ClusterError("请填写对方面板密码")
-            with cluster_batch():   # this core reloads once, after every link is made
+            with cluster_batch() as b:   # exchange with every panel first, then each applies once
                 link, _ = cluster_pair(base, {"password": pw})
                 rep = cluster_sync()
+            if link["name"] in b.failed:
+                return f"「{link['name']}」没能让新配置生效，已撤销这次互联，请稍后重试", False
             msg = f"已和「{link['name']}」双向互联，双方都已把对方写入服务端出站并立即生效"
-            extra = cluster_report_text(rep)
+            extra = "；".join(x for x in (cluster_report_text(rep), cluster_batch_text(b)) if x)
             return (f"{msg}；{extra}" if extra else msg), True
         return self._cluster_job(s, job, form, "add")
 
@@ -1247,10 +1298,41 @@ class Panel(BaseHTTPRequestHandler):
                 with LOCK:   # no members: nothing can be waiting either (load_cluster already drops them)
                     save_cluster(load_cluster())
                 return "集群里还没有其他面板", True
-            with cluster_batch():
+            with cluster_batch() as b:
                 rep = cluster_sync()
-            return cluster_report_text(rep) or "集群成员都在线，互联完整", True
+            text = "；".join(x for x in (cluster_report_text(rep), cluster_batch_text(b)) if x)
+            return text or "集群成员都在线，互联完整", True
         return self._cluster_job(s, job, form, "sync")
+
+    def do_cluster_retry(self, s, form):
+        """「重试」 on a member that failed: ask it again now; when it answers, 检查 fills in what is missing."""
+        def job():
+            st = load_cluster()
+            x = _link_by(st, lid=str(form.get("id") or ""))
+            if not x:
+                return "集群成员不存在", False
+            name = x.get("name", "")
+            cluster_stage(f"正在检查「{name}」")
+            try:
+                cluster_call(x, "/api/cluster/status", {"name": local_node_name(), "url": local_cluster_url(), "version": VERSION},
+                             timeout=20)
+            except ClusterRemoteError as e:
+                if e.code != "bad_token":
+                    _update_link(x["instance"], ok=False, error=str(e))
+                    return f"「{name}」仍然连接失败：{e}", False
+            except ClusterError as e:
+                _update_link(x["instance"], ok=False, error=str(e))
+                return f"「{name}」仍然连接失败：{e}", False
+            # it answered (or says it removed us): a full 检查 updates everything with one reload per panel
+            with cluster_batch() as b:
+                rep = cluster_sync()
+            if not _link_by(load_cluster(), instance=x["instance"]):
+                return f"「{name}」已把本机移出集群，本机这边也已删除", True
+            extra = "；".join(t for t in (cluster_report_text({**rep, "offline": [n for n in rep["offline"] if n != name]}),
+                                           cluster_batch_text(b)) if t)
+            msg = f"已重新连上「{name}」"
+            return (f"{msg}；{extra}" if extra else msg), True
+        return self._cluster_job(s, job, form, "retry")
 
     def do_cluster_remove(self, s, form):
         def job():
@@ -1275,7 +1357,7 @@ class Panel(BaseHTTPRequestHandler):
                 missed.append(x.get("name", ""))
             name = x.get("name", "")
             if missed:
-                return f"已把「{name}」移出集群；「{'、'.join(missed)}」暂时联系不上，恢复后在任意成员上点「检查」会自动清理", True
+                return f"已把「{name}」移出集群；「{'、'.join(missed)}」暂时连接失败，恢复后在任意成员上点「检查」会自动清理", True
             return f"已把「{name}」移出集群，所有成员上和它的互联都已删除", True
         return self._cluster_job(s, job, form, "remove")
 
@@ -1293,12 +1375,11 @@ class Panel(BaseHTTPRequestHandler):
 
     def do_cluster_leave_ui(self, s, form=None):
         def job():
-            n, missed = cluster_leave_all()
+            # This panel's config first; the members are told in the background (1.41)
+            n, _ = cluster_leave_all(background=True)
             if not n:
                 return "本机不在集群里", True
-            if missed:
-                return f"本机已退出集群；「{'、'.join(missed)}」暂时联系不上，恢复后在它们上面点「检查」会自动删除和本机的互联", True
-            return "本机已退出集群，其他成员上和本机的互联都已删除", True
+            return "本机已退出集群，正在后台通知其他成员", True
         return self._cluster_job(s, job, form, "leave")
 
     def do_discard_pending(self, s):
@@ -2167,7 +2248,9 @@ class Panel(BaseHTTPRequestHandler):
                 clear_pending_reload()
             except Exception as e:
                 return self.respond_mutation(s, f"恢复默认配置失败：{e}", False)
-        return self.respond_mutation(s, "已恢复默认服务端配置，并生成默认 VlessReality 节点。", True)
+            # 1.41: back on the template, so custom mode is turned off too (Settings shows it off)
+            save_panel_settings({"custom_server_enabled": False})
+        return self.respond_mutation(s, "已恢复默认服务端模板并关闭自定义服务端，已生成新的默认 VlessReality 节点，请在客户端更新订阅。", True)
 
     # -- views
     def login_page(self, err=""):
@@ -2270,10 +2353,19 @@ def serve(cfg_path):
     except Exception as e:
         sys.stderr.write(f"pending reconcile failed: {e}\n")
     try:
+        if reformat_flow_entries():
+            sys.stderr.write("config.yaml: entries rewritten as multi-line YAML (same content, no reload)\n")
+    except Exception as e:
+        sys.stderr.write(f"config reformat failed: {e}\n")
+    try:
         if refresh_cluster_fragments():
             sys.stderr.write("cluster links updated: members are exits only (no loops)\n")
     except Exception as e:
         sys.stderr.write(f"cluster refresh failed: {e}\n")
+    try:
+        start_cluster_migration()   # 1.42: links with their own inbound move to the shared one
+    except Exception as e:
+        sys.stderr.write(f"cluster migration not started: {e}\n")
     start_traffic_poller(30)
     refresh_update_check_for_version()
     start_weekly_update_check()

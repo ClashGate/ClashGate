@@ -8,16 +8,24 @@ import { CG_NODE_NAME_MAX, nodeNameError, clusterUrlError } from './validation.j
 export function useCluster(p) {
   const { applyServerState, busyKey, openConfirmDialog, postAction, showToast, state } = p
 
-  // Cluster operations run on the server in the background (adding a panel waits for both cores to
-  // reload). While one runs, a full-page overlay shows the current step and blocks other clicks.
+  // Cluster operations run on the server in the background. Only the first 添加到集群 shows a
+  // blocking overlay with the current step (it waits for both cores); 检查 / 重试 / 移除 / 退出 run
+  // quietly: their own button says so (clusterBusy), the rest of the panel stays usable, and the
+  // result arrives as a toast.
   const clusterTask = reactive({ show: false, kind: '', stage: '', elapsed: 0 })
+  const clusterBusy = ref('')
 
-  function taskTitle(kind) {
-    if (kind === 'add') return t('正在添加到集群')
-    if (kind === 'sync') return t('正在检查集群')
-    if (kind === 'remove') return t('正在移出集群')
-    if (kind === 'leave') return t('正在退出集群')
-    return t('正在处理集群')
+  async function fetchClusterTask() {
+    const res = await fetch('/api/cluster-task-status', {
+      headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+    if (res.status === 401) {
+      window.location.href = '/login'
+      return { gone: true }
+    }
+    return res.ok ? res.json() : null
   }
 
   // expectId: the task this page started (null when the start request failed and the id is unknown).
@@ -27,23 +35,14 @@ export function useCluster(p) {
       await new Promise((r) => setTimeout(r, 1000))
       let d = null
       try {
-        const res = await fetch('/api/cluster-task-status', {
-          headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
-          credentials: 'same-origin',
-          cache: 'no-store',
-        })
-        if (res.status === 401) {
-          window.location.href = '/login'
-          return null
-        }
-        if (!res.ok) continue
-        d = await res.json()
+        d = await fetchClusterTask()
       } catch {
         continue   // a dropped request: the task keeps running on the server
       }
+      if (!d) continue
+      if (d.gone) return null
       if (d.running) {
         if (expectId === null) expectId = d.id   // the start request was lost but the task did start
-        if (d.kind) clusterTask.kind = d.kind
         clusterTask.stage = d.stage || ''
         clusterTask.elapsed = Number(d.elapsed || 0)
         continue
@@ -61,13 +60,16 @@ export function useCluster(p) {
     return null
   }
 
-  async function runClusterTask(url, params, key, kind) {
-    if (busyKey.value) {
+  async function runClusterTask(url, params, key, kind, { overlay = false } = {}) {
+    if (clusterBusy.value || (overlay && busyKey.value)) {
       showToast(t('上一个操作还在进行，请稍候'), false)
       return null
     }
-    busyKey.value = key
-    Object.assign(clusterTask, { show: true, kind, stage: '', elapsed: 0 })
+    clusterBusy.value = key
+    if (overlay) {
+      busyKey.value = key
+      Object.assign(clusterTask, { show: true, kind, stage: '', elapsed: 0 })
+    }
     try {
       let data = null
       try {
@@ -84,29 +86,34 @@ export function useCluster(p) {
       }
       return await pollClusterTask(data ? data.id : null)
     } finally {
-      clusterTask.show = false
-      busyKey.value = ''
+      clusterBusy.value = ''
+      if (overlay) {
+        clusterTask.show = false
+        busyKey.value = ''
+      }
     }
   }
 
-  // After a reload while an operation is still running, show it again.
+  // After a page reload while an operation is still running: the overlay again for an add, the busy
+  // button for the others.
   async function resumeClusterTaskIfRunning() {
     try {
-      const res = await fetch('/api/cluster-task-status', {
-        headers: { Accept: 'application/json', 'X-Requested-With': 'fetch' },
-        credentials: 'same-origin',
-        cache: 'no-store',
-      })
-      if (!res.ok) return
-      const d = await res.json()
-      if (!d || !d.running || busyKey.value) return
-      busyKey.value = 'cluster-task'
-      Object.assign(clusterTask, { show: true, kind: d.kind || '', stage: d.stage || '', elapsed: Number(d.elapsed || 0) })
+      const d = await fetchClusterTask()
+      if (!d || !d.running || clusterBusy.value || busyKey.value) return
+      const overlay = d.kind === 'add'
+      clusterBusy.value = ({ add: 'cluster-add', sync: 'cluster-sync', leave: 'cluster-leave' })[d.kind] || 'cluster-task'
+      if (overlay) {
+        busyKey.value = clusterBusy.value
+        Object.assign(clusterTask, { show: true, kind: d.kind, stage: d.stage || '', elapsed: Number(d.elapsed || 0) })
+      }
       try {
         await pollClusterTask(d.id)
       } finally {
-        clusterTask.show = false
-        busyKey.value = ''
+        clusterBusy.value = ''
+        if (overlay) {
+          clusterTask.show = false
+          busyKey.value = ''
+        }
       }
     } catch {}
   }
@@ -140,7 +147,7 @@ export function useCluster(p) {
   const clusterPwErr = computed(() => (clusterForm.password ? '' : t('请填写对方面板密码')))
 
   async function submitAddCluster() {
-    if (busyKey.value) return
+    if (busyKey.value || clusterBusy.value) return
     clusterTouched.url = true
     clusterTouched.password = true
     const err = clusterUrlErr.value || clusterPwErr.value
@@ -152,7 +159,8 @@ export function useCluster(p) {
       '/cluster/add',
       { url: clusterForm.url.trim(), password: clusterForm.password },
       'cluster-add',
-      'add'
+      'add',
+      { overlay: true }
     )
     if (res && res.ok) {
       clusterForm.url = ''
@@ -178,6 +186,11 @@ export function useCluster(p) {
 
   function syncCluster() {
     return runClusterTask('/cluster/sync', {}, 'cluster-sync', 'sync')
+  }
+
+  // 「重试」 on a member that failed (or whose links are incomplete).
+  function retryClusterMember(m) {
+    return runClusterTask('/cluster/retry', { id: m.id }, `cl-rt-${m.id}`, 'retry')
   }
 
   // Hide a 等待互联 entry; the next 检查 tries that panel again.
@@ -212,8 +225,9 @@ export function useCluster(p) {
     syncCluster,
     leaveCluster,
     clusterTask,
-    taskTitle,
+    clusterBusy,
     resumeClusterTaskIfRunning,
     dismissPending,
+    retryClusterMember,
   }
 }

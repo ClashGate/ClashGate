@@ -4,7 +4,7 @@ import { t } from '../i18n.js'
 import { fixCertPaths } from './validation.js'
 
 export function useCustomConfig(p) {
-  const { customConfigText, openConfirmDialog, postAction, showToast } = p
+  const { activeTab, customConfigText, openConfirmDialog, postAction, selectTab, showToast } = p
 
   // cert-path helpers live in validation.js
   // autoFix: the server rewrites the paths (and reports how many); `shown` is what the
@@ -44,10 +44,13 @@ export function useCustomConfig(p) {
   function resetTemplateConfig() {
     openConfirmDialog({
       title: t('恢复默认服务端模板'),
-      message: t('确定恢复默认服务端模板？这将还原内置标准服务端模板，并重新生成一个默认 VlessReality 节点（同时同步至客户端订阅）。'),
-      confirmText: t('恢复默认服务端模板'),
+      message: t('服务端会换回内置模板，现有节点换成一个新的 VlessReality 节点，客户端需要更新订阅。完成后自动关闭自定义服务端，你的自定义配置会保留，重新开启后可以载入。'),
+      confirmText: t('恢复并关闭自定义服务端'),
       tone: 'rose',
-      onConfirm: () => postAction('/config/reset-template', {}, 'reset-template'),
+      onConfirm: async () => {
+        const res = await postAction('/config/reset-template', {}, 'reset-template')
+        if (res && res.ok && activeTab.value === 'advanced') selectTab('inbounds')   // the page is off now
+      },
     })
   }
 

@@ -11,6 +11,8 @@ CLUSTER_JSON
 CLUSTER_LISTENER_PREFIX
 CLUSTER_MIN_VERSION
 CLUSTER_PROTOCOL
+CLUSTER_SHARED_LISTENER
+CLUSTER_STAGE_TTL
 CLUSTER_TICKET_TTL
 CLUSTER_TOMBSTONE_TTL
 CONF
@@ -113,6 +115,7 @@ _ROUTING
 _SESSION_LOCK
 _SNELL_V5_DEFAULT_NAME
 _SNI_HOST
+_STAGED
 _TRACKED_DRAFT_FILES
 _WG_KEY_RE
 _all_tracked_draft_files
@@ -126,14 +129,17 @@ _clean_inbounds
 _cluster_commit
 _cluster_new_inbound
 _cluster_ssl_context
+_conf_cluster_entries
 _conf_digest
 _controller_uses_tls
 _dedup_inbounds
+_deferring
 _detect_lang
 _drop_links
 _edge_public_b64
 _ensure_pending_baseline
 _first_user_creds
+_frag_items
 _gf_mul
 _host_only
 _http_get_text
@@ -144,6 +150,7 @@ _iter_server_cert_lines
 _json_text
 _link_auth
 _link_by
+_link_legacy
 _live_conf_with_cluster
 _load_sessions_file
 _localize_fields
@@ -159,10 +166,12 @@ _parse_nodes_tsv
 _prune_pending
 _read_frag
 _reconstruct_draft_from_live_conf
+_remote_apply
 _remote_error
 _restore_files
 _rs_encode
 _save_sessions_file
+_section_items
 _seed_dir
 _snapshot_files
 _snell_needs_v6
@@ -192,7 +201,9 @@ check_manual_cert
 check_panel_update
 check_reality_dest
 clear_pending_reload
+cluster_apply_staged
 cluster_batch
+cluster_batch_text
 cluster_call
 cluster_hello
 cluster_http
@@ -200,7 +211,9 @@ cluster_instance_id
 cluster_issue_ticket
 cluster_leave_all
 cluster_listener_from_link
+cluster_listeners
 cluster_members_view
+cluster_migrate_links
 cluster_pair
 cluster_pending_id
 cluster_ports
@@ -208,6 +221,7 @@ cluster_proxy_from_link
 cluster_proxy_names
 cluster_push_name_async
 cluster_report_text
+cluster_reserved_ports
 cluster_stage
 cluster_sync
 cluster_ufw_specs
@@ -222,8 +236,10 @@ dump_yaml_map
 dump_yaml_providers
 dump_yaml_proxies
 enable_cert_renew_timer
+ensure_cluster_inbound
 ensure_geodata
 ensure_unified_root
+expand_flow_items
 extract_top_level_yaml_section
 extract_yaml_secret
 fetch_channel_commit_sha
@@ -293,6 +309,7 @@ reconcile_pending_with_live
 record_core_check
 record_panel_check
 record_pending_reload
+reformat_flow_entries
 refresh_cluster_fragments
 refresh_template_if_flagged
 refresh_update_check_for_version
@@ -337,6 +354,7 @@ snell_client_from_listener
 split_flow
 split_kv
 start_background_core_update
+start_cluster_migration
 start_masque_registrar
 start_traffic_poller
 start_upgrade_job

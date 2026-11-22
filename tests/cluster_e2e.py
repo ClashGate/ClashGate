@@ -33,6 +33,8 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(REPO, "panel"))
+import cg_yaml  # noqa: E402  (json + re only: the panel's YAML reader)
 MIHOMO = os.path.abspath(os.environ.get("MIHOMO_BIN") or os.path.join(HERE, ".cache", "mihomo"))
 TMP = tempfile.mkdtemp(prefix="cg-e2e-")
 PW = {w: f"pw-{w}-" + os.urandom(6).hex() for w in ("A", "B", "C", "D")}
@@ -262,10 +264,41 @@ def member_names(cl):
     return sorted(m["name"] for m in state(cl)["cluster"]["members"])
 
 
+def yaml_items(text, section=None):
+    """Entries of a top-level list section of a config (a whole fragment when section is None), read with
+    the panel's own parser: fragments and config.yaml are multi-line YAML since 1.41."""
+    if section is None:
+        text, section = "x:\n" + text, "x"
+    lines, in_sec = [], False
+    for raw in text.splitlines():
+        c = cg_yaml.strip_yaml_comment(raw.expandtabs(2))
+        if not c.strip():
+            continue
+        s = c.lstrip(" ")
+        ind = len(c) - len(s)
+        if not in_sec:
+            k, sep, _ = cg_yaml.split_kv(s)
+            if ind == 0 and sep and k == section:
+                in_sec = True
+                lines.append((0, s))
+        elif ind == 0 and not (s == "-" or s.startswith("- ")):
+            break
+        else:
+            lines.append((ind, s))
+    if not lines:
+        return []
+    parsed, _ = cg_yaml.parse_yaml_lines(lines, 0, 0)
+    v = parsed.get(section) if isinstance(parsed, dict) else None
+    return v if isinstance(v, list) else []
+
+
+def conf_names(text):
+    """Outbound names in a config's proxies section."""
+    return {p.get("name") for p in yaml_items(text, "proxies") if isinstance(p, dict)}
+
+
 def cluster_frags(cs):
-    proxies = [json.loads(l.strip()[2:]) for l in read(cs + "/proxies.cluster.yaml").splitlines() if l.strip()]
-    listeners = [json.loads(l.strip()[2:]) for l in read(cs + "/listeners.cluster.yaml").splitlines() if l.strip()]
-    return proxies, listeners
+    return yaml_items(read(cs + "/proxies.cluster.yaml")), yaml_items(read(cs + "/listeners.cluster.yaml"))
 
 
 def wait_for(fn, secs=8.0):
@@ -362,10 +395,14 @@ def main():
             check(member_names(cl[w]) == want, f"{w} lists {want}")
             prox, lst = cluster_frags(cs[w])
             conf = read(cs[w] + "/config.yaml")
-            check(sorted(p["name"] for p in prox) == want and len(lst) == len(want), f"{w} has {len(want)} outbounds and inbounds")
-            check(all(f'"name": "{n}"' in conf for n in want) and conf.count("cg-cluster-") == len(want), f"{w}'s live config has them")
+            # 1.42: one cluster inbound per panel, one user (UUID) per member in it
+            check(sorted(p["name"] for p in prox) == want and [x["name"] for x in lst] == ["cg-cluster-in"]
+                  and len(lst[0]["users"]) == len(want), f"{w} has {len(want)} outbounds and one inbound with {len(want)} users")
+            check(set(want) <= conf_names(conf) and conf.count("cg-cluster-") == 1, f"{w}'s live config has them")
             check(all(listening(x["port"]) for x in lst), f"{w}'s core listens on its cluster ports")
             check(all(x.get("proxy") == "DIRECT" for x in lst), f"{w}'s cluster inbounds are exits only (no loops)")
+            port_w = json.loads(read(cs[w] + "/cluster.json"))["inbound"]["port"]
+            check(lst[0]["port"] == port_w, f"{w}'s cluster inbound keeps its port")
             for o in names:
                 if o != w:
                     out = traffic(w, f"{o}-Node")
@@ -461,9 +498,9 @@ def main():
     print("[discard drafts / reload keep the cluster]")
     r = a.post("/action/discard-pending")
     check(r["ok"] and r["state"]["pending_reload_count"] == 0, "discard drafts")
-    check('"name": "B-Node"' in read(cs["A"] + "/config.yaml"), "cluster outbound survives discard")
+    check("B-Node" in conf_names(read(cs["A"] + "/config.yaml")), "cluster outbound survives discard")
     r = a.post("/action/reload")
-    check(r["ok"] and '"name": "B-Node"' in read(cs["A"] + "/config.yaml"), f"cluster outbound survives reload: {r['msg']}")
+    check(r["ok"] and "B-Node" in conf_names(read(cs["A"] + "/config.yaml")), f"cluster outbound survives reload: {r['msg']}")
 
     print("[C adds A: C is linked with A and B automatically]")
     t0 = time.time()
@@ -478,18 +515,17 @@ def main():
     check(not r["ok"] and "集群" in r["msg"], f"server outbound cannot take a member name: {r['msg']}")
     r = b.post("/action/settings", node_name="B-东京")
     check(r["ok"] and "通知" in r["msg"], f"B renames itself: {r['msg']}")
-    check(wait_for(lambda: all('"name": "B-东京"' in read(cs[w] + "/config.yaml") for w in ("A", "C"))),
+    check(wait_for(lambda: all("B-东京" in conf_names(read(cs[w] + "/config.yaml")) for w in ("A", "C"))),
           "A and C renamed B's outbound")
     a.post("/proxies/add", proxies_raw='- {"name":"Taken","type":"socks5","server":"127.0.0.1","port":1080}')
     a.post("/action/reload")
     b.post("/action/settings", node_name="Taken")
-    check(wait_for(lambda: '"name": "Taken"' in read(cs["C"] + "/config.yaml")), "C took the new name")
-    check('"name": "B-东京"' in read(cs["A"] + "/config.yaml"), "A kept the old name (it clashes with A's own outbound)")
+    check(wait_for(lambda: "Taken" in conf_names(read(cs["C"] + "/config.yaml"))), "C took the new name")
+    check("B-东京" in conf_names(read(cs["A"] + "/config.yaml")), "A kept the old name (it clashes with A's own outbound)")
     for sym in ('B,"\'[]{}#|<>🚀', "B:&*!%@`~ $^ 1"):
         r = b.post("/action/settings", node_name=sym)
         check(r["ok"], f"B takes a name full of symbols {sym!r}: {r['msg']}")
-        quoted = json.dumps(sym, ensure_ascii=False)
-        check(wait_for(lambda: all(f'"name": {quoted}' in read(cs[w] + "/config.yaml") for w in ("A", "C"))),
+        check(wait_for(lambda: all(sym in conf_names(read(cs[w] + "/config.yaml")) for w in ("A", "C"))),
               f"A and C write {sym!r} quoted into the live config")
         for w in ("A", "C"):
             check(member_names(cl[w]) == sorted([sym] + [f"{o}-Node" for o in ("A", "C") if o != w]), f"{w} lists {sym!r}")
@@ -498,7 +534,7 @@ def main():
             out = traffic(w, sym)
             check(out.endswith("\n200") and "hello-through-cluster" in out, f"traffic {w} -> {sym!r}")
     b.post("/action/settings", node_name="B-Node")
-    check(wait_for(lambda: all('"name": "B-Node"' in read(cs[w] + "/config.yaml") for w in ("A", "C"))), "name back to B-Node")
+    check(wait_for(lambda: all("B-Node" in conf_names(read(cs[w] + "/config.yaml")) for w in ("A", "C"))), "name back to B-Node")
     r = a.post("/cluster/sync")
     check(r["ok"] and "完整" in r["msg"], f"检查 on a healthy cluster: {r['msg']}")
 
@@ -525,12 +561,16 @@ def main():
     check(r["ok"] and "C-Node" in r["msg"], f"检查 on A reports C offline: {r['msg']}")
     check([m for m in state(a)["cluster"]["members"] if m["name"] == "C-Node"][0]["ok"] is False, "A marks C offline")
     start_panel("C")
+    r = a.post("/cluster/retry", id=[m for m in state(a)["cluster"]["members"] if m["name"] == "C-Node"][0]["id"])
+    check(r["ok"] and "已重新连上「C-Node」" in r["msg"], f"重试 on A after C is back: {r['msg']}")
+    check([m for m in r["state"]["cluster"]["members"] if m["name"] == "C-Node"][0]["ok"] is not False, "A shows C connected again")
     r = d.post("/cluster/sync")
     check(r["ok"], f"检查 on D after C is back: {r['msg']}")
     check(not state(d)["cluster"]["pending"], "nothing pending on D")
     mesh_ok(["A", "B", "C", "D"])
 
     print("[remove D from the cluster on A]")
+    ports_before = {w: json.loads(read(cs[w] + "/cluster.json"))["inbound"]["port"] for w in ("A", "B", "C")}
     r = a.post("/cluster/remove", id=[m for m in state(a)["cluster"]["members"] if m["name"] == "D-Node"][0]["id"])
     check(r["ok"] and "移出集群" in r["msg"], f"remove D: {r['msg']}")
     check(wait_for(lambda: all("D-Node" not in member_names(cl[w]) for w in ("A", "B", "C"))), "A, B and C dropped D")
@@ -538,11 +578,14 @@ def main():
     check(wait_for(lambda: "cg-cluster-" not in read(cs["D"] + "/config.yaml")), "D's config has no cluster entries")
     r = a.post("/cluster/sync")
     check(r["ok"] and "D-Node" not in member_names(a), f"检查 does not bring D back: {r['msg']}")
+    check(all(json.loads(read(cs[w] + "/cluster.json"))["inbound"]["port"] == ports_before[w] for w in ("A", "B", "C")),
+          "removing a member keeps every panel's cluster inbound (only D's user is gone)")
+    mesh_ok(["A", "B", "C"])
 
     print("[remove B while B is offline]")
     stop_panel("B")
     r = a.post("/cluster/remove", id=[m for m in state(a)["cluster"]["members"] if m["name"] == "B-Node"][0]["id"])
-    check(r["ok"] and "联系不上" in r["msg"], f"remove offline B: {r['msg']}")
+    check(r["ok"] and "连接失败" in r["msg"], f"remove offline B: {r['msg']}")
     check(member_names(a) == ["C-Node"] and member_names(c) == ["A-Node"], "A and C dropped B")
     start_panel("B")
     check(member_names(b) == ["A-Node", "C-Node"], "B still has its stale links while it was offline")
@@ -558,7 +601,9 @@ def main():
     print("[C leaves the cluster]")
     r = c.post("/cluster/leave")
     check(r["ok"] and "退出集群" in r["msg"], f"C leaves: {r['msg']}")
-    check(not member_names(c) and member_names(a) == ["B-Node"] and member_names(b) == ["A-Node"], "C gone everywhere")
+    check(not member_names(c), "C dropped its links before answering")
+    check(wait_for(lambda: member_names(a) == ["B-Node"] and member_names(b) == ["A-Node"]),
+          "A and B are told in the background and drop C")
     mesh_ok(["A", "B"])
 
     print("[clashgate uninstall: panel.py cluster-leave]")

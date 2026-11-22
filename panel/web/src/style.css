@@ -770,6 +770,13 @@ html[lang="fa"] textarea.font-mono {
   to { transform: rotate(360deg); }
 }
 
+/* Small spinner inside a button (cluster 检查 / 重试 / 移除 / 退出 running in the background). */
+.cg-spin.cg-spin-sm {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+}
+
 /* Routing group order: up / down next to the drag handle (dragging does not work on touch screens). */
 .cg-move {
   display: inline-flex;

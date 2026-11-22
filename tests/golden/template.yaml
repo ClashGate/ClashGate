@@ -124,7 +124,13 @@ listeners:
       dest: www.microsoft.com:443
       private-key: YQdE8o0kC6k0m0s0kC6k0m0s0kC6k0m0s0kC6k0m0s0
       short-id:
-        - 01234567
+        - "01234567"
       server-names:
         - www.microsoft.com
-  - {"name": "ss-fixed", "type": "shadowsocks", "port": 30101, "listen": "0.0.0.0", "password": "fixed-secret", "cipher": "chacha20-ietf-poly1305", "udp": true}
+  - name: ss-fixed
+    type: shadowsocks
+    port: 30101
+    listen: 0.0.0.0
+    password: fixed-secret
+    cipher: chacha20-ietf-poly1305
+    udp: true

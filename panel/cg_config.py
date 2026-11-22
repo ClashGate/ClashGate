@@ -453,7 +453,7 @@ def used_ports(env) -> set:
     ports = {80, 443, int(env.get("PANEL_PORT", "0") or 0), get_controller_port(env)}
     ports |= {n["port"] for n in read_nodes()}
     ports |= {i["port"] for i in load_inbounds()}
-    ports |= cluster_ports() | set(_CLUSTER_PORT_HOLD)
+    ports |= cluster_reserved_ports() | set(_CLUSTER_PORT_HOLD)
     return ports
 
 
@@ -1313,7 +1313,7 @@ def render_reality(nodes: list) -> str:
             f"      dest: {n['sni']}:443\n"
             f"      private-key: {n['priv']}\n"
             f"      short-id:\n"
-            f"        - {n['sid']}\n"
+            f"        - \"{n['sid']}\"\n"   # quoted: an all-digit id like 01234567 must stay a string
             f"      server-names:\n"
             f"        - {n['sni']}\n"
         )
@@ -1321,7 +1321,8 @@ def render_reality(nodes: list) -> str:
 
 
 def render_extra(inbounds: list) -> str:
-    return "".join("  - " + json.dumps(i["listener"], ensure_ascii=False) + "\n" for i in inbounds)
+    """Panel inbounds as multi-line YAML (1.41; one JSON object per line before)."""
+    return dump_yaml_proxies([i["listener"] for i in inbounds])
 
 
 # IPv6-only servers (SERVER_IP is an IPv6 address): listen on "::" (both stacks) and resolve through
@@ -1827,6 +1828,51 @@ def ensure_geodata(root: str = "") -> list:
     return missing
 
 
+def _section_items(raw: str, sec: str):
+    v = extract_top_level_yaml_section(raw, sec)
+    return v if isinstance(v, list) else []
+
+
+def reformat_flow_entries() -> bool:
+    """1.41: before, panel inbounds and cluster entries were written as one JSON object per line. On
+    the first start after the update, rewrite listeners.extra.yaml and the live config.yaml as
+    multi-line YAML. Only the format changes (both are parsed and compared, and the new config must
+    pass `mihomo -t`), so the core is not reloaded. Skipped with unapplied drafts (the next 应用配置
+    writes the new format) and in custom mode (the user's own file). True when config.yaml changed."""
+    with LOCK:
+        try:
+            with open(FRAG_EXTRA) as f:
+                old = f.read()
+            new = expand_flow_items(old)
+            if new != old and _section_items("x:\n" + new, "x") == _section_items("x:\n" + old, "x"):
+                atomic_write(FRAG_EXTRA, new, 0o640)
+        except FileNotFoundError:
+            pass
+        if is_custom_config_mode() or not os.path.isfile(CONF):
+            return False
+        pend = load_pending_reload()
+        if pend["items"] or pend["sub_token"] or pend["mihomo_secret"]:
+            return False
+        with open(CONF) as f:
+            old = f.read()
+        new = expand_flow_items(old, ("listeners", "proxies"))
+        if new == old:
+            return False
+        if any(_section_items(new, s) != _section_items(old, s) for s in ("listeners", "proxies")):
+            sys.stderr.write("config reformat skipped: entries differ after parsing\n")
+            return False
+        with tempfile.TemporaryDirectory() as d:
+            test = os.path.join(d, "config.yaml")
+            with open(test, "w") as f:
+                f.write(new)
+            rc, out = validate_config(test)
+        if rc != 0:
+            sys.stderr.write(f"config reformat skipped: mihomo -t failed: {out[-300:]}\n")
+            return False
+        atomic_write(CONF, new, 0o640)
+        return True
+
+
 def validate_config(path=CONF, bin_path: str = ""):
     if os.path.isdir(CS_ROOT):
         ensure_geodata()
@@ -1968,7 +2014,7 @@ def _sync_custom_conf_listeners(nodes: list, inbounds: list):
             raw = f.read()
         st = load_cluster()
         l_body = (render_reality(nodes) + dump_yaml_proxies([i["listener"] for i in inbounds])
-                  + dump_yaml_proxies([cluster_listener_from_link(l) for l in st["links"]]))
+                  + dump_yaml_proxies(cluster_listeners(st)))
         new_block = ("listeners:\n" + l_body) if l_body.strip() else "listeners: []\n"
         updated = replace_top_level_yaml_section(raw, "listeners", new_block)
         atomic_write(CUSTOM_CONF, updated, 0o640)
@@ -2143,7 +2189,9 @@ def _reconstruct_draft_from_live_conf():
         atomic_write(PROXIES_JSON, json.dumps(new_proxies, indent=2, ensure_ascii=False), 0o600)
         atomic_write(PROVIDERS_JSON, json.dumps(new_providers, indent=2, ensure_ascii=False), 0o600)
         return
-    reality_yaml_names = set(re.findall(r"^  - name:\s*(\S+)\s*$", conf_raw, re.M))
+    # Install-time Reality nodes, as render_reality writes them (name, type: vless, then udp before
+    # port). Panel inbounds are multi-line too since 1.41 but dump_yaml_map puts port right after type.
+    reality_yaml_names = set(re.findall(r"^  - name:\s*(\S+)\s*\n    type: vless\n    udp: true\n    port:", conf_raw, re.M))
     restored_nodes = []
     restored_inbs = []
     for inb in new_inbounds:
@@ -2613,12 +2661,14 @@ def reset_to_template_config():
     """Restore server config to clean default template and generate a default VlessReality node."""
     env = read_env()
     old_specs = collect_ufw_specs(read_nodes(), load_inbounds())
-    files = (CUSTOM_CONF, CONF, NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON,
+    files = (CUSTOM_CONF, CUSTOM_SAVED, CONF, NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON,
              FRAG_REALITY, FRAG_EXTRA, FRAG_PROXIES, FRAG_PROVIDERS, FRAG_CONTROLLER)
     backup = _snapshot_files(files)
     try:
         default_node = new_default_reality_node(env)
         if os.path.exists(CUSTOM_CONF):
+            # 1.41: keep the user's file like 关闭自定义服务端 does; turning custom mode on again offers it
+            atomic_write(CUSTOM_SAVED, backup[CUSTOM_CONF], 0o640)
             os.remove(CUSTOM_CONF)
         atomic_write(NODES_TSV, render_nodes_tsv([default_node]), 0o640)
         atomic_write(INBOUNDS, "[]\n", 0o600)
