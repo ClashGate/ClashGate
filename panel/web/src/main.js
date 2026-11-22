@@ -1,3 +1,4 @@
+import './boot.js'
 import { createApp } from 'vue'
 import './fonts.css'
 import './style.css'

@@ -420,14 +420,6 @@ def main():
     with open(cs["A"] + "/clashgate.env", "w") as f:
         f.write(env_a)
     check(not member_names(b), "B kept nothing from the failed attempt")
-    b.post("/action/settings", custom_server_enabled="1")
-    r = a.post("/cluster/add", url=url["B"], password=PW["B"])
-    check(not r["ok"] and "自定义服务端" in r["msg"], f"remote in custom-server mode: {r['msg']}")
-    b.post("/action/settings", custom_server_enabled="0")
-    a.post("/action/settings", custom_server_enabled="1")
-    r = a.post("/cluster/add", url=url["B"], password=PW["B"])
-    check(not r["ok"] and "自定义服务端" in r["msg"], f"local custom-server lock: {r['msg']}")
-    a.post("/action/settings", custom_server_enabled="0")
 
     print("[A adds B: two-way link, with an unpublished draft on A]")
     r = a.post("/inbounds/add", kind="shadowsocks", name="DraftSS", port="30555")

@@ -213,8 +213,7 @@ const {
             </button>
           </section>
 
-
-                    <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
             <div class="flex items-center justify-between gap-4">
               <div class="min-w-0">
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('更新通道') }}</h2>
@@ -245,8 +244,7 @@ const {
             </div>
           </section>
 
-
-                    <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
             <div class="flex items-center justify-between gap-4">
               <div>
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('自动更新') }}</h2>
@@ -268,8 +266,7 @@ const {
             </div>
           </section>
 
-
-                    <section id="settings-core-card" class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
+          <section id="settings-core-card" class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
             <div class="flex items-center justify-between gap-4">
               <div class="min-w-0">
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('内核版本') }}</h2>
@@ -292,36 +289,7 @@ const {
             </div>
           </section>
 
-
-          <section id="settings-panel-card" class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
-            <div class="flex items-center justify-between gap-4">
-              <div class="min-w-0">
-                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('面板版本') }}</h2>
-                <p class="text-xs mt-1 leading-relaxed" :class="panelHasUpdate ? 'text-emerald-700' : 'text-slate-500'">
-                  ClashGate <bdi dir="ltr">{{ versionLabel(state.version) || '—' }}</bdi>
-                  · {{ panelHasUpdate ? updateHint(panelUpdate.latest) : t('升级时面板会自动重启。') }}
-                </p>
-              </div>
-              <button
-                id="settings-check-update"
-                type="button"
-                :disabled="!!busyKey || upgradeInProgress"
-                @click="checkUpdateAndPrompt"
-                class="cg-tool shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border-slate-200 text-slate-800"
-                :class="{ 'is-update': panelHasUpdate }"
-              >
-                <CgIcon name="refresh" :size="14" />
-                <span>{{
-                  busyKey === '/action/upgrade-self' || upgradeInProgress
-                    ? t('升级中…')
-                    : busyKey === '/action/check-update' ? t('检查中…') : t('检查更新')
-                }}</span>
-              </button>
-            </div>
-          </section>
-
-
-                    <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
             <div class="flex items-center justify-between gap-4">
               <div class="min-w-0">
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('皮肤') }}</h2>
@@ -356,8 +324,7 @@ const {
             </div>
           </section>
 
-
-                    <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center lg:col-span-2">
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
             <div class="flex items-center justify-between gap-4">
               <div>
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('自定义服务端') }}</h2>

@@ -184,6 +184,17 @@ def used_proxy_names() -> set:
             names.add(str(v))
     except Exception as e:
         sys.stderr.write(f"routing names unavailable: {e}\n")
+    if is_custom_config_mode():   # the user's own proxy groups and outbounds
+        try:
+            with open(CUSTOM_CONF) as f:
+                raw = f.read()
+            for sec in ("proxy-groups", "proxies"):
+                items = extract_top_level_yaml_section(raw, sec)
+                for g in items if isinstance(items, list) else []:
+                    if isinstance(g, dict) and g.get("name") and str(g["name"]) not in cluster_proxy_names():
+                        names.add(str(g["name"]))
+        except Exception as e:
+            sys.stderr.write(f"custom config names unavailable: {e}\n")
     return {n for n in names if n}
 
 
@@ -226,22 +237,54 @@ def _wait_cluster_ports(want: set, timeout: float = 8.0) -> bool:
         time.sleep(0.15)
 
 
-def apply_cluster_live(old_specs: set):
+def custom_conf_with_cluster(raw: str, old_names: set = None) -> str:
+    """A user's full server config (custom mode) with the cluster entries replaced by cluster.json:
+    cluster listeners (CLUSTER_LISTENER_PREFIX) and member outbounds (names in old_names, default the
+    current members) are dropped, the current ones appended. The user's own entries and every other
+    section stay as written; the user's proxy-groups choose whether to use the members (e.g. include-all)."""
+    st = load_cluster()
+    old = set(old_names if old_names is not None else cluster_proxy_names())
+    lst = extract_top_level_yaml_section(raw, "listeners")
+    prox = extract_top_level_yaml_section(raw, "proxies")
+    lst = [x for x in (lst if isinstance(lst, list) else [])
+           if not (isinstance(x, dict) and str(x.get("name") or "").startswith(CLUSTER_LISTENER_PREFIX))]
+    prox = [p for p in (prox if isinstance(prox, list) else [])
+            if not (isinstance(p, dict) and str(p.get("name") or "") in old)]
+    l_body = dump_yaml_proxies(lst + [cluster_listener_from_link(l) for l in st["links"]])
+    p_body = dump_yaml_proxies(prox + [cluster_proxy_from_link(l) for l in st["links"]])
+    raw = replace_top_level_yaml_section(raw, "listeners", ("listeners:\n" + l_body) if l_body.strip() else "listeners: []\n")
+    return replace_top_level_yaml_section(raw, "proxies", ("proxies:\n" + p_body) if p_body.strip() else "proxies: []\n")
+
+
+def apply_cluster_live(old_specs: set, old_names: set = None):
     """Write the cluster change into config.yaml, validate, reload the core, update the firewall.
+    In custom mode the user's file gets only the cluster entries replaced (custom_conf_with_cluster).
     Caller holds LOCK and has already saved cluster.json; raises (config restored) on failure."""
-    if is_custom_config_mode():
-        raise ValueError("已启用自定义服务端配置，集群暂不可用")
+    custom = is_custom_config_mode()
     try:
         with open(CONF) as f:
             backup = f.read()
     except FileNotFoundError:
         backup = None
-    new_conf = _live_conf_with_cluster()
+    custom_backup = None
+    if custom:
+        with open(CUSTOM_CONF) as f:
+            custom_backup = f.read()
+        new_conf = custom_conf_with_cluster(custom_backup, old_names)
+        atomic_write(CUSTOM_CONF, new_conf, 0o640)
+    else:
+        new_conf = _live_conf_with_cluster()
+
+    def restore():
+        if backup is not None:
+            atomic_write(CONF, backup, 0o640)
+        if custom_backup is not None:
+            atomic_write(CUSTOM_CONF, custom_backup, 0o640)
+
     atomic_write(CONF, new_conf, 0o640)
     rc, out = validate_config()
     if rc != 0:
-        if backup is not None:
-            atomic_write(CONF, backup, 0o640)
+        restore()
         raise RuntimeError("配置校验失败（mihomo -t）：" + out[-300:])
     st = load_cluster()
     rc, out = run([SYSTEMCTL, "reload", "mihomo"])
@@ -255,8 +298,7 @@ def apply_cluster_live(old_specs: set):
                 rc = 1
                 out = (out or "") + "集群入站端口未能在重载后开始监听"
     if rc != 0:
-        if backup is not None:
-            atomic_write(CONF, backup, 0o640)
+        restore()
         run([SYSTEMCTL, "restart", "mihomo"])
         raise RuntimeError("重载 Mihomo 失败：" + out[-300:])
     # Keep "discard drafts" working: the baseline must describe the config that is live now.
@@ -265,6 +307,8 @@ def apply_cluster_live(old_specs: set):
             with open(PENDING_BASELINE_JSON) as f:
                 snap = json.load(f)
             snap["conf_sha256"] = _conf_digest()
+            if custom and isinstance(snap.get("files"), dict) and CUSTOM_CONF in snap["files"]:
+                snap["files"][CUSTOM_CONF] = new_conf
             atomic_write(PENDING_BASELINE_JSON, json.dumps(snap, ensure_ascii=False) + "\n", 0o600)
         except Exception as e:
             sys.stderr.write(f"pending baseline digest update failed: {e}\n")
@@ -440,15 +484,11 @@ def _cluster_commit(mutate) -> dict:
         backup = _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS))
         st = load_cluster()
         old_specs = cluster_ufw_specs(st)
+        old_names = {str(l.get("name") or "") for l in st["links"]}
         try:
             res = mutate(st)
             save_cluster(st)
-            if is_custom_config_mode():
-                # Locked mode: keep the custom file in sync; the core picks it up on the next reload.
-                _sync_custom_conf_listeners(read_nodes(), load_inbounds())
-                _sync_custom_conf_proxies(load_server_proxies())
-            else:
-                apply_cluster_live(old_specs)
+            apply_cluster_live(old_specs, old_names)
         except Exception:
             _restore_files(backup)
             raise

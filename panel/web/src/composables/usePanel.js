@@ -834,7 +834,7 @@ export function usePanel() {
   // Pages that are locked in the current mode, with the toast that explains why.
   function tabLockedMsg(tab) {
     if (tab === 'advanced' && !state.custom_server_enabled) return t('高级功能请到设置页开启')
-    if ((tab === 'routing' || tab === 'cluster') && state.custom_server_enabled) {
+    if (tab === 'routing' && state.custom_server_enabled) {
       return t('已启用自定义服务端配置，请自行修改相关配置')
     }
     return ''
@@ -917,6 +917,7 @@ export function usePanel() {
     certExpiresDisplay,
     certDaysValue,
     certIsTemp,
+    certAlert,
     certBaselineMode,
     certModeDirty,
     certRegenDisabled,
@@ -1134,6 +1135,7 @@ export function usePanel() {
     certExpiresDisplay,
     certDaysValue,
     certIsTemp,
+    certAlert,
     certBaselineMode,
     certModeDirty,
     certRegenDisabled,

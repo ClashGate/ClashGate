@@ -58,6 +58,23 @@ def resolve_sni(form: dict) -> str:
         raise ValueError("SNI 无效，请填写域名，或留空从内置域名池随机抽取")
     return raw
 
+def check_reality_dest(host: str, timeout: float = 6.0):
+    """Reality forwards unknown visitors to host:443 and borrows its TLS 1.3 handshake: the site must
+    be reachable from this server and speak TLS 1.3, or the node is added but never connects.
+    Raises ValueError with a beginner-readable reason."""
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    try:
+        with socket.create_connection((host, 443), timeout=timeout) as raw:
+            with ctx.wrap_socket(raw, server_hostname=host):
+                pass
+    except (OSError, ssl.SSLError, ValueError) as e:
+        reason = str(getattr(e, "reason", None) or e or type(e).__name__)
+        # args[1]: the raw reason, shown folded under 「详情」.
+        raise ValueError(f"无法从服务器用 TLS 1.3 连接 {host}:443，请换一个网站，或留空从内置域名池随机抽取", reason) from None
+
+
 TYPES = (
     "vless-reality", "shadowsocks", "hysteria2", "snell",
     "anytls", "tuic", "trusttunnel", "shadowquic", "mieru", "sudoku", "http", "socks",
@@ -1622,6 +1639,8 @@ def cert_failure_message(out: str, mode: str) -> str:
         return "重新生成证书失败：80 端口被占用。端口模式需要临时使用 80 端口，请释放该端口，或改用 Cloudflare DNS。"
     if "socat" in low:
         return "重新生成证书失败：端口模式需要 socat，请先在服务器上安装 socat，或改用 Cloudflare DNS。"
+    if mode == "dns" and ("cloudflare 账号里找不到" in low or "invalid domain" in low):
+        return "重新生成证书失败：这个 Cloudflare 账号里找不到该域名。请确认域名托管在这个账号下，或改用端口模式。"
     token_bad = mode == "dns" and (
         "api token" in low or "invalid api" in low or "authentication error" in low
         or "unauthorized" in low or "error code" in low and "token" in low
@@ -2441,6 +2460,10 @@ def apply_custom_config(raw_yaml: str):
     if not s:
         raise ValueError("请输入完整的 Mihomo 服务端配置内容")
     s = sanitize_doh_url_line(s) + "\n"
+    # Cluster links stay as they are: their listeners / outbounds come from cluster.json, whatever the
+    # pasted text has for them (missing, edited or stale).
+    if load_cluster()["links"]:
+        s = custom_conf_with_cluster(s)
     # mihomo -t does not open TLS files, so a wrong path would "pass" and fail only at runtime.
     missing = missing_cert_files(s)
     if missing:

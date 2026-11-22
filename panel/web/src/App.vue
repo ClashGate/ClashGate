@@ -107,6 +107,7 @@ const {
   certExpiresDisplay,
   certDaysValue,
   certIsTemp,
+  certAlert,
   certBaselineMode,
   certModeDirty,
   certRegenDisabled,
@@ -596,8 +597,8 @@ const {
           <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
             <CgIcon :name="state.custom_server_enabled ? 'lock' : 'routing'" />{{ t('服务端分流') }}
           </button>
-          <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'cluster' }" @click="selectTab('cluster')">
-            <CgIcon :name="state.custom_server_enabled ? 'lock' : 'cluster'" />{{ t('集群') }}
+          <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'cluster' }" @click="selectTab('cluster')">
+            <CgIcon name="cluster" />{{ t('集群') }}
           </button>
           <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
             <CgIcon name="convert" />{{ t('节点转换') }}
@@ -808,6 +809,21 @@ const {
           </div>
         </div>
 
+        <!-- Certificate problem only (temporary / missing / expiring): the fix is on the HTTPS 证书 page. -->
+        <button
+          v-if="certAlert"
+          id="cert-alert"
+          type="button"
+          class="w-full flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-start text-sm text-amber-900 hover:bg-amber-100/70 transition cursor-pointer"
+          @click="selectTab('certs')"
+        >
+          <span class="flex items-center gap-2 min-w-0">
+            <CgIcon name="shield" :size="15" />
+            <span class="cg-wrap">{{ certAlert }}</span>
+          </span>
+          <span class="shrink-0 inline-flex items-center gap-1 text-xs font-semibold">{{ t('去处理') }}<CgIcon name="chevron" :size="13" /></span>
+        </button>
+
         <Transition name="cg-collapse">
           <div
             v-if="showPendingDiff"
@@ -863,8 +879,8 @@ const {
         <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
           <CgIcon :name="state.custom_server_enabled ? 'lock' : 'routing'" :size="15" />{{ t('服务端分流') }}
         </button>
-        <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'cluster' }" @click="selectTab('cluster')">
-          <CgIcon :name="state.custom_server_enabled ? 'lock' : 'cluster'" :size="15" />{{ t('集群') }}
+        <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'cluster' }" @click="selectTab('cluster')">
+          <CgIcon name="cluster" :size="15" />{{ t('集群') }}
         </button>
         <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
           <CgIcon name="convert" :size="15" />{{ t('节点转换') }}

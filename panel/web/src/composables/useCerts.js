@@ -32,6 +32,22 @@ export function useCerts(p) {
     return d === null || d === undefined || d === '' ? null : Number(d)
   })
   const certIsTemp = computed(() => /clashgate temporary/i.test(certIssuerDisplay.value))
+  // Shown on the home page only when the certificate needs attention (renewal runs 30 days ahead,
+  // so under 14 days left means it is not working).
+  const certAlert = computed(() => {
+    if (state.mode === 'no-cert') return ''
+    if (state.certs_present === false) return t('没有找到证书，客户端无法更新订阅')
+    if (certIsTemp.value) return t('证书还没有签发成功，当前是临时证书，客户端可能无法更新订阅')
+    const d = certDaysValue.value
+    if (d === null || !Number.isFinite(d)) return ''
+    if (d < 0) return t('证书已过期，客户端无法更新订阅')
+    if (d < 14) {
+      return certModeValue.value === 'manual'
+        ? t('证书 {n} 天后过期，请更换手动证书', { n: d })
+        : t('证书 {n} 天后过期，自动续期可能没有成功', { n: d })
+    }
+    return ''
+  })
   const certBaselineMode = computed(() => (certModeValue.value === 'dns' ? 'dns' : 'port'))
   const certModeDirty = computed(() => {
     // Manual: always clickable, so replaced files can be re-checked and loaded.
@@ -199,6 +215,7 @@ export function useCerts(p) {
     certExpiresDisplay,
     certDaysValue,
     certIsTemp,
+    certAlert,
     certBaselineMode,
     certModeDirty,
     certRegenDisabled,

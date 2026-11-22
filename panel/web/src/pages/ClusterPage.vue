@@ -193,15 +193,10 @@ const {
 
 <template>
 <div class="space-y-4">
-          <div v-if="state.custom_server_enabled" class="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm font-semibold text-amber-800">
-            {{ t('已启用自定义服务端配置，请自行修改相关配置') }}
+          <div v-if="state.custom_config_mode" class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-4 py-3 text-xs text-emerald-900 leading-relaxed">
+            {{ t('自定义服务端：集群成员会加入配置的 proxies，请在自己的 proxy-groups 中引用（例如 include-all: true）。') }}
           </div>
-          <div
-            class="space-y-4"
-            :class="state.custom_server_enabled ? 'opacity-50 pointer-events-none select-none' : ''"
-            :inert="state.custom_server_enabled || undefined"
-            :aria-disabled="state.custom_server_enabled ? 'true' : undefined"
-          >
+          <div class="space-y-4">
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
               <div class="space-y-4 min-w-0">
                 <section class="cg-surface rounded-2xl p-5 sm:p-6 space-y-4" data-cg-card="node-name">

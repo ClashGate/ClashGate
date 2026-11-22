@@ -305,6 +305,7 @@ echo "certctl: ok"
 CERT_HARNESS = r"""
 chown() { return 0; }
 systemctl() { return 0; }
+ss() { return 0; }   # nothing listens on this test host as far as the script can tell
 verify() { log "检查运行状态"; }
 open_firewall() { return 0; }
 has_tty() { return 1; }
@@ -322,6 +323,19 @@ export PYTHONDONTWRITEBYTECODE=1
 ACTION_ARG=new.example.com
 do_cert || exit $?   # as the dispatcher runs it (errexit off inside)
 """
+
+
+CERT_TTY_HARNESS = CERT_HARNESS.replace("has_tty() { return 1; }", r'''has_tty() { return 0; }
+IFS='|' read -r -a ANS <<< "$CERT_ANSWERS"; AI_FILE=$(mktemp); echo 0 > "$AI_FILE"
+ask() {   # answers in order ("" = Enter); runs in $(...) subshells, so the index lives in a file
+  builtin printf '%s\n' "$1" >&2
+  local i; i=$(<"$AI_FILE"); builtin echo $((i + 1)) > "$AI_FILE"
+  if ((i >= ${#ANS[@]})); then
+    [[ -n $2 ]] || kill -TERM $$   # out of answers at a prompt without a default: stop, never loop
+    builtin printf '%s' "$2"; return
+  fi
+  builtin printf '%s' "${ANS[i]:-$2}"
+}''').replace("ACTION_ARG=new.example.com\n", "")
 
 
 class CertCommandTest(unittest.TestCase):
@@ -361,14 +375,15 @@ class CertCommandTest(unittest.TestCase):
                 f.write(body)
         return prefix, cs, files
 
-    def _run(self, prefix, cs, rc):
+    def _run(self, prefix, cs, rc, answers=None):
         src = open(os.path.join(REPO, "scripts", "cmd", "clashgate.sh"), encoding="utf-8").read()
         src = re.sub(r"(?m)^CS_HOME=.*$", "CS_HOME=" + REPO, src, count=1)
         src = src[: src.index('\nACTION=""\n')]
         script = os.path.join(os.path.dirname(prefix), "run.sh")
         with open(script, "w", encoding="utf-8") as f:
-            f.write(src + CERT_HARNESS)
-        env = snippet_env(prefix, cs, extra={"CS": cs, "FAKE_CS": cs, "FAKE_CERT_RC": str(rc), "CLASHGATE_LANG": "zh"})
+            f.write(src + (CERT_HARNESS if answers is None else CERT_TTY_HARNESS))
+        env = snippet_env(prefix, cs, extra={"CS": cs, "FAKE_CS": cs, "FAKE_CERT_RC": str(rc), "CLASHGATE_LANG": "zh",
+                                             "CERT_ANSWERS": "|".join(answers or [])})
         return subprocess.run(["bash", script], env=env, capture_output=True, text=True, timeout=180)
 
     def test_failed_certificate_changes_nothing(self):
@@ -404,8 +419,36 @@ class CertCommandTest(unittest.TestCase):
         self.assertEqual(json.loads(read("inbounds.json")), [])
         self.assertEqual(read("listeners.extra.yaml"), "")
         self.assertNotIn("old-ss", read("config.yaml"))
-        self.assertIn("https://new.example.com:25183/sub/" + panel["sub_token"] + "/mihomo.yaml", r.stdout)
+        self.assertIn("https://new.example.com:25183\n", r.stdout)   # the panel URL
+        self.assertNotIn("/sub/", r.stdout)   # the subscription link is not printed
         self.assertIn("[6/6]", r.stdout)
+
+    def test_interactive_switches_the_certificate_method(self):
+        """The menu asks for the method first (Enter keeps it); a failed request also restores CERT_MODE."""
+        if not os.path.isfile(MIHOMO) or not os.access(MIHOMO, os.X_OK):
+            self.skipTest("mihomo binary not found at " + MIHOMO)
+        prefix, cs, files = self._tree()
+        env_path = os.path.join(cs, "clashgate.env")
+        with open(env_path, "w") as f:
+            f.write(files["clashgate.env"].replace('CERT_MODE="port"', 'CERT_MODE="dns"') + 'CF_TOKEN="tok"\n')
+        dns_env = open(env_path).read()
+        r = self._run(prefix, cs, 1, answers=["1", "new.example.com", "y"])
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("请输入 [1/2/3]（回车沿用当前：DNS API 模式）：", r.stderr)
+        self.assertEqual(open(env_path).read(), dns_env)   # restored: still DNS API mode
+        r = self._run(prefix, cs, 0, answers=["1", "new.example.com", "y"])
+        self.assertEqual(r.returncode, 0, "stdout:\n%s\nstderr:\n%s" % (r.stdout, r.stderr))
+        env = open(env_path).read()
+        self.assertIn('CERT_MODE="port"', env)
+        self.assertIn('DOMAIN="new.example.com"', env)
+        self.assertIn("确定更换为 new.example.com？节点和订阅链接会重新生成 [y/N]：", r.stderr)
+        self.assertNotIn("Cloudflare API Token", r.stderr)   # port mode: no token prompt
+        # A "n" at the confirmation changes nothing.
+        before = open(env_path).read()
+        r = self._run(prefix, cs, 0, answers=["", "other.example.com", "n"])
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("已取消", r.stdout)
+        self.assertEqual(open(env_path).read(), before)
 
 
 if __name__ == "__main__":
