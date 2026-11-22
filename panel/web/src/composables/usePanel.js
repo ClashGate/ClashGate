@@ -706,7 +706,11 @@ export function usePanel() {
   }
 
   async function postAction(url, params = {}, key = url, opts = {}) {
-    if (busyKey.value) return null
+    if (busyKey.value) {
+      // A click while another action is still running used to do nothing at all.
+      if (!opts.silentToast) showToast(t('上一个操作还在进行，请稍候'), false)
+      return null
+    }
     busyKey.value = key
     const versionBefore = state.version
     const ctrl = window.AbortController ? new AbortController() : null
@@ -878,7 +882,10 @@ export function usePanel() {
       activeTab.value = next
     })
     resumeUpgradeIfRunning()
-    if (pageMode.value === 'dashboard') resumeCertTaskIfRunning()
+    if (pageMode.value === 'dashboard') {
+      resumeCertTaskIfRunning()
+      resumeClusterTaskIfRunning()
+    }
     window.addEventListener('blur', maskAllSensitive)
     document.addEventListener('visibilitychange', handleVisibilityChange)
     document.addEventListener('pointerdown', handleDocumentPointerDown)
@@ -968,6 +975,9 @@ export function usePanel() {
     listSep,
     syncCluster,
     leaveCluster,
+    clusterTask,
+    taskTitle,
+    resumeClusterTaskIfRunning,
   } = useCluster(shared)
   const {
     converterInput,
@@ -1194,6 +1204,8 @@ export function usePanel() {
     listSep,
     syncCluster,
     leaveCluster,
+    clusterTask,
+    taskTitle,
     loadFileInto,
     fillCurrentInboundsToConverter,
     convertConfigFormat,

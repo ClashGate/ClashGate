@@ -160,6 +160,8 @@ const {
   listSep,
   syncCluster,
   leaveCluster,
+  clusterTask,
+  taskTitle,
   loadFileInto,
   fillCurrentInboundsToConverter,
   convertConfigFormat,
@@ -374,6 +376,38 @@ const {
           <div class="flex items-center justify-end gap-2.5 pt-2">
             <button type="button" @click="closeRenameDialog" class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition cursor-pointer">{{ t('取消') }}</button>
             <button type="button" @click="acceptRenameDialog" :disabled="!String(renameDialog.name || '').trim()" class="cg-btn-primary px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer">{{ t('确认') }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Running cluster operation: blocks the page until the server reports the result. -->
+    <Transition name="cg-modal">
+      <div
+        v-if="clusterTask.show"
+        id="cluster-task-overlay"
+        class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/25 backdrop-blur-[2px]"
+      >
+        <div
+          v-cg-dialog
+          role="alertdialog"
+          aria-modal="true"
+          aria-busy="true"
+          aria-labelledby="cluster-task-title"
+          aria-describedby="cluster-task-stage"
+          tabindex="-1"
+          class="cg-modal-panel w-full max-w-sm bg-white rounded-2xl border border-slate-200/90 p-6 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18)] outline-none"
+        >
+          <div class="flex items-center gap-3">
+            <span class="cg-spin" aria-hidden="true"></span>
+            <h3 id="cluster-task-title" class="text-base font-bold text-slate-900 tracking-tight">{{ taskTitle(clusterTask.kind) }}</h3>
+          </div>
+          <p id="cluster-task-stage" class="mt-3 min-h-[20px] text-sm text-slate-700 cg-wrap" aria-live="polite">
+            {{ clusterTask.stage || t('正在准备…') }}
+          </p>
+          <div class="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+            <span>{{ t('需要联系其他面板并重载内核，可能要一分钟左右。') }}</span>
+            <span class="shrink-0 tabular-nums">{{ t('{s} 秒', { s: clusterTask.elapsed }) }}</span>
           </div>
         </div>
       </div>

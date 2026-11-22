@@ -12,6 +12,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -82,7 +83,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -523,6 +524,7 @@ class ClusterTest(unittest.TestCase):
         self.assertEqual([l["name"] for l in lst], ["my-ss", P.CLUSTER_LISTENER_PREFIX + "abc123"])
         self.assertEqual([p["name"] for p in prox], ["mine", "东京-1"])
         self.assertEqual(prox[1]["server"], "tokyo.example.com")   # from cluster.json, not the pasted text
+        self.assertEqual(lst[1].get("proxy"), "DIRECT")   # exit only in custom mode too (no loops)
         self.assertIn("include-all: true", out)
         self.assertIn("MATCH,G", out)
         # A member that left: its outbound is dropped when it is named in old_names.
@@ -567,6 +569,139 @@ class ClusterTest(unittest.TestCase):
             if os.path.exists(P.CUSTOM_CONF):
                 os.remove(P.CUSTOM_CONF)
             P.atomic_write(P.CONF, base, 0o640)
+
+    def test_cluster_members_are_exits_not_relays(self):
+        """Traffic from another panel leaves directly, so A -> B -> A can never happen, whatever is
+        selected in Zashboard. Existing links get this on the first start after an update."""
+        st, _, _ = self._state()
+        self.assertEqual(P.cluster_listener_from_link(st["links"][0])["proxy"], "DIRECT")
+        P.save_cluster(st)
+        old_shape = P.render_cluster_listeners(st).replace(', "proxy": "DIRECT"', "")
+        self.assertNotEqual(old_shape, P.render_cluster_listeners(st))
+        P.atomic_write(P.FRAG_CLUSTER_LISTENERS, old_shape, 0o640)   # what 1.37 left on disk
+        P.atomic_write(P.CONF, P.assemble_config(), 0o640)
+        self.assertNotIn('"proxy": "DIRECT"', read(P.CONF))
+        g = P.apply_cluster_live.__globals__
+        with mock.patch.dict(g, {"_wait_cluster_ports": lambda want, timeout=8.0: True}):
+            self.assertTrue(P.refresh_cluster_fragments())
+            self.assertFalse(P.refresh_cluster_fragments())   # done once
+        self.assertEqual(read(P.FRAG_CLUSTER_LISTENERS), P.render_cluster_listeners(st))
+        conf = read(P.CONF)
+        self.assertIn('"proxy": "DIRECT"', conf)
+        rc, out = P.validate_config()
+        self.assertEqual(rc, 0, out)
+        P.save_cluster({**st, "links": []})
+        self.assertFalse(P.refresh_cluster_fragments())   # no links: nothing to do
+
+    def test_custom_mode_old_cluster_inbound_gets_direct(self):
+        """A 1.37 custom config (cluster inbound without proxy: DIRECT) is fixed on the first start,
+        even if the user deleted the field by hand; then nothing more to do."""
+        st, _, _ = self._state()
+        P.save_cluster(st)
+        base = P.custom_conf_with_cluster(P.assemble_config())
+        self.assertEqual(base.count("    proxy: DIRECT\n"), 1)   # only the cluster inbound has it
+        old = base.replace("    proxy: DIRECT\n", "")
+        P.atomic_write(P.CUSTOM_CONF, old, 0o640)
+        P.atomic_write(P.CONF, old, 0o640)
+        g = P.apply_cluster_live.__globals__
+        try:
+            with mock.patch.dict(g, {"_wait_cluster_ports": lambda want, timeout=8.0: True}):
+                self.assertTrue(P.refresh_cluster_fragments())
+                self.assertFalse(P.refresh_cluster_fragments())
+            lst = P.extract_top_level_yaml_section(read(P.CUSTOM_CONF), "listeners")
+            cl = [x for x in lst if x["name"].startswith(P.CLUSTER_LISTENER_PREFIX)]
+            self.assertEqual([x.get("proxy") for x in cl], ["DIRECT"])
+            self.assertEqual(read(P.CONF), read(P.CUSTOM_CONF))
+        finally:
+            os.remove(P.CUSTOM_CONF)
+            P.atomic_write(P.CONF, P.assemble_config(), 0o640)
+
+    def test_cluster_operation_runs_in_background_with_steps(self):
+        """1.39: the page starts a cluster operation with async=1 and polls its current step, so a long
+        add (both cores reload) shows progress instead of a frozen button."""
+        h = object.__new__(P.Panel)
+        h.headers = {"X-Requested-With": "fetch"}
+        sent = []
+        h.send = lambda code, body, ctype="", headers=None, cache_key=None: sent.append((code, json.loads(body)))
+        h.build_client_state = lambda s, *a: {"x": 1}
+        h.tr = lambda m: m
+        got = {}
+        h.respond_mutation = lambda s, msg, ok=True, detail="": got.update(ok=ok, msg=msg)
+        go = threading.Event()
+
+        def job():
+            P.cluster_stage("正在检查「东京-1」")
+            go.wait(5)
+            return "集群成员都在线，互联完整", True
+
+        h._cluster_job({}, job, {"async": "1"}, "sync")
+        code, started = sent[-1]
+        self.assertEqual((code, started["ok"], started["running"]), (200, True, True))
+        for _ in range(50):
+            h.cluster_task_status({})
+            if sent[-1][1].get("stage"):
+                break
+            time.sleep(0.02)
+        run = sent[-1][1]
+        self.assertEqual((run["running"], run["kind"], run["stage"]), (True, "sync", "正在检查「东京-1」"))
+        h._cluster_job({}, job, {"async": "1"}, "add")   # one operation at a time
+        self.assertEqual(got, {"ok": False, "msg": "另一个集群操作正在进行，请稍候再试"})
+        go.set()
+        for _ in range(100):
+            h.cluster_task_status({})
+            if not sent[-1][1]["running"]:
+                break
+            time.sleep(0.02)
+        done = sent[-1][1]
+        self.assertEqual((done["done"], done["ok"], done["msg"], done["state"]), (True, True, "集群成员都在线，互联完整", {"x": 1}))
+        self.assertEqual(done["id"], started["id"])   # the page only reports the task it started
+        self.assertTrue(P._CLUSTER_OP_LOCK.acquire(blocking=False))   # released after the job
+        P._CLUSTER_OP_LOCK.release()
+        # Outside a page task a step report changes nothing (CLI `clashgate uninstall` leaves too).
+        P.cluster_stage("正在通知「x」")
+        self.assertEqual(P._CLUSTER_TASK["stage"], "")
+        # Without async=1 (other panels, older pages, tests) it still answers in the same request.
+        h._cluster_job({}, lambda: ("ok-now", True), {}, "sync")
+        self.assertEqual(got, {"ok": True, "msg": "ok-now"})
+
+    def test_cluster_page_overlay_while_an_operation_runs(self):
+        src = os.path.join(REPO, "panel/web/src")
+        app = read(os.path.join(src, "App.vue"))
+        ov = app[app.index('id="cluster-task-overlay"'):]
+        ov = ov[:ov.index("</Transition>")]
+        for needle in ('v-if="clusterTask.show"', "v-cg-dialog", 'role="alertdialog"', 'aria-busy="true"',
+                       "clusterTask.stage", "clusterTask.elapsed", 'class="cg-spin"'):
+            self.assertIn(needle, ov)
+        self.assertNotIn("✕", ov)   # nothing to close: it ends with the operation
+        cl = read(os.path.join(src, "composables/useCluster.js"))
+        for url, kind in (("/cluster/add", "add"), ("/cluster/sync", "sync"), ("/cluster/remove", "remove"), ("/cluster/leave", "leave")):
+            self.assertRegex(cl, r"runClusterTask\(\s*'" + re.escape(url) + r"'[^)]*'" + kind + "'", url)
+        self.assertNotIn("postAction('/cluster/", cl)
+        self.assertIn("resumeClusterTaskIfRunning()", read(os.path.join(src, "composables/usePanel.js")))
+
+    def test_core_build_matches_the_cpu(self):
+        """1.39: the plain amd64 core needs an x86-64-v3 CPU ("can only be run on AMD64 processors with v3
+        microarchitecture support"); install and panel update pick a build by CPU level and fall back."""
+        U = sys.modules["cg_update"]
+        tag = "v1.19.34"
+        self.assertEqual(U.mihomo_asset_candidates("amd64", tag, level=1),
+                         ["mihomo-linux-amd64-v1-v1.19.34.gz", "mihomo-linux-amd64-compatible-v1.19.34.gz"])
+        self.assertEqual(U.mihomo_asset_candidates("amd64", tag, level=2)[0], "mihomo-linux-amd64-v2-v1.19.34.gz")
+        self.assertEqual(U.mihomo_asset_candidates("amd64", tag, level=3)[:2],
+                         ["mihomo-linux-amd64-v3-v1.19.34.gz", "mihomo-linux-amd64-v1.19.34.gz"])
+        for lvl in (1, 2, 3):
+            self.assertEqual(U.mihomo_asset_candidates("amd64", tag, level=lvl)[-1], "mihomo-linux-amd64-compatible-v1.19.34.gz")
+        self.assertEqual(U.mihomo_asset_candidates("arm64", tag), ["mihomo-linux-arm64-v1.19.34.gz"])
+        core = read(os.path.join(REPO, "scripts/lib/core.sh"))
+        body = core[core.index("install_core() {"):]
+        body = body[:body.index("\n}\n")]
+        self.assertIn("core_asset_candidates", body)
+        self.assertNotIn('mihomo-linux-${a}-${tag}.gz" \'.assemblies[]', body)
+        # the shell list is the same as the Python one for each level
+        for lvl in (1, 2, 3):
+            out = subprocess.run(["bash", "-c", f'source scripts/lib/core.sh; amd64_level() {{ echo {lvl}; }}; core_asset_candidates amd64 {tag}'],
+                                 cwd=REPO, capture_output=True, text=True)
+            self.assertEqual(out.stdout.split(), U.mihomo_asset_candidates("amd64", tag, level=lvl), out.stderr)
 
     def test_old_cluster_file_is_ignored(self):
         with open(P.CLUSTER_JSON, "w") as f:

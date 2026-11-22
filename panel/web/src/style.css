@@ -753,6 +753,23 @@ html[lang="fa"] textarea.font-mono {
   }
 }
 
+/* Busy spinner (cluster operation overlay). Reduced motion: the global rule stops it; the step
+   text and the seconds still show progress. */
+.cg-spin {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 2px solid #dbeafe;
+  border-top-color: #1d6fe0;
+  animation: cg-spin 0.8s linear infinite;
+}
+
+@keyframes cg-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Routing group order: up / down next to the drag handle (dragging does not work on touch screens). */
 .cg-move {
   display: inline-flex;

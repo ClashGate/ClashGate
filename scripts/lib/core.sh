@@ -40,24 +40,58 @@ install_deps() {
   fi
 }
 
+# x86-64 microarchitecture level (1/2/3) from /proc/cpuinfo flags. Mihomo's plain amd64 build needs v3
+# (AVX2 etc.); older CPUs and many VPS CPU models only have v1/v2 and fail with
+# "This program can only be run on AMD64 processors with v3 microarchitecture support".
+amd64_level() {
+  local f x
+  f=" $(grep -m1 -E '^flags' /proc/cpuinfo 2>/dev/null | cut -d: -f2) "
+  for x in cx16 lahf_lm popcnt pni sse4_1 sse4_2 ssse3; do [[ $f == *" $x "* ]] || { echo 1; return; }; done
+  for x in avx avx2 bmi1 bmi2 f16c fma abm movbe xsave; do [[ $f == *" $x "* ]] || { echo 2; return; }; done
+  echo 3
+}
+
+# Release asset names to try for this machine, best first (each is checked with `-v` before use).
+core_asset_candidates() { # <arch> <tag>
+  local a=$1 tag=$2
+  if [[ $a == amd64 ]]; then
+    case $(amd64_level) in
+      3) printf '%s\n' "amd64-v3" "amd64" "amd64-v2" "amd64-v1" "amd64-compatible" ;;
+      2) printf '%s\n' "amd64-v2" "amd64-v1" "amd64-compatible" ;;
+      *) printf '%s\n' "amd64-v1" "amd64-compatible" ;;
+    esac | sed "s/.*/mihomo-linux-&-${tag}.gz/"
+  else
+    echo "mihomo-linux-${a}-${tag}.gz"
+  fi
+}
+
 install_core() {
   log "安装最新稳定版 Mihomo 内核"
   install -d -m 1775 "$CS_ROOT"
-  local a rel tag url tmp
+  local a rel tag url tmp name tried=0
   a=$(arch)
   rel=$(curl -fsSL --retry 3 "$REPO_API") || die "无法获取 Mihomo 版本信息（请确认服务器可以访问 GitHub）"
   tag=$(jq -r .tag_name <<<"$rel")
-  # stable "latest" endpoint already excludes prereleases; plain build name: mihomo-linux-<arch>-<tag>.gz
-  url=$(jq -r --arg n "mihomo-linux-${a}-${tag}.gz" '.assets[] | select(.name==$n) | .browser_download_url' <<<"$rel")
-  [[ -n "$url" ]] || die "版本 $tag 中没有找到 mihomo-linux-${a}-${tag}.gz"
   tmp=$(mktemp)
-  curl -fsSL --retry 3 -o "$tmp" "$url" || die "下载失败：$url"
-  gzip -dc "$tmp" > "$BIN.new" && rm -f "$tmp"
-  chmod 755 "$BIN.new"
-  "$BIN.new" -v >/dev/null || die "下载的 Mihomo 无法运行"
-  mv "$BIN.new" "$BIN"
-  ln -sfn "$BIN" /usr/local/bin/mihomo
-  info "已安装 $tag -> $BIN"
+  while read -r name; do
+    url=$(jq -r --arg n "$name" '.assets[] | select(.name==$n) | .browser_download_url' <<<"$rel")
+    [[ -n "$url" ]] || continue
+    tried=$((tried + 1))
+    curl -fsSL --retry 3 -o "$tmp" "$url" || die "下载失败：$url"
+    gzip -dc "$tmp" > "$BIN.new" || { rm -f "$BIN.new"; continue; }
+    chmod 755 "$BIN.new"
+    if "$BIN.new" -v >/dev/null 2>&1; then
+      rm -f "$tmp"
+      mv "$BIN.new" "$BIN"
+      ln -sfn "$BIN" /usr/local/bin/mihomo
+      info "已安装 $tag -> $BIN"
+      return 0
+    fi
+    rm -f "$BIN.new"   # this CPU cannot run that build: quietly try the next one
+  done < <(core_asset_candidates "$a" "$tag")
+  rm -f "$tmp"
+  ((tried)) || die "版本 $tag 中没有找到适合 $a 的 Mihomo 内核文件"
+  die "下载的 Mihomo 无法运行"
 }
 
 IPV4_RE='^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'

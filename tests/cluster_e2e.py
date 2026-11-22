@@ -365,6 +365,7 @@ def main():
             check(sorted(p["name"] for p in prox) == want and len(lst) == len(want), f"{w} has {len(want)} outbounds and inbounds")
             check(all(f'"name": "{n}"' in conf for n in want) and conf.count("cg-cluster-") == len(want), f"{w}'s live config has them")
             check(all(listening(x["port"]) for x in lst), f"{w}'s core listens on its cluster ports")
+            check(all(x.get("proxy") == "DIRECT" for x in lst), f"{w}'s cluster inbounds are exits only (no loops)")
             for o in names:
                 if o != w:
                     out = traffic(w, f"{o}-Node")
