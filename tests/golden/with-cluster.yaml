@@ -89,7 +89,16 @@ proxies:
     server: 9.9.9.9
     port: 1080
     udp: true
-  - {"name": "Tokyo-1", "type": "vless", "server": "tokyo.example.com", "port": 31000, "uuid": "11111111-2222-4333-8444-555555555555", "flow": "xtls-rprx-vision", "packet-encoding": "xudp", "encryption": "mlkem768x25519plus.native.0rtt.fixed-out", "network": "tcp", "udp": true}
+  - name: Tokyo-1
+    type: vless
+    server: tokyo.example.com
+    port: 31000
+    uuid: 11111111-2222-4333-8444-555555555555
+    flow: xtls-rprx-vision
+    packet-encoding: xudp
+    encryption: mlkem768x25519plus.native.0rtt.fixed-out
+    network: tcp
+    udp: true
 
 
 proxy-groups:
@@ -125,8 +134,23 @@ listeners:
       dest: www.microsoft.com:443
       private-key: YQdE8o0kC6k0m0s0kC6k0m0s0kC6k0m0s0kC6k0m0s0
       short-id:
-        - 01234567
+        - "01234567"
       server-names:
         - www.microsoft.com
-  - {"name": "ss-fixed", "type": "shadowsocks", "port": 30101, "listen": "0.0.0.0", "password": "fixed-secret", "cipher": "chacha20-ietf-poly1305", "udp": true}
-  - {"name": "cg-cluster-abc123", "type": "vless", "port": 31001, "listen": "0.0.0.0", "users": [{"username": "cluster", "uuid": "66666666-7777-4888-9999-000000000000", "flow": "xtls-rprx-vision"}], "decryption": "mlkem768x25519plus.native.600s.fixed-in", "proxy": "DIRECT"}
+  - name: ss-fixed
+    type: shadowsocks
+    port: 30101
+    listen: 0.0.0.0
+    password: fixed-secret
+    cipher: chacha20-ietf-poly1305
+    udp: true
+  - name: cg-cluster-abc123
+    type: vless
+    port: 31001
+    listen: 0.0.0.0
+    users:
+      - username: cluster
+        uuid: 66666666-7777-4888-9999-000000000000
+        flow: xtls-rprx-vision
+    decryption: mlkem768x25519plus.native.600s.fixed-in
+    proxy: DIRECT

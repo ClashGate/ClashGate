@@ -63,6 +63,7 @@ const {
   activeTab,
   scrollActiveNavIntoView,
   busyKey,
+  clusterBusy,
   copiedKey,
   langOpen,
   langMenuStyle,
@@ -140,6 +141,7 @@ const {
   syncCluster,
   leaveCluster,
   dismissPending,
+  retryClusterMember,
   loadFileInto,
   fillCurrentInboundsToConverter,
   convertConfigFormat,
@@ -279,7 +281,7 @@ const {
                     </div>
                     <button
                       type="submit"
-                      :disabled="!!busyKey || !state.cluster.self_url"
+                      :disabled="!!busyKey || !!clusterBusy || !state.cluster.self_url"
                       class="cg-btn-primary h-10 px-5 rounded-xl disabled:opacity-50 text-sm font-semibold cursor-pointer"
                     >{{ busyKey === 'cluster-add' ? t('正在和对方面板互联…') : t('添加到集群') }}</button>
                   </form>
@@ -305,10 +307,11 @@ const {
                     <button
                       v-if="state.cluster.members.length || state.cluster.pending.length"
                       type="button"
-                      :disabled="!!busyKey"
+                      :disabled="!!busyKey || !!clusterBusy"
+                      :aria-busy="clusterBusy === 'cluster-sync' ? 'true' : undefined"
                       @click="syncCluster"
-                      class="-my-1 h-8 px-3 rounded-xl text-xs font-semibold bg-white hover:bg-sky-50 text-slate-700 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer shrink-0"
-                    >{{ busyKey === 'cluster-sync' ? t('检查中…') : t('检查') }}</button>
+                      class="-my-1 h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-semibold bg-white hover:bg-sky-50 text-slate-700 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer shrink-0"
+                    ><span v-if="clusterBusy === 'cluster-sync'" class="cg-spin cg-spin-sm" aria-hidden="true"></span>{{ clusterBusy === 'cluster-sync' ? t('检查中…') : t('检查') }}</button>
                   </div>
                   <div
                     v-if="state.cluster.members.length === 0 && state.cluster.pending.length === 0"
@@ -322,7 +325,7 @@ const {
                           <span
                             v-if="m.ok === false"
                             class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-amber-50 text-amber-800 border border-amber-200/80"
-                          >{{ t('联系不上') }}</span>
+                          >{{ t('连接失败') }}</span>
                           <span
                             v-else-if="m.missing && m.missing.length"
                             class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-amber-50 text-amber-800 border border-amber-200/80"
@@ -332,15 +335,24 @@ const {
                         <div class="text-xs text-slate-500 font-mono cg-wrap" dir="ltr">{{ m.url }}</div>
                         <p v-if="m.ok === false && m.error" class="text-xs text-amber-700 cg-wrap">{{ m.error }}</p>
                         <p v-else-if="m.missing && m.missing.length" class="text-xs text-amber-700 cg-wrap">
-                          {{ t('还没和「{names}」互联，点「检查」重试', { names: m.missing.join(listSep) }) }}
+                          {{ t('还没和「{names}」互联，点「重试」再试一次', { names: m.missing.join(listSep) }) }}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        :disabled="!!busyKey"
-                        @click="removeClusterMember(m)"
-                        class="h-8 px-3 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer shrink-0"
-                      >{{ busyKey === `cl-rm-${m.id}` ? t('移除中…') : t('移除') }}</button>
+                      <div class="flex items-center gap-2 shrink-0">
+                        <button
+                          v-if="m.ok === false || (m.missing && m.missing.length)"
+                          type="button"
+                          :disabled="!!busyKey || !!clusterBusy"
+                          @click="retryClusterMember(m)"
+                          class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-slate-700 bg-white hover:bg-sky-50 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer"
+                        ><span v-if="clusterBusy === `cl-rt-${m.id}`" class="cg-spin cg-spin-sm" aria-hidden="true"></span>{{ clusterBusy === `cl-rt-${m.id}` ? t('重试中…') : t('重试') }}</button>
+                        <button
+                          type="button"
+                          :disabled="!!busyKey || !!clusterBusy"
+                          @click="removeClusterMember(m)"
+                          class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                        ><span v-if="clusterBusy === `cl-rm-${m.id}`" class="cg-spin cg-spin-sm" aria-hidden="true"></span>{{ clusterBusy === `cl-rm-${m.id}` ? t('移除中…') : t('移除') }}</button>
+                      </div>
                     </div>
                     <div v-for="p in state.cluster.pending" :key="'p-' + p.id" class="p-4 flex items-center justify-between gap-3">
                       <div class="space-y-1 min-w-0 flex-1">
@@ -351,22 +363,30 @@ const {
                         <div class="text-xs text-slate-500 font-mono cg-wrap" dir="ltr">{{ p.url }}</div>
                         <p v-if="p.error" class="text-xs text-amber-700 cg-wrap">{{ p.error }}</p>
                       </div>
+                      <div class="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
-                        :disabled="!!busyKey"
+                        :disabled="!!busyKey || !!clusterBusy"
+                        @click="syncCluster"
+                        class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-slate-700 bg-white hover:bg-sky-50 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer"
+                      ><span v-if="clusterBusy === 'cluster-sync'" class="cg-spin cg-spin-sm" aria-hidden="true"></span>{{ clusterBusy === 'cluster-sync' ? t('重试中…') : t('重试') }}</button>
+                      <button
+                        type="button"
+                        :disabled="!!busyKey || !!clusterBusy"
                         @click="dismissPending(p)"
                         :title="t('只是不再显示这一条；下次点「检查」时还会再试')"
-                        class="h-8 px-3 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer shrink-0"
+                        class="h-8 px-3 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer"
                       >{{ t('忽略') }}</button>
+                      </div>
                     </div>
                   </div>
                   <div v-if="state.cluster.members.length" class="flex justify-end">
                     <button
                       type="button"
-                      :disabled="!!busyKey"
+                      :disabled="!!busyKey || !!clusterBusy"
                       @click="leaveCluster"
-                      class="h-8 px-3 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
-                    >{{ busyKey === 'cluster-leave' ? t('正在退出…') : t('退出集群') }}</button>
+                      class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                    ><span v-if="clusterBusy === 'cluster-leave'" class="cg-spin cg-spin-sm" aria-hidden="true"></span>{{ clusterBusy === 'cluster-leave' ? t('正在退出…') : t('退出集群') }}</button>
                   </div>
                 </section>
               </div>

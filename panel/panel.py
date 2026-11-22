@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.40 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.42 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -96,6 +96,7 @@ from cg_yaml import (  # noqa: E402
     dump_yaml_map,
     dump_yaml_providers,
     dump_yaml_proxies,
+    expand_flow_items,
     parse_flow_val,
     parse_mihomo_proxies,
     parse_scalar,
@@ -170,7 +171,15 @@ from cg_cluster import (  # noqa: E402
     cluster_stage,
     cluster_pending_id,
     _prune_pending,
+    _frag_items,
+    _conf_cluster_entries,
     cluster_batch,
+    cluster_batch_text,
+    cluster_apply_staged,
+    CLUSTER_STAGE_TTL,
+    _STAGED,
+    _deferring,
+    _remote_apply,
     ClusterTimeout,
     _CLUSTER_BATCH,
     _batching,
@@ -180,6 +189,13 @@ from cg_cluster import (  # noqa: E402
     cluster_instance_id,
     cluster_proxy_from_link,
     cluster_listener_from_link,
+    cluster_listeners,
+    _link_legacy,
+    cluster_reserved_ports,
+    ensure_cluster_inbound,
+    cluster_migrate_links,
+    start_cluster_migration,
+    CLUSTER_SHARED_LISTENER,
     render_cluster_proxies,
     render_cluster_listeners,
     save_cluster,
@@ -231,9 +247,9 @@ from cg_qr import (  # noqa: E402
     qr_png_data_url,
 )
 
-# Versions compare as integer tuples (parse_version_tuple): 1.40 > 1.39 > 1.38 > 1.37 > 1.36 > 1.35 > 1.34 > 1.33 > 1.32 > 1.31 > 1.30 > 1.29 > 1.28 > 1.27 > 1.26 > 1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
-# would sort below 1.09 on every installed panel); the next releases are 1.41, 1.42, ...
-VERSION = "1.40"
+# Versions compare as integer tuples (parse_version_tuple): 1.42 > 1.41 > 1.40 > 1.39 > 1.38 > 1.37 > 1.36 > 1.35 > 1.34 > 1.33 > 1.32 > 1.31 > 1.30 > 1.29 > 1.28 > 1.27 > 1.26 > 1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
+# would sort below 1.09 on every installed panel); the next releases are 1.43, 1.44, ...
+VERSION = "1.42"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -358,6 +374,8 @@ KIND_ZH = {
 import cg_config  # noqa: E402
 from cg_config import (  # noqa: E402
     pick_reality_sni,
+    reformat_flow_entries,
+    _section_items,
     _SNI_HOST,
     resolve_sni,
     TYPES,

@@ -83,7 +83,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -440,8 +440,16 @@ class ClusterTest(unittest.TestCase):
         h.do_cluster_dismiss({}, {"id": pub[0]["id"]})
         self.assertEqual(got, {"ok": True, "msg": "这条等待互联的记录已经不在了"})
 
+    def _no_staged(self):
+        if P._STAGED.get("timer"):
+            P._STAGED["timer"].cancel()
+        P._STAGED.clear()
+        P._STAGED["on"] = False
+
     def test_one_reload_per_operation(self):
-        """1.40: adding a panel reloaded this core once per member it linked with; now once at the end."""
+        """1.40: exchange first, then apply: inside cluster_batch nothing reloads until the end, and then
+        this core reloads once (it used to reload after every link)."""
+        self.addCleanup(self._no_staged)
         st, a, b = self._two_members()
         st["links"] = [a]
         P.save_cluster(st)
@@ -454,8 +462,10 @@ class ClusterTest(unittest.TestCase):
                 with P.cluster_batch():   # nested: still one reload
                     P._cluster_commit(lambda s: None)
                 self.assertEqual(calls, [])
+                self.assertTrue(P._STAGED["on"])
                 self.assertEqual(len(P.load_cluster()["links"]), 2)   # saved as they are made
             self.assertEqual(calls, [1])
+            self.assertFalse(P._STAGED["on"])
             with P.cluster_batch():   # nothing changed: no reload
                 pass
             self.assertEqual(calls, [1])
@@ -464,7 +474,86 @@ class ClusterTest(unittest.TestCase):
             P._cluster_commit(lambda s: None)
         self.assertEqual(calls, [1, 2])
 
+    def test_batch_applies_every_touched_panel_after_the_exchange(self):
+        """The other panels staged their side (join / connect with defer=1); the batch sends each one
+        /api/cluster/apply after all exchanges, then applies here. A panel that answers with a failure
+        has undone its side: the link made with it this time is dropped here too."""
+        self.addCleanup(self._no_staged)
+        st, a, b = self._two_members()
+        st["links"] = [a]
+        P.save_cluster(st)
+        g = P._cluster_commit.__globals__
+        order = []
+
+        def fake_http(base, path, data=None, timeout=15):
+            order.append((path, base))
+            if path == "/api/cluster/apply" and base == b["url"]:
+                return 500, {"ok": False, "code": "apply_failed", "msg": "boom"}, "clashgate"
+            return 200, {"ok": True}, "clashgate"
+
+        with mock.patch.dict(g, {"apply_cluster_live": lambda *x, **k: order.append(("local", ""))}), \
+                mock.patch.dict(g, {"cluster_http": fake_http}):
+            with P.cluster_batch() as bt:
+                P._cluster_commit(lambda s: s["links"].append(json.loads(json.dumps(b))))
+                P._CLUSTER_BATCH.new[b["instance"]] = (b["url"], "c" * 32, "key-b")
+                P._CLUSTER_BATCH.touch.update({a["instance"], b["instance"]})
+                self.assertEqual(order, [])   # nothing applied while exchanging
+        applies = [x for x in order if x[0] == "/api/cluster/apply"]
+        self.assertEqual(sorted(x[1] for x in applies), sorted([a["url"], b["url"]]))
+        self.assertEqual(order[-1], ("local", ""))   # this panel last, once
+        self.assertEqual(order.count(("local", "")), 1)
+        self.assertEqual(bt.failed, ["大阪"])
+        self.assertEqual([l["name"] for l in P.load_cluster()["links"]], ["东京-1"])   # undone here
+        self.assertIn("已撤销", P.cluster_batch_text(bt))
+
+    def test_remote_apply_results(self):
+        l = self._two_members()[1]
+        g = P._remote_apply.__globals__
+        for answer, want in (((200, {"ok": True}, ""), "ok"),
+                             ((401, {"ok": False, "msg": "登录会话已过期"}, ""), "ok"),   # panel before 1.40
+                             ((500, {"ok": False, "code": "apply_failed", "msg": "x"}, ""), "failed"),
+                             ((403, {"ok": False, "code": "bad_token", "msg": "x"}, ""), "failed")):
+            with mock.patch.dict(g, {"cluster_http": lambda *x, **k: answer}):
+                self.assertEqual(P._remote_apply(l)[0], want, answer)
+
+        def down(*x, **k):
+            raise P.ClusterTimeout("连接对方面板超时，请检查地址、端口和对方防火墙")
+        with mock.patch.dict(g, {"cluster_http": down}):
+            self.assertEqual(P._remote_apply(l)[0], "later")   # it applies by itself after CLUSTER_STAGE_TTL
+
+    def test_staged_links_apply_by_themselves(self):
+        """A panel that staged a link (defer=1) but never got /api/cluster/apply applies it after the TTL;
+        a direct change meanwhile applies the staged ones with it."""
+        self.addCleanup(self._no_staged)
+        st, a, b = self._two_members()
+        st["links"] = [a]
+        P.save_cluster(st)
+        g = P._cluster_commit.__globals__
+        calls = []
+        with mock.patch.dict(g, {"apply_cluster_live": lambda *x, **k: calls.append(x)}):
+            P._CLUSTER_BATCH.defer = 1
+            try:
+                P._cluster_commit(lambda s: s["links"].append(json.loads(json.dumps(b))))
+            finally:
+                P._CLUSTER_BATCH.defer = 0
+            self.assertTrue(P._STAGED["on"] and P._STAGED["timer"].is_alive())
+            self.assertEqual(P._STAGED["timer"].interval, P.CLUSTER_STAGE_TTL)
+            g["_staged_timeout"]()
+            self.assertEqual(len(calls), 1)
+            self.assertFalse(P._STAGED["on"])
+            self.assertFalse(P.cluster_apply_staged())   # nothing left
+            # staged again, then a direct change: one reload covers both, staged state cleared
+            P._CLUSTER_BATCH.defer = 1
+            try:
+                P._cluster_commit(lambda s: s["links"][1].update(name="大阪-2"))
+            finally:
+                P._CLUSTER_BATCH.defer = 0
+            P._cluster_commit(lambda s: None)
+            self.assertEqual(len(calls), 2)
+            self.assertFalse(P._STAGED["on"])
+
     def test_failed_batch_reload_undoes_its_links(self):
+        self.addCleanup(self._no_staged)
         st, a, b = self._two_members()
         st["links"] = [a]
         P.save_cluster(st)
@@ -483,11 +572,24 @@ class ClusterTest(unittest.TestCase):
             with self.assertRaises(P.ClusterError) as cm:
                 with P.cluster_batch():
                     P._cluster_commit(lambda s: s["links"].append(json.loads(json.dumps(b))))
-                    P._CLUSTER_BATCH.state["new"].append(("https://osaka.example.com:8443", "c" * 32, "key-b"))
+                    P._CLUSTER_BATCH.new[b["instance"]] = ("https://osaka.example.com:8443", "c" * 32, "key-b")
         self.assertIn("已撤销", str(cm.exception))
         self.assertEqual(read(P.CLUSTER_JSON), before)
         self.assertEqual(told, [("https://osaka.example.com:8443", "/api/cluster/leave", {"instance": "c" * 32, "key": "key-b"})])
-        self.assertFalse(P._batching())
+        self.assertFalse(P._deferring() or P._STAGED["on"])
+
+    def test_join_and_connect_stage_when_asked(self):
+        h = read(os.path.join(REPO, "panel/cg_http.py"))
+        for fn in ("def do_cluster_join", "def do_cluster_connect"):
+            body = h[h.index(fn):]
+            body = body[:body.index("\n    def ", 10)]
+            self.assertIn('_CLUSTER_BATCH.defer = 1 if form.get("defer") == "1" else 0', body, fn)
+            self.assertIn("_CLUSTER_BATCH.defer = 0", body[body.index("finally:"):], fn)
+        self.assertIn('if path == "/api/cluster/apply":', h)
+        cl = read(os.path.join(REPO, "panel/cg_cluster.py"))
+        self.assertIn('**({"defer": "1"} if _deferring() else {})', cl[cl.index("def cluster_pair"):])
+        mesh = cl[cl.index("# 3. link members with each other"):]
+        self.assertIn('"defer": "1"', mesh[:mesh.index("rep[\"meshed\"] += 1")])
 
     def _sync_with(self, introduce):
         """cluster_sync where both members know 硅谷 (not linked here); introduce(link) answers for each."""
@@ -572,6 +674,202 @@ class ClusterTest(unittest.TestCase):
                 P.cluster_issue_ticket(b, a)
         self.assertEqual(len(calls), 2)   # one retry, not more
 
+    def test_retry_a_member(self):
+        """1.40: 「重试」 next to 「移除」 on a member that failed: ask it again, then a full 检查."""
+        self.addCleanup(self._no_staged)
+        st, a, b = self._two_members()
+        a.update(ok=False, error="连接对方面板超时，请检查地址、端口和对方防火墙")
+        P.save_cluster(st)
+        h = object.__new__(P.Panel)
+        h.headers = {}
+        got = {}
+        h.respond_mutation = lambda s, msg, ok=True, detail="": got.update(ok=ok, msg=msg)
+        g = P.Panel.do_cluster_retry.__globals__   # cg_http: the handler's own cluster_call / cluster_sync
+        synced = []
+
+        def down(l, path, extra=None, timeout=30, fallback=""):
+            raise P.ClusterTimeout("连接对方面板超时，请检查地址、端口和对方防火墙")
+
+        with mock.patch.dict(g, {"cluster_call": down}):
+            h.do_cluster_retry({}, {"id": a["id"]})
+        self.assertFalse(got["ok"])
+        self.assertEqual(got["msg"], "「东京-1」仍然连接失败：连接对方面板超时，请检查地址、端口和对方防火墙")
+
+        def up(l, path, extra=None, timeout=30, fallback=""):
+            return {"ok": True, "name": l["name"], "members": []}
+
+        def fake_sync():
+            synced.append(1)
+            P._update_link(a["instance"], ok=True, error="")
+            return {"linked": [], "meshed": 0, "failed": [], "dropped": [], "offline": []}
+
+        with mock.patch.dict(g, {"cluster_call": up, "cluster_sync": fake_sync}):
+            h.do_cluster_retry({}, {"id": a["id"]})
+        self.assertEqual(got, {"ok": True, "msg": "已重新连上「东京-1」"})
+        self.assertEqual(synced, [1])
+        self.assertIsNot(P.public_cluster_state(False)["members"][0]["ok"], False)
+        h.do_cluster_retry({}, {"id": "nope"})
+        self.assertEqual(got, {"ok": False, "msg": "集群成员不存在"})
+        page = read(os.path.join(REPO, "panel/web/src/pages/ClusterPage.vue"))
+        row = page[page.index('v-for="m in state.cluster.members"'):page.index('v-for="p in state.cluster.pending"')]
+        self.assertIn('@click="retryClusterMember(m)"', row)
+        self.assertIn('v-if="m.ok === false || (m.missing && m.missing.length)"', row)
+        self.assertIn("t('连接失败')", row)
+        self.assertNotIn("联系不上", page)
+
+    def test_reset_template_turns_custom_server_off(self):
+        """1.41: 恢复默认服务端模板 also turns custom server off and keeps the user's file for later."""
+        P.save_panel_settings({"custom_server_enabled": True})
+        P.atomic_write(P.CUSTOM_CONF, P.assemble_config(), 0o640)
+        mine = read(P.CUSTOM_CONF)
+        h = object.__new__(P.Panel)
+        h.headers = {}
+        got = {}
+        h.respond_mutation = lambda s, msg, ok=True, detail="": got.update(ok=ok, msg=msg)
+        try:
+            with mock.patch.dict(P.reset_to_template_config.__globals__, {"wait_mihomo_ports": lambda *a, **k: True}):
+                h.do_reset_template_config({})
+            self.assertTrue(got["ok"], got)
+            self.assertIn("关闭自定义服务端", got["msg"])
+            self.assertFalse(P.load_panel_settings().get("custom_server_enabled"))
+            self.assertFalse(P.is_custom_config_mode())
+            self.assertEqual(read(P.CUSTOM_SAVED), mine)
+        finally:
+            for f in (P.CUSTOM_CONF, P.CUSTOM_SAVED):
+                if os.path.exists(f):
+                    os.remove(f)
+            P.save_panel_settings({"custom_server_enabled": False})
+        page = read(os.path.join(REPO, "panel/web/src/composables/useCustomConfig.js"))
+        body = page[page.index("function resetTemplateConfig"):]
+        self.assertIn("openConfirmDialog(", body[:300])
+        self.assertIn("selectTab('inbounds')", body)
+
+    def test_leaving_drops_the_links_here_first(self):
+        """1.41: 退出集群 changes this panel's config first and tells the members in the background."""
+        st, a, b = self._two_members()
+        P.save_cluster(st)
+        release = threading.Event()
+        told = []
+
+        def slow_call(l, path, extra=None, timeout=30, fallback=""):
+            release.wait(5)
+            told.append((l["name"], path))
+            return {"ok": True}
+
+        g = P.cluster_leave_all.__globals__
+        with mock.patch.dict(g, {"cluster_call": slow_call, "apply_cluster_live": lambda *x, **k: None}):
+            t0 = time.monotonic()
+            n, missed = P.cluster_leave_all(background=True)
+            self.assertLess(time.monotonic() - t0, 2)   # did not wait for the members
+            self.assertEqual((n, missed), (2, []))
+            self.assertEqual(P.load_cluster()["links"], [])   # dropped before anyone was told
+            self.assertEqual(told, [])
+            release.set()
+            for _ in range(100):
+                if len(told) == 2:
+                    break
+                time.sleep(0.02)
+        self.assertEqual(sorted(told), [("东京-1", "/api/cluster/leave"), ("大阪", "/api/cluster/leave")])
+        self.assertEqual(P.cluster_leave_all(background=True), (0, []))
+
+    def _shared_state(self):
+        """Two members as 1.42 makes them: one user each in the shared cluster inbound."""
+        st, _, _ = self._two_members()
+        dec, enc = P.vless_mlkem768_pair()
+        st["inbound"] = {"port": 31050, "decryption": dec, "encryption": enc}
+        for l in st["links"]:
+            l["in"] = {"uuid": "%s-0000-4000-8000-000000000000" % l["id"][:6].ljust(8, "0")}
+        return st, dec, enc
+
+    def test_one_cluster_inbound_for_every_member(self):
+        """1.42: each panel has one cluster inbound; every member is a user (its own UUID) in it.
+        Adding or removing a member never changes the port or the keys."""
+        st, dec, enc = self._shared_state()
+        P.save_cluster(st)
+        conf = P.assemble_config()
+        P.atomic_write(P.CONF, conf, 0o640)
+        rc, out = P.validate_config()
+        self.assertEqual(rc, 0, out)
+        lst, prox = P._conf_cluster_entries(conf)
+        self.assertEqual([x["name"] for x in lst], [P.CLUSTER_SHARED_LISTENER])
+        self.assertEqual((lst[0]["port"], lst[0]["decryption"], lst[0]["proxy"]), (31050, dec, "DIRECT"))
+        self.assertEqual([u["uuid"] for u in lst[0]["users"]], [l["in"]["uuid"] for l in st["links"]])
+        self.assertEqual(len(prox), 2)
+        self.assertEqual(P.cluster_ports(), {31050})
+        self.assertEqual(P.cluster_ufw_specs(), {"31050/tcp"})
+        g = P._cluster_commit.__globals__
+        with mock.patch.dict(g, {"apply_cluster_live": lambda *a, **k: None}):
+            P._drop_links({st["links"][0]["instance"]})
+            lst = P.cluster_listeners(P.load_cluster())
+            self.assertEqual([(x["port"], len(x["users"])) for x in lst], [(31050, 1)])
+            P._drop_links({st["links"][1]["instance"]})
+        self.assertEqual(P.cluster_listeners(P.load_cluster()), [])
+        self.assertEqual(P.load_cluster()["inbound"]["port"], 31050)   # kept for the next member
+        self.assertIn(31050, P.cluster_reserved_ports())
+        self.assertIn(31050, P.used_ports(P.read_env()))
+
+    def test_new_members_share_the_inbound(self):
+        a = P._cluster_new_inbound()
+        b = P._cluster_new_inbound()
+        self.assertEqual((a["port"], a["_enc"], a["decryption"]), (b["port"], b["_enc"], b["decryption"]))
+        self.assertNotEqual(a["uuid"], b["uuid"])
+        self.assertEqual(json.loads(read(P.CLUSTER_JSON))["inbound"]["port"], a["port"])
+        self.assertIn(a["port"], P.used_ports(P.read_env()))
+        src = read(os.path.join(REPO, "panel/cg_cluster.py")) + read(os.path.join(REPO, "panel/cg_http.py"))
+        self.assertEqual(src.count('"in": {"uuid": inb["uuid"]}'), 2)   # cluster_pair and the join handler
+        self.assertNotIn('"in": {k: inb[k]', src)
+
+    def test_old_links_move_to_the_shared_inbound(self):
+        """Links made before 1.42 (own inbound each) move when the member is 1.42 too; an older member
+        answers 401 to /api/cluster/node and keeps its dedicated inbound for now."""
+        self.addCleanup(self._no_staged)
+        st, a, b = self._two_members()
+        P.save_cluster(st)
+        g = P._cluster_commit.__globals__
+        calls = []
+
+        def fake_http(base, path, data=None, timeout=15):
+            calls.append((base, path, dict(data or {})))
+            if path == "/api/cluster/node" and base == b["url"]:
+                return 401, {"ok": False, "msg": "登录会话已过期，请刷新页面重新登录"}, "clashgate/1.41"
+            return 200, {"ok": True}, "clashgate"
+
+        with mock.patch.dict(g, {"cluster_http": fake_http, "apply_cluster_live": lambda *x, **k: None}):
+            with P.cluster_batch():
+                moved = P.cluster_migrate_links()
+        self.assertEqual(moved, ["东京-1"])
+        inb = P.load_cluster()["inbound"]
+        sent = [c for c in calls if c[1] == "/api/cluster/node" and c[0] == a["url"]][0][2]
+        self.assertEqual((int(sent["port"]), sent["encryption"], sent["defer"]), (inb["port"], inb["encryption"], "1"))
+        links = {l["name"]: l for l in P.load_cluster()["links"]}
+        self.assertEqual(links["东京-1"]["in"], {"uuid": sent["uuid"]})
+        self.assertTrue(P._link_legacy(links["大阪"]))
+        names = [x["name"] for x in P.cluster_listeners(P.load_cluster())]
+        self.assertEqual(names, [P.CLUSTER_SHARED_LISTENER, P.CLUSTER_LISTENER_PREFIX + b["id"]])
+        self.assertIn(("https://tokyo.example.com:8443", "/api/cluster/apply"), [(c[0], c[1]) for c in calls])
+        self.assertIsNotNone(P.start_cluster_migration(delay=3600))   # 大阪 still has its own inbound
+        P.save_cluster({**P.load_cluster(), "links": [links["东京-1"]]})
+        self.assertIsNone(P.start_cluster_migration(delay=3600))      # nothing left to move
+
+    def test_member_points_its_outbound_at_the_new_node(self):
+        self.addCleanup(self._no_staged)
+        st, a, b = self._two_members()
+        P.save_cluster(st)
+        h = object.__new__(P.Panel)
+        h._cluster_link_auth = lambda form: (P._link_by(P.load_cluster(), instance=a["instance"]), None)
+        sent = []
+        h._cjson = lambda code, obj: sent.append((code, obj))
+        _, enc = P.vless_mlkem768_pair()
+        node = {"port": "31077", "uuid": "77777777-7777-4777-8777-777777777777", "encryption": enc}
+        with mock.patch.dict(P._cluster_commit.__globals__, {"apply_cluster_live": lambda *x, **k: None}):
+            h.do_cluster_node(dict(node, defer="1"))
+        self.assertEqual(sent[-1], (200, {"ok": True}))
+        out = P._link_by(P.load_cluster(), instance=a["instance"])["out"]
+        self.assertEqual(out, {"server": "tokyo.example.com", "port": 31077, "uuid": node["uuid"], "encryption": enc})
+        self.assertTrue(P._STAGED["on"])   # staged: the caller sends /api/cluster/apply when done
+        h.do_cluster_node({"port": "x"})
+        self.assertEqual(sent[-1][0], 400)
+
     def test_node_name_validation(self):
         for name in NODE_NAMES_OK:
             self.assertEqual(P.validate_node_name(name), name.strip(), name)
@@ -613,8 +911,10 @@ class ClusterTest(unittest.TestCase):
             f.write(conf)
         rc, out = P.validate_config()
         self.assertEqual(rc, 0, out)
+        members = {p.get("name") for p in P._section_items(conf, "proxies")}
         for name in SYMBOL_NAMES:
-            self.assertIn('"name": ' + json.dumps(name, ensure_ascii=False), conf)
+            self.assertIn(name, members)
+            self.assertIn("  - name: " + P.yaml_scalar(name, "name") + "\n", conf)
         self.assertEqual(P.cluster_proxy_names(), set(SYMBOL_NAMES))
         self.assertTrue(set(SYMBOL_NAMES) <= P.used_proxy_names())
         # hidden from the subscription and the outbound list, in both template and custom mode
@@ -658,12 +958,12 @@ class ClusterTest(unittest.TestCase):
         rc, out = P.validate_config()
         self.assertEqual(rc, 0, out)
         # one link = one outbound to the other panel + one dedicated inbound for it
-        self.assertIn('"name": "东京-1"', conf)
-        self.assertIn('"server": "tokyo.example.com"', conf)
-        self.assertIn('"encryption": "' + enc + '"', conf)
-        self.assertIn('"name": "cg-cluster-abc123"', conf)
-        self.assertIn('"decryption": "' + dec + '"', conf)
-        self.assertEqual(conf.count('"flow": "xtls-rprx-vision"'), 2)
+        lst, prox = P._conf_cluster_entries(conf)
+        self.assertEqual([(p["name"], p["server"], p["encryption"], p["flow"]) for p in prox],
+                         [("东京-1", "tokyo.example.com", enc, "xtls-rprx-vision")])
+        self.assertEqual([(x["name"], x["decryption"], x["users"][0]["flow"]) for x in lst],
+                         [("cg-cluster-abc123", dec, "xtls-rprx-vision")])
+        self.assertNotRegex(conf, r"(?m)^\s*- \{")   # 1.41: multi-line YAML, no one-line JSON entries
         self.assertNotIn("skip-cert-verify", conf)
         # routing groups use include-all, so the link is selectable without listing it anywhere
         self.assertIn("include-all: true", read(P.FRAG_PROXY_GROUPS) if os.path.exists(P.FRAG_PROXY_GROUPS) else conf)
@@ -762,24 +1062,72 @@ class ClusterTest(unittest.TestCase):
                 os.remove(P.CUSTOM_CONF)
             P.atomic_write(P.CONF, base, 0o640)
 
+    def test_one_json_object_per_line_becomes_multi_line_yaml_without_a_reload(self):
+        """1.41: panel inbounds, cluster fragments and config.yaml used one JSON object per line. The first
+        start rewrites them as multi-line YAML; the entries are the same, so nothing reloads."""
+        st, _, _ = self._state()
+        P.save_cluster(st)
+
+        def one_line(items):
+            return "".join("  - " + json.dumps(x, ensure_ascii=False) + "\n" for x in items)
+
+        P.atomic_write(P.FRAG_CLUSTER_LISTENERS, one_line([P.cluster_listener_from_link(l) for l in st["links"]]), 0o640)
+        P.atomic_write(P.FRAG_CLUSTER_PROXIES, one_line([P.cluster_proxy_from_link(l) for l in st["links"]]), 0o640)
+        P.atomic_write(P.FRAG_EXTRA, one_line([i["listener"] for i in P.load_inbounds()]), 0o640)
+        P.atomic_write(P.CONF, P.assemble_config(), 0o640)
+        old = read(P.CONF)
+        self.assertRegex(old, r'(?m)^  - \{"name": ')
+
+        def no_reload(*a, **k):
+            raise AssertionError("the core was reloaded for a format change")
+
+        with mock.patch.dict(P.apply_cluster_live.__globals__, {"apply_cluster_live": no_reload}):
+            self.assertTrue(P.reformat_flow_entries())
+            self.assertFalse(P.refresh_cluster_fragments())
+            self.assertFalse(P.reformat_flow_entries())   # once
+        new = read(P.CONF)
+        self.assertNotRegex(new, r"(?m)^\s*- \{")
+        for sec in ("listeners", "proxies"):
+            self.assertEqual(P._section_items(new, sec), P._section_items(old, sec))
+        for f in (P.FRAG_EXTRA, P.FRAG_CLUSTER_LISTENERS, P.FRAG_CLUSTER_PROXIES):
+            self.assertNotRegex(read(f), r"(?m)^\s*- \{", f)
+        self.assertEqual(new, P.assemble_config())   # what the panel writes from now on
+        rc, out = P.validate_config()
+        self.assertEqual(rc, 0, out)
+
+    def test_yaml_values_keep_their_type(self):
+        """Strings a YAML reader would take as numbers, booleans or reserved syntax are quoted."""
+        item = {"name": "@x", "type": "socks5", "server": "1.2.3.4", "port": 1, "password": "1e5", "a": "0x1F",
+                "b": ".inf", "c": "1:30", "d": "y", "e": "`t", "f": "01234567", "g": [], "h": {}, "i": [[1], {}],
+                "j": "a: b", "k": "#c", "l": "plain-text_1.2/3", "m": None, "n": 1.5, "o": True}
+        out = P.dump_yaml_proxies([item])
+        self.assertEqual(P._section_items("x:\n" + out, "x"), [item])
+        self.assertIn("    l: plain-text_1.2/3\n", out)
+        for k in ("name", "password", "a", "b", "c", "d", "e", "f"):
+            self.assertRegex(out, r'(?m)^ +(- )?%s: "' % k, k)
+        # the Reality short-id stays a string even when it is all digits with a leading zero
+        node = dict(P.read_nodes()[0], sid="01234567")
+        self.assertIn('        - "01234567"\n', P.render_reality([node]))
+
     def test_cluster_members_are_exits_not_relays(self):
         """Traffic from another panel leaves directly, so A -> B -> A can never happen, whatever is
         selected in Zashboard. Existing links get this on the first start after an update."""
         st, _, _ = self._state()
         self.assertEqual(P.cluster_listener_from_link(st["links"][0])["proxy"], "DIRECT")
         P.save_cluster(st)
-        old_shape = P.render_cluster_listeners(st).replace(', "proxy": "DIRECT"', "")
-        self.assertNotEqual(old_shape, P.render_cluster_listeners(st))
-        P.atomic_write(P.FRAG_CLUSTER_LISTENERS, old_shape, 0o640)   # what 1.37 left on disk
+        # what 1.37 left on disk: one JSON object per line and no proxy: DIRECT
+        old_shape = "".join("  - " + json.dumps({k: v for k, v in P.cluster_listener_from_link(l).items() if k != "proxy"},
+                                                 ensure_ascii=False) + "\n" for l in st["links"])
+        P.atomic_write(P.FRAG_CLUSTER_LISTENERS, old_shape, 0o640)
         P.atomic_write(P.CONF, P.assemble_config(), 0o640)
-        self.assertNotIn('"proxy": "DIRECT"', read(P.CONF))
+        self.assertEqual([x.get("proxy") for x in P._conf_cluster_entries(read(P.CONF))[0]], [None])
         g = P.apply_cluster_live.__globals__
         with mock.patch.dict(g, {"_wait_cluster_ports": lambda want, timeout=8.0: True}):
             self.assertTrue(P.refresh_cluster_fragments())
             self.assertFalse(P.refresh_cluster_fragments())   # done once
         self.assertEqual(read(P.FRAG_CLUSTER_LISTENERS), P.render_cluster_listeners(st))
         conf = read(P.CONF)
-        self.assertIn('"proxy": "DIRECT"', conf)
+        self.assertEqual([x.get("proxy") for x in P._conf_cluster_entries(conf)[0]], ["DIRECT"])
         rc, out = P.validate_config()
         self.assertEqual(rc, 0, out)
         P.save_cluster({**st, "links": []})
@@ -865,10 +1213,17 @@ class ClusterTest(unittest.TestCase):
                        "clusterTask.stage", "clusterTask.elapsed", 'class="cg-spin"'):
             self.assertIn(needle, ov)
         self.assertNotIn("✕", ov)   # nothing to close: it ends with the operation
+        self.assertIn("t('正在添加到集群')", ov)
         cl = read(os.path.join(src, "composables/useCluster.js"))
         for url, kind in (("/cluster/add", "add"), ("/cluster/sync", "sync"), ("/cluster/remove", "remove"), ("/cluster/leave", "leave")):
             self.assertRegex(cl, r"runClusterTask\(\s*'" + re.escape(url) + r"'[^)]*'" + kind + "'", url)
         self.assertNotIn("postAction('/cluster/", cl)
+        # 1.41: only the first add blocks the page; 检查 / 重试 / 移除 / 退出 run behind their own button
+        self.assertEqual(cl.count("{ overlay: true }"), 1)
+        self.assertRegex(cl, r"runClusterTask\(\s*'/cluster/add'[^)]*\{ overlay: true \}")
+        page = read(os.path.join(src, "pages/ClusterPage.vue"))
+        for key in ("'cluster-sync'", "'cluster-leave'", "`cl-rt-${m.id}`", "`cl-rm-${m.id}`"):
+            self.assertIn(f'<span v-if="clusterBusy === {key}" class="cg-spin cg-spin-sm"', page, key)
         self.assertIn("resumeClusterTaskIfRunning()", read(os.path.join(src, "composables/usePanel.js")))
 
     def test_core_build_matches_the_cpu(self):

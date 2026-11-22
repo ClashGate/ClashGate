@@ -30,10 +30,13 @@ def bind():
 
 
 # ---------------------------------------------------------------- cluster (集群, 1.14)
-# Panels that know each other form one cluster. Every pair of panels in the cluster has one *link*:
-# each side runs a dedicated VLESS inbound with post-quantum VLESS Encryption (mlkem768x25519plus,
-# ML-KEM-768 key) for the other side, and an outbound to the other side's inbound, named after the
-# other side's 本机名称. Links live in cluster.json and their own fragments, never in inbounds.json /
+# Panels that know each other form one cluster. Every pair of panels in the cluster has one *link*.
+# Since 1.42 each panel runs ONE cluster inbound (`cg-cluster-in`, one port, VLESS with post-quantum
+# VLESS Encryption mlkem768x25519plus) for all members; every member is one user (its own UUID) in it.
+# Each side has an outbound to the other side's cluster inbound, named after the other side's 本机名称.
+# Adding a member adds a user, removing one deletes that user: the port and the keys never change.
+# Links made before 1.42 had a dedicated inbound each (link["in"] has a port); they keep it until
+# cluster_migrate_links moves them over (the member must be 1.42 too). Links live in cluster.json and their own fragments, never in inbounds.json /
 # proxies.json, so they stay out of the node list, the outbound list and the client subscription.
 # Changes are applied to the running core right away (the other side has nobody to click "reload").
 #
@@ -45,19 +48,20 @@ def bind():
 CLUSTER_PROTOCOL = 2          # 2: two-way links and full mesh (1 was the one-way pre-release)
 CLUSTER_MIN_VERSION = "1.15"
 CLUSTER_LISTENER_PREFIX = "cg-cluster-"
+CLUSTER_SHARED_LISTENER = CLUSTER_LISTENER_PREFIX + "in"   # the one inbound for every member (1.42)
 CLUSTER_FLOW = "xtls-rprx-vision"
 CLUSTER_TICKET_TTL = 300
 CLUSTER_TOMBSTONE_TTL = 30 * 86400
 _CLUSTER_OP_LOCK = threading.Lock()   # one user-started cluster job at a time (never held with LOCK while waiting on a remote)
 _CLUSTER_TICKETS = {}                 # sha256(ticket) -> (instance allowed to join, expiry); in memory only
 _CLUSTER_TICKETS_LOCK = threading.Lock()
-_CLUSTER_PORT_HOLD = set()            # ports picked for a link that is still being negotiated
+_CLUSTER_PORT_HOLD = set()            # kept for callers; the shared inbound's port is saved at once (1.42)
 _INST_RE = re.compile(r"[0-9a-f]{32}")
 _ENC_RE = re.compile(r"mlkem768x25519plus\.[A-Za-z0-9._=-]+")
 
 
 def load_cluster() -> dict:
-    out = {"instance": "", "links": [], "pending": [], "removed": {}}
+    out = {"instance": "", "links": [], "pending": [], "removed": {}, "inbound": None}
     try:
         with open(CLUSTER_JSON) as f:
             raw = json.load(f)
@@ -67,6 +71,10 @@ def load_cluster() -> dict:
                             and isinstance(l.get("in"), dict) and isinstance(l.get("out"), dict)]
             out["pending"] = [p for p in (raw.get("pending") or []) if isinstance(p, dict)]
             _prune_pending(out)
+            inb = raw.get("inbound")
+            if (isinstance(inb, dict) and isinstance(inb.get("port"), int) and 1 <= inb["port"] <= 65535
+                    and _ENC_RE.fullmatch(str(inb.get("decryption") or "")) and _ENC_RE.fullmatch(str(inb.get("encryption") or ""))):
+                out["inbound"] = {k: inb[k] for k in ("port", "decryption", "encryption")}
             now = time.time()
             out["removed"] = {k: v for k, v in (raw.get("removed") or {}).items()
                               if _INST_RE.fullmatch(str(k)) and isinstance(v, (int, float)) and now - v < CLUSTER_TOMBSTONE_TTL}
@@ -124,8 +132,28 @@ def cluster_proxy_from_link(l: dict) -> dict:
     }
 
 
+def _link_legacy(l: dict) -> bool:
+    """A link made before 1.42: it has its own inbound (port + keys) instead of a user in the shared one."""
+    return "port" in (l.get("in") or {})
+
+
+def cluster_listeners(st: dict) -> list:
+    """The cluster inbounds of this panel: the shared one with a user per member (1.42), plus the
+    dedicated inbound of every link not moved yet."""
+    out = []
+    users = [{"username": str(l["id"]), "uuid": str(l["in"]["uuid"]), "flow": CLUSTER_FLOW}
+             for l in st.get("links") or [] if not _link_legacy(l) and (l.get("in") or {}).get("uuid")]
+    inb = st.get("inbound")
+    if users and inb:
+        out.append({"name": CLUSTER_SHARED_LISTENER, "type": "vless", "port": int(inb["port"]), "listen": "0.0.0.0",
+                    "users": users, "decryption": str(inb["decryption"]),
+                    "proxy": "DIRECT"})   # exits only, see cluster_listener_from_link
+    out += [cluster_listener_from_link(l) for l in st.get("links") or [] if _link_legacy(l)]
+    return out
+
+
 def cluster_listener_from_link(l: dict) -> dict:
-    """Dedicated inbound for the other panel (Mihomo docs: config/inbound/listeners/vless, `decryption`)."""
+    """Dedicated inbound of a link made before 1.42 (Mihomo docs: config/inbound/listeners/vless, `decryption`)."""
     inb = l.get("in") or {}
     return {
         "name": CLUSTER_LISTENER_PREFIX + str(l["id"]),
@@ -142,19 +170,37 @@ def cluster_listener_from_link(l: dict) -> dict:
 
 
 def render_cluster_proxies(st: dict) -> str:
-    return "".join("  - " + json.dumps(cluster_proxy_from_link(l), ensure_ascii=False) + "\n"
-                   for l in st.get("links") or [])
+    """Member outbounds as multi-line YAML (1.41; one JSON object per line before)."""
+    return dump_yaml_proxies([cluster_proxy_from_link(l) for l in st.get("links") or []])
 
 
 def render_cluster_listeners(st: dict) -> str:
-    return "".join("  - " + json.dumps(cluster_listener_from_link(l), ensure_ascii=False) + "\n"
-                   for l in st.get("links") or [])
+    return dump_yaml_proxies(cluster_listeners(st))
+
+
+def _frag_items(text: str) -> list:
+    """The entries of a list fragment (`  - ...` lines, either format) as parsed dicts."""
+    v = extract_top_level_yaml_section("x:\n" + (text or ""), "x")
+    return v if isinstance(v, list) else []
+
+
+def _conf_cluster_entries(raw: str) -> tuple:
+    """(cluster listeners, member outbounds) as written in a full config, in file order."""
+    names = cluster_proxy_names()
+    lst = extract_top_level_yaml_section(raw, "listeners")
+    prox = extract_top_level_yaml_section(raw, "proxies")
+    return ([x for x in (lst if isinstance(lst, list) else [])
+             if isinstance(x, dict) and str(x.get("name") or "").startswith(CLUSTER_LISTENER_PREFIX)],
+            [p for p in (prox if isinstance(prox, list) else [])
+             if isinstance(p, dict) and str(p.get("name") or "") in names])
 
 
 def save_cluster(st: dict):
     """cluster.json (0600: holds link keys) plus both fragments; does not touch the running core."""
     data = {"instance": st.get("instance") or "", "links": st.get("links") or [],
             "pending": st.get("pending") or [], "removed": st.get("removed") or {}}
+    if st.get("inbound"):
+        data["inbound"] = st["inbound"]
     atomic_write(CLUSTER_JSON, json.dumps(data, indent=2, ensure_ascii=False) + "\n", 0o600)
     atomic_write(FRAG_CLUSTER_PROXIES, render_cluster_proxies(data), 0o640)
     atomic_write(FRAG_CLUSTER_LISTENERS, render_cluster_listeners(data), 0o640)
@@ -175,8 +221,15 @@ def cluster_proxy_names() -> set:
 
 
 def cluster_ports(st: dict = None) -> set:
+    """Ports the core listens on for the cluster (shared inbound while it has members + old dedicated ones)."""
     st = st or load_cluster()
-    return {int(l["in"]["port"]) for l in st["links"] if (l.get("in") or {}).get("port")}
+    return {int(x["port"]) for x in cluster_listeners(st)}
+
+
+def cluster_reserved_ports() -> set:
+    """cluster_ports plus the shared inbound's port while it has no member: it stays this panel's."""
+    st = load_cluster()
+    return cluster_ports(st) | ({int(st["inbound"]["port"])} if st.get("inbound") else set())
 
 
 def cluster_ufw_specs(st: dict = None) -> set:
@@ -275,7 +328,7 @@ def custom_conf_with_cluster(raw: str, old_names: set = None) -> str:
            if not (isinstance(x, dict) and str(x.get("name") or "").startswith(CLUSTER_LISTENER_PREFIX))]
     prox = [p for p in (prox if isinstance(prox, list) else [])
             if not (isinstance(p, dict) and str(p.get("name") or "") in old)]
-    l_body = dump_yaml_proxies(lst + [cluster_listener_from_link(l) for l in st["links"]])
+    l_body = dump_yaml_proxies(lst + cluster_listeners(st))
     p_body = dump_yaml_proxies(prox + [cluster_proxy_from_link(l) for l in st["links"]])
     raw = replace_top_level_yaml_section(raw, "listeners", ("listeners:\n" + l_body) if l_body.strip() else "listeners: []\n")
     return replace_top_level_yaml_section(raw, "proxies", ("proxies:\n" + p_body) if p_body.strip() else "proxies: []\n")
@@ -499,54 +552,172 @@ def cluster_call(l: dict, path: str, extra: dict = None, timeout: int = 30, fall
     return obj
 
 
-def _cluster_new_inbound() -> dict:
-    """Keys and a free port for a new dedicated inbound (port held until the link is saved)."""
-    dec, enc = vless_mlkem768_pair()
+def ensure_cluster_inbound() -> dict:
+    """This panel's one cluster inbound (port + keys), created and saved the first time it is needed."""
     with LOCK:
-        port = pick_port(read_env())
-        _CLUSTER_PORT_HOLD.add(port)
-    return {"port": port, "uuid": str(uuidlib.uuid4()), "decryption": dec, "_enc": enc}
+        st = load_cluster()
+        if not st.get("inbound"):
+            dec, enc = vless_mlkem768_pair()
+            st["inbound"] = {"port": pick_port(read_env()), "decryption": dec, "encryption": enc}
+            save_cluster(st)   # no member uses it yet: the fragments do not change
+        return dict(st["inbound"])
 
 
-# One reload per operation on the panel that runs it. Adding a panel used to reload this core once for
-# every member it linked with (the first one, then each member found by 检查); inside cluster_batch()
-# the links are saved as they are made and the core reloads once at the end. The other panels still
-# reload once each: every one of them gets its own new inbound. Thread-local: a link another panel
-# makes with us meanwhile (its own request thread) is applied at once as before.
-_CLUSTER_BATCH = threading.local()
+def _cluster_new_inbound() -> dict:
+    """A new member's place in the shared inbound: its own UUID, the shared port and keys."""
+    inb = ensure_cluster_inbound()
+    return {"port": inb["port"], "uuid": str(uuidlib.uuid4()), "decryption": inb["decryption"], "_enc": inb["encryption"]}
+
+
+# Two phases: exchange first, then make it live. An add / 检查 used to reload a core after every single
+# link (this panel once per member, each other panel as soon as it accepted a link), so later requests
+# reached panels that were busy reloading. Now, inside cluster_batch():
+#   1. links are only saved: this panel and every panel it links with (join / connect with defer=1)
+#      keep their changes staged, nothing reloads;
+#   2. at the end this panel asks each panel it touched to apply its staged changes (/api/cluster/apply,
+#      one reload each), then applies its own (one reload).
+# A panel that never gets the apply call (the initiator went away) applies its staged changes by itself
+# after CLUSTER_STAGE_TTL; on start the panel also applies links that are saved but not in the config.
+CLUSTER_STAGE_TTL = 180
+_STAGED = {"on": False}          # this panel's saved-but-not-live cluster changes (guarded by LOCK)
+_CLUSTER_BATCH = threading.local()   # .defer: commits in this thread are staged; .new / .touch: see cluster_batch
+
+
+def _deferring() -> bool:
+    return bool(getattr(_CLUSTER_BATCH, "defer", 0))
+
+
+_batching = _deferring
+
+
+def _staged_timeout():
+    try:
+        if cluster_apply_staged():
+            sys.stderr.write("cluster: applied staged links (no apply call arrived)\n")
+    except Exception as e:
+        sys.stderr.write(f"cluster: applying staged links failed: {e}\n")
+
+
+def _arm_stage_timer():
+    t = _STAGED.get("timer")
+    if t:
+        t.cancel()
+    t = threading.Timer(CLUSTER_STAGE_TTL, _staged_timeout)
+    t.daemon = True
+    t.start()
+    _STAGED["timer"] = t
+
+
+def cluster_apply_staged() -> bool:
+    """Make the staged cluster changes live with one reload. False when nothing was staged.
+    On failure everything staged is undone here (files restored, config untouched) and it raises."""
+    with LOCK:
+        if not _STAGED["on"]:
+            return False
+        s = dict(_STAGED)
+        _STAGED.clear()
+        _STAGED["on"] = False
+        if s.get("timer"):
+            s["timer"].cancel()
+        try:
+            apply_cluster_live(s["specs"], s["names"])
+        except Exception:
+            _restore_files(s["backup"])
+            raise
+        return True
+
+
+def _cluster_commit(mutate) -> dict:
+    """Under LOCK: load, mutate(st) (may raise), save, apply live; restore everything on failure.
+    While deferring (cluster_batch, or a join / connect with defer=1) the change is only saved and staged."""
+    with LOCK:
+        backup = _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS))
+        st = load_cluster()
+        if _STAGED["on"]:   # what is live is still what it was before the first staged change
+            old_specs, old_names = _STAGED["specs"], _STAGED["names"]
+        else:
+            old_specs = cluster_ufw_specs(st)
+            old_names = {str(l.get("name") or "") for l in st["links"]}
+        try:
+            res = mutate(st)
+            save_cluster(st)
+            if not _deferring():
+                apply_cluster_live(old_specs, old_names)
+        except Exception:
+            _restore_files(backup)
+            raise
+        if _deferring():
+            if not _STAGED["on"]:
+                _STAGED.update(on=True, backup=backup, specs=old_specs, names=old_names)
+            _arm_stage_timer()
+        elif _STAGED["on"]:   # applied together with this change
+            if _STAGED.get("timer"):
+                _STAGED["timer"].cancel()
+            _STAGED.clear()
+            _STAGED["on"] = False
+        return res
+
+
+def _remote_apply(l: dict) -> tuple:
+    """Ask a member to apply its staged cluster changes. ("ok"|"later"|"failed", message)."""
+    try:
+        status, obj, _ = cluster_http(l["url"], "/api/cluster/apply", _link_auth(l), timeout=120)
+    except ClusterError as e:
+        return "later", str(e)   # it applies by itself after CLUSTER_STAGE_TTL
+    if status == 200 and obj and obj.get("ok"):
+        return "ok", ""
+    if status in (401, 404) and not (obj or {}).get("code"):
+        return "ok", ""   # a panel older than 1.40 applied each link at once
+    return "failed", str(_remote_error(status, obj, "对方面板没能让集群配置生效"))
 
 
 class cluster_batch:
-    """with cluster_batch(): ... -> links made inside go live together when the block ends. If that
-    final reload fails, everything is put back here and the other side of each new link is told to drop it."""
+    """with cluster_batch() as b: exchange with every panel first, then each applies once.
+    b.failed: panels that could not apply (links made with them this time are undone);
+    b.later: panels that did not answer the apply call (they apply by themselves within minutes)."""
 
     def __enter__(self):
-        if getattr(_CLUSTER_BATCH, "state", None) is not None:   # nested: the outer block applies
-            self.outer = False
-            return self
-        self.outer = True
-        with LOCK:
-            st = load_cluster()
-            _CLUSTER_BATCH.state = {
-                "backup": _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS)),
-                "specs": cluster_ufw_specs(st), "names": {str(l.get("name") or "") for l in st["links"]},
-                "dirty": False, "new": []}
+        self.failed, self.later = [], []
+        self.outer = not _deferring()
+        if self.outer:
+            _CLUSTER_BATCH.defer = 1
+            _CLUSTER_BATCH.new = {}       # instance -> (base, my instance, key) of links made now
+            _CLUSTER_BATCH.touch = set()  # members that staged changes for this operation
         return self
 
     def __exit__(self, exc_type, exc, tb):
         if not self.outer:
             return False
-        b, _CLUSTER_BATCH.state = _CLUSTER_BATCH.state, None
-        if not b["dirty"]:
-            return False
+        new = dict(getattr(_CLUSTER_BATCH, "new", {}) or {})
+        touch = set(getattr(_CLUSTER_BATCH, "touch", set()) or set())
         try:
-            cluster_stage("本机正在让集群配置生效")
-            with LOCK:
-                apply_cluster_live(b["specs"], b["names"])
+            if touch:
+                cluster_stage("正在让各面板的新配置生效")
+            for inst in sorted(touch):
+                l = _link_by(load_cluster(), instance=inst)
+                if not l:
+                    continue
+                res, msg = _remote_apply(l)
+                if res == "later":
+                    self.later.append(l.get("name", ""))
+                elif res == "failed":
+                    self.failed.append(l.get("name", ""))
+                    sys.stderr.write(f"cluster: '{l.get('name')}' could not apply: {msg}\n")
+                    if inst in new:   # it has undone its side already; undo ours (still staged)
+                        try:
+                            _drop_links({inst})
+                        except Exception as e:
+                            sys.stderr.write(f"cluster: undo link failed: {e}\n")
+                        new.pop(inst, None)
+        finally:
+            _CLUSTER_BATCH.defer = 0
+            _CLUSTER_BATCH.new, _CLUSTER_BATCH.touch = {}, set()
+        try:
+            if _STAGED["on"]:
+                cluster_stage("本机正在让集群配置生效")
+            cluster_apply_staged()
         except Exception as e:
-            with LOCK:
-                _restore_files(b["backup"])
-            for base, my_inst, key in b["new"]:   # do not leave half links on the other panels
+            for base, my_inst, key in new.values():   # do not leave half links on the other panels
                 try:
                     cluster_http(base, "/api/cluster/leave", {"instance": my_inst, "key": key}, timeout=60)
                 except ClusterError:
@@ -556,65 +727,46 @@ class cluster_batch:
         return False
 
 
-def _batching() -> bool:
-    return getattr(_CLUSTER_BATCH, "state", None) is not None
-
-
-def _cluster_commit(mutate) -> dict:
-    """Under LOCK: load, mutate(st) (may raise), save, apply live; restore everything on failure.
-    Inside cluster_batch() the change is saved now and applied when the batch ends."""
-    if _batching():
-        with LOCK:
-            backup = _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS))
-            st = load_cluster()
-            try:
-                res = mutate(st)
-                save_cluster(st)
-            except Exception:
-                _restore_files(backup)
-                raise
-            _CLUSTER_BATCH.state["dirty"] = True
-            return res
-    with LOCK:
-        backup = _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS))
-        st = load_cluster()
-        old_specs = cluster_ufw_specs(st)
-        old_names = {str(l.get("name") or "") for l in st["links"]}
-        try:
-            res = mutate(st)
-            save_cluster(st)
-            apply_cluster_live(old_specs, old_names)
-        except Exception:
-            _restore_files(backup)
-            raise
-        return res
+def cluster_batch_text(b) -> str:
+    parts = []
+    if b.failed:
+        parts.append("「{}」没能让新配置生效，已撤销这次和它的互联".format("、".join(b.failed)))
+    if b.later:
+        parts.append("「{}」暂时没有回应，它会在 3 分钟内自动让新配置生效".format("、".join(b.later)))
+    return "；".join(parts)
 
 
 def refresh_cluster_fragments() -> bool:
-    """After an update, bring existing links to the current listener shape (1.38: exit only) in the
-    running config. Nothing to do without links or when the config already has it."""
+    """After an update or a restart, bring the running config in line with cluster.json: the current
+    listener shape (1.38: exit only) and links saved but never applied (1.40: staged when the panel
+    restarted). Compares the entries, not the text: fragments that only differ in format (1.41:
+    multi-line YAML instead of one JSON object per line) are rewritten without reloading the core.
+    True when the core was reloaded."""
     st = load_cluster()
     if not st["links"]:
         return False
-    stale = _read_frag(FRAG_CLUSTER_LISTENERS) != render_cluster_listeners(st)
-    if not stale and is_custom_config_mode():
-        # Custom mode: the user's file holds the cluster entries (multi-line YAML), compare it directly.
-        with open(CUSTOM_CONF) as f:
-            raw = f.read()
-        stale = custom_conf_with_cluster(raw) != raw
-        if not stale:
-            return False
+    want = (cluster_listeners(st), [cluster_proxy_from_link(l) for l in st["links"]])
+    stale = (_frag_items(_read_frag(FRAG_CLUSTER_LISTENERS)), _frag_items(_read_frag(FRAG_CLUSTER_PROXIES))) != want
     if not stale:
+        if (_read_frag(FRAG_CLUSTER_LISTENERS), _read_frag(FRAG_CLUSTER_PROXIES)) != (
+                render_cluster_listeners(st), render_cluster_proxies(st)):
+            with LOCK:
+                save_cluster(load_cluster())   # same entries in the new format: nothing to reload
         try:
-            with open(CONF) as f:
-                stale = '"proxy": "DIRECT"' not in f.read()
+            # Custom mode: the user's file holds the cluster entries; template mode: the live config,
+            # where an IPv6-only server listens on "::" (assemble_config -> ipv6_listen).
+            custom = is_custom_config_mode()
+            live_want = want
+            if not custom and ipv6_only():
+                live_want = ([dict(x, listen="::") if x.get("listen") == "0.0.0.0" else x for x in want[0]], want[1])
+            with open(CUSTOM_CONF if custom else CONF) as f:
+                stale = _conf_cluster_entries(f.read()) != live_want
         except OSError:
             stale = True
     if not stale:
         return False
     _cluster_commit(lambda s: None)
     return True
-
 
 def _parse_node(obj: dict, prefix: str = "") -> dict:
     try:
@@ -667,10 +819,11 @@ def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
     inb = _cluster_new_inbound()
     key = secrets.token_urlsafe(32)
     try:
-        cluster_stage(f"「{rname}」正在创建集群节点并让配置生效")
+        cluster_stage(f"正在和「{rname}」交换节点" if _deferring() else f"「{rname}」正在创建集群节点并让配置生效")
         status, obj, _ = cluster_http(base, "/api/cluster/join", {
             **auth, "instance": my_inst, "name": local_node_name(), "url": self_url, "version": VERSION,
-            "key": key, "port": inb["port"], "uuid": inb["uuid"], "encryption": inb["_enc"]}, timeout=120)
+            "key": key, "port": inb["port"], "uuid": inb["uuid"], "encryption": inb["_enc"],
+            **({"defer": "1"} if _deferring() else {})}, timeout=120)
         if status != 200 or not obj or not obj.get("ok"):
             raise _remote_error(status, obj, "对方面板没能创建集群节点")
         node = _parse_node(obj.get("node") if isinstance(obj.get("node"), dict) else {})
@@ -681,7 +834,7 @@ def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
         link = {"id": secrets.token_hex(6), "instance": r_inst, "name": rname, "url": base, "key": key,
                 "version": str(obj.get("version") or hello.get("version") or ""), "created": int(time.time()),
                 "seen": int(time.time()), "ok": True, "error": "", "missing": [],
-                "in": {k: inb[k] for k in ("port", "uuid", "decryption")},
+                "in": {"uuid": inb["uuid"]},   # a user in the shared cluster inbound (1.42)
                 "out": {"server": urlparse(base).hostname, **node}}
 
         def add(st):
@@ -693,11 +846,14 @@ def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
             st["pending"] = [p for p in st["pending"] if p.get("instance") != r_inst]
             st["removed"].pop(r_inst, None)
         try:
-            if not _batching():
+            if not _deferring():
                 cluster_stage("本机正在让集群配置生效")
             _cluster_commit(add)
-            if _batching():
-                _CLUSTER_BATCH.state["new"].append((base, my_inst, key))
+            if _deferring():
+                if isinstance(getattr(_CLUSTER_BATCH, "new", None), dict):
+                    _CLUSTER_BATCH.new[r_inst] = (base, my_inst, key)
+                if isinstance(getattr(_CLUSTER_BATCH, "touch", None), set):
+                    _CLUSTER_BATCH.touch.add(r_inst)
         except Exception as e:
             try:   # do not leave a half link on the other side
                 cluster_http(base, "/api/cluster/leave", {"instance": my_inst, "key": key}, timeout=60)
@@ -748,21 +904,34 @@ def _drop_links(instances: set, tombstone: bool = False) -> list:
     return _cluster_commit(drop)
 
 
-def cluster_leave_all(notify: bool = True) -> tuple:
-    """This panel leaves the cluster: drop every link here, tell each member (best effort).
-    Returns (number of links, names that could not be told)."""
+def cluster_leave_all(notify: bool = True, background: bool = False) -> tuple:
+    """This panel leaves the cluster: first drop every link here (one reload), then tell each member
+    (best effort). background=True (the page, 1.41): the members are told from a thread and the call
+    returns at once. A member that is not reached drops its link by itself at its next 检查 (this panel
+    answers bad_token), or its owner removes it. Returns (number of links, names that could not be told;
+    always empty in the background)."""
     links = load_cluster()["links"]
-    unreachable = []
-    if notify:
-        for l in links:
-            cluster_stage(f"正在通知「{l.get('name', '')}」")
-            try:
-                cluster_call(l, "/api/cluster/leave", timeout=30)
-            except ClusterError:
-                unreachable.append(l.get("name", ""))
+    if not links:
+        return 0, []
     cluster_stage("本机正在删除互联")
     _drop_links({l["instance"] for l in links})
-    return len(links), unreachable
+
+    def tell() -> list:
+        missed = []
+        for l in links:
+            try:
+                cluster_call(l, "/api/cluster/leave", timeout=30)
+            except ClusterError as e:
+                missed.append(l.get("name", ""))
+                sys.stderr.write(f"cluster: could not tell '{l.get('name')}' that this panel left: {e}\n")
+        return missed
+
+    if not notify:
+        return len(links), []
+    if background:
+        threading.Thread(target=tell, name="cluster-leave-notify", daemon=True).start()
+        return len(links), []
+    return len(links), tell()
 
 
 def _update_link(instance: str, **fields):
@@ -787,6 +956,62 @@ def _update_link(instance: str, **fields):
         _cluster_commit(ren)
     except Exception as e:
         sys.stderr.write(f"cluster rename failed: {e}\n")
+
+
+def cluster_migrate_links(only: set = None) -> list:
+    """1.42: move links made before 1.42 (a dedicated inbound each) to the shared cluster inbound: tell
+    the member its new node (/api/cluster/node, staged inside cluster_batch), then drop the old inbound
+    here. A member before 1.42 does not know that request (401/404): its link keeps its own inbound
+    and is tried again later. only: instances to try (None: all). Returns the names moved."""
+    moved = []
+    for l in list(load_cluster()["links"]):
+        if not _link_legacy(l) or (only is not None and l["instance"] not in only):
+            continue
+        inb = _cluster_new_inbound()
+        try:
+            status, obj, _ = cluster_http(l["url"], "/api/cluster/node", {
+                **_link_auth(l), "port": inb["port"], "uuid": inb["uuid"], "encryption": inb["_enc"],
+                **({"defer": "1"} if _deferring() else {})}, timeout=60)
+        except ClusterError as e:
+            sys.stderr.write(f"cluster: moving '{l.get('name')}' to the shared inbound failed: {e}\n")
+            continue
+        if status != 200 or not obj or not obj.get("ok"):
+            continue   # a member before 1.42, or it refused: its link keeps its own inbound for now
+
+        def switch(st, inst=l["instance"], uid=inb["uuid"]):
+            x = _link_by(st, instance=inst)
+            if x:
+                x["in"] = {"uuid": uid}
+        _cluster_commit(switch)
+        if isinstance(getattr(_CLUSTER_BATCH, "touch", None), set):
+            _CLUSTER_BATCH.touch.add(l["instance"])
+        moved.append(l.get("name", ""))
+    return moved
+
+
+def start_cluster_migration(delay: float = 30, every: float = 900):
+    """On panel start: while links made before 1.42 remain, move them (one batch, one reload per panel)
+    whenever no other cluster job runs. Members that are still old are retried every 15 minutes."""
+    if not any(_link_legacy(l) for l in load_cluster()["links"]):
+        return None
+
+    def loop():
+        time.sleep(delay)
+        while any(_link_legacy(l) for l in load_cluster()["links"]):
+            if _CLUSTER_OP_LOCK.acquire(blocking=False):
+                try:
+                    with cluster_batch():
+                        moved = cluster_migrate_links()
+                    if moved:
+                        sys.stderr.write("cluster: moved to the shared inbound: {}\n".format(", ".join(moved)))
+                except Exception as e:
+                    sys.stderr.write(f"cluster: migration failed: {e}\n")
+                finally:
+                    _CLUSTER_OP_LOCK.release()
+            time.sleep(every)
+    t = threading.Thread(target=loop, name="cluster-migrate", daemon=True)
+    t.start()
+    return t
 
 
 def cluster_sync() -> dict:
@@ -825,6 +1050,12 @@ def cluster_sync() -> dict:
                                 if isinstance(m, dict) and _INST_RE.fullmatch(str(m.get("instance") or ""))]
         _update_link(l["instance"], ok=True, error="", seen=int(time.time()),
                      version=str(obj.get("version") or ""), **({"name": name} if name else {}))
+
+    # 1.42: members that answered and still use a dedicated inbound here move to the shared one
+    try:
+        cluster_migrate_links(only=set(views))
+    except Exception as e:
+        sys.stderr.write(f"cluster: migration during 检查 failed: {e}\n")
 
     def is_removed(m) -> bool:
         ts = removed.get(m["instance"])
@@ -910,7 +1141,10 @@ def cluster_sync() -> dict:
             try:
                 ticket = cluster_issue_ticket(q, p)
                 cluster_call(p, "/api/cluster/connect", {"target_url": q["url"], "target_instance": q["instance"],
-                                                         "ticket": ticket}, timeout=180, fallback="成员之间互联失败")
+                                                         "ticket": ticket, **({"defer": "1"} if _deferring() else {})},
+                             timeout=180, fallback="成员之间互联失败")
+                if isinstance(getattr(_CLUSTER_BATCH, "touch", None), set):   # both staged the new link
+                    _CLUSTER_BATCH.touch.update({p["instance"], q["instance"]})
                 views[p["instance"]].append({"instance": q["instance"]})
                 rep["meshed"] += 1
             except ClusterError as e:
@@ -937,7 +1171,7 @@ def cluster_report_text(rep: dict) -> str:
     if rep["dropped"]:
         parts.append("「{}」已把本机移出集群，本机这边也已删除".format("、".join(rep["dropped"])))
     if rep["offline"]:
-        parts.append("「{}」暂时联系不上".format("、".join(rep["offline"])))
+        parts.append("「{}」暂时连接失败".format("、".join(rep["offline"])))
     if rep["failed"]:
         parts.append(f"有 {len(rep['failed'])} 条互联没有完成，原因见成员列表，恢复后点「检查」重试")
     return "；".join(parts)
