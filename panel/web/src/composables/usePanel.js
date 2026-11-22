@@ -363,6 +363,7 @@ export function usePanel() {
       advanced: t('自定义服务端'),
       settings: t('设置'),
       cluster: t('集群'),
+      about: t('关于'),
     }
     return titles[activeTab.value] || t('首页')
   })
@@ -371,7 +372,7 @@ export function usePanel() {
     () => t('在此粘贴节点配置，例如：') + '\n- {"name":"VlessReality","type":"vless","server":"1.2.3.4","port":28443,...}'
   )
 
-  const VALID_TABS = ['inbounds', 'outbounds', 'routing', 'cluster', 'readable', 'certs', 'advanced', 'settings']
+  const VALID_TABS = ['inbounds', 'outbounds', 'routing', 'cluster', 'readable', 'certs', 'advanced', 'settings', 'about']
   const TAB_PATHS = {
     inbounds: '/',
     outbounds: '/outbounds',
@@ -381,6 +382,7 @@ export function usePanel() {
     advanced: '/advanced',
     certs: '/certs',
     settings: '/settings',
+    about: '/about',
   }
 
   function detectInitialTab() {
@@ -393,6 +395,7 @@ export function usePanel() {
   function tabFromPath() {
     const p = window.location.pathname
     if (p === '/settings') return 'settings'
+    if (p === '/about') return 'about'
     if (p === '/certs' || p === '/cert') return 'certs'
     if (p === '/advanced' || p === '/custom-config') return 'advanced'
     if (p === '/readable' || p === '/convert') return 'readable'
@@ -977,6 +980,7 @@ export function usePanel() {
     leaveCluster,
     clusterTask,
     clusterBusy,
+    leaveBlocked,
     resumeClusterTaskIfRunning,
     dismissPending,
     retryClusterMember,
@@ -1010,6 +1014,7 @@ export function usePanel() {
     retryMasque,
   } = useOutbounds(shared)
   const {
+    ADV_FIELDS,
     PROTOCOLS,
     DEFAULT_NAMES,
     PROTOCOL_MAP,
@@ -1126,6 +1131,7 @@ export function usePanel() {
     toggleLangMenu,
     pickLang,
     showToast,
+    ADV_FIELDS,
     PROTOCOLS,
     DEFAULT_NAMES,
     PROTOCOL_MAP,
@@ -1211,6 +1217,7 @@ export function usePanel() {
     leaveCluster,
     clusterTask,
     clusterBusy,
+    leaveBlocked,
     dismissPending,
     retryClusterMember,
     autoCheckCluster,

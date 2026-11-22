@@ -4,7 +4,50 @@ import { reactive, computed, watch } from 'vue'
 import { t } from '../i18n.js'
 
 export function useInbounds(p) {
-  const { busyKey, openConfirmDialog, postAction } = p
+  const { busyKey, openConfirmDialog, postAction, state } = p
+
+  // 1.44, custom server: the options the safe defaults lock, as optional fields of the add-node form.
+  // Blank = the default (random secret, default cipher ...), so nothing changes for users who skip
+  // them. Sent as adv_<key>; the server reads them only in custom server mode.
+  const PW = { key: 'password', desc: '密码' }
+  const USER = { key: 'username', desc: '用户名' }
+  const ADV_FIELDS = {
+    'vless-reality': [
+      { key: 'uuid', desc: 'UUID', wide: true },
+      { key: 'short_id', desc: 'Short ID' },
+      { key: 'vless_enc', desc: 'VLESS Encryption', options: [{ value: '', desc: '开启（默认）' }, { value: 'off', desc: '关闭' }] },
+      { key: 'reality_key', desc: 'Reality 私钥', wide: true },
+    ],
+    hysteria2: [
+      { ...PW, wide: true },
+      { key: 'obfs', desc: '混淆', options: [{ value: '', desc: 'Salamander（默认）' }, { value: 'off', desc: '关闭' }] },
+      { key: 'obfs_password', desc: '混淆密码' },
+    ],
+    shadowsocks: [
+      {
+        key: 'cipher',
+        desc: '加密方式',
+        wide: true,
+        options: [{ value: '', desc: 'aes-256-gcm（默认）' }].concat(
+          ['aes-128-gcm', 'chacha20-ietf-poly1305', 'xchacha20-ietf-poly1305',
+            '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305'].map((v) => ({ value: v, desc: v }))
+        ),
+      },
+      { ...PW, wide: true },
+    ],
+    snell: [{ key: 'psk', desc: 'PSK', wide: true }],
+    anytls: [USER, PW],
+    shadowquic: [USER, PW],
+    sudoku: [
+      { key: 'aead', desc: 'AEAD 加密', options: [{ value: '', desc: 'chacha20-poly1305（默认）' }, { value: 'aes-128-gcm', desc: 'aes-128-gcm' }] },
+      { key: 'table', desc: '表格类型', options: [{ value: '', desc: 'prefer_ascii（默认）' }, { value: 'prefer_entropy', desc: 'prefer_entropy' }] },
+    ],
+    tuic: [{ key: 'uuid', desc: 'UUID', wide: true }, { ...PW, wide: true }],
+    trusttunnel: [USER, PW],
+    mieru: [USER, PW],
+    http: [USER, PW],
+    socks: [USER, PW],
+  }
 
   const PROTOCOLS = [
     {
@@ -106,6 +149,7 @@ export function useInbounds(p) {
     http_tls: '0',
     socks_tls: '0',
     sni: '',
+    adv: {},
   })
 
   const currentProtocol = computed(() => PROTOCOL_MAP[inboundForm.kind] || PROTOCOLS[0])
@@ -124,6 +168,7 @@ export function useInbounds(p) {
       if (!inboundForm.name.trim() || inboundForm.name.trim() === oldDefault) {
         inboundForm.name = newDefault
       }
+      inboundForm.adv = {}   // the optional fields belong to one protocol
     }
   )
 
@@ -146,12 +191,19 @@ export function useInbounds(p) {
       sni: sniEditable.value ? inboundForm.sni.trim() : '',
       req_id: pendingAddReqId,
     }
+    if (state.custom_server_enabled) {
+      for (const f of ADV_FIELDS[inboundForm.kind] || []) {
+        const v = String(inboundForm.adv[f.key] || '').trim()
+        if (v) payload['adv_' + f.key] = v
+      }
+    }
     const res = await postAction('/inbounds/add', payload, 'add-inbound')
     // No answer (timeout / dropped connection): keep the id so a retry is not added twice.
     if (res) pendingAddReqId = ''
     if (res && res.ok) {
       inboundForm.port = ''
       inboundForm.sni = ''
+      inboundForm.adv = {}
       inboundForm.name = currentDefaultName.value
     }
   }
@@ -179,6 +231,7 @@ export function useInbounds(p) {
   }
 
   return {
+    ADV_FIELDS,
     PROTOCOLS,
     DEFAULT_NAMES,
     PROTOCOL_MAP,

@@ -691,6 +691,8 @@ class Panel(BaseHTTPRequestHandler):
             return self.send(200, self.dashboard(s, initial_tab="certs"))
         if path == "/settings":
             return self.send(200, self.dashboard(s, initial_tab="settings"))
+        if path == "/about":
+            return self.send(200, self.dashboard(s, initial_tab="about"))
         if path == "/cluster":
             return self.send(200, self.dashboard(s, initial_tab="cluster"))
         if path == "/api/state":
@@ -1238,23 +1240,45 @@ class Panel(BaseHTTPRequestHandler):
     def _run_cluster_job(job) -> tuple:
         try:
             return job()
+        except ClusterCancelled:
+            return "检查已中断，正在退出集群", False
         except (ClusterError, ValueError) as e:
             return str(e), False
         except Exception as e:   # never drop the connection on an unexpected error
             sys.stderr.write(f"cluster job failed: {e!r}\n")
             return f"集群操作失败：{e}", False
 
+    _PREEMPTABLE = ("sync", "retry")   # 检查 / 重试 give way to 退出集群 (1.44)
+
     def _cluster_job(self, s, job, form=None, kind=""):
         """Run a cluster operation. With async=1 (the page) it runs in a background thread and the page
         polls /api/cluster-task-status for the current step: adding a panel waits for both cores to
-        reload and can take a minute, longer than a request should hang."""
-        if not _CLUSTER_OP_LOCK.acquire(blocking=False):
-            return self.respond_mutation(s, "另一个集群操作正在进行，请稍候再试", False)
-        if not ((form or {}).get("async") == "1" and self.is_ajax()):
+        reload and can take a minute, longer than a request should hang.
+        1.44: 退出集群 does not wait for a running 检查 / 重试: it tells that one to stop (_CLUSTER_CANCEL,
+        honoured at its next step) and leaves at once; the check releases the lock when it stops."""
+        locked = _CLUSTER_OP_LOCK.acquire(blocking=False)
+        if not locked:
+            with _CLUSTER_TASK_LOCK:
+                busy_kind = _CLUSTER_TASK["kind"] if _CLUSTER_TASK["running"] else ""
+            if kind != "leave" or busy_kind not in self._PREEMPTABLE:
+                return self.respond_mutation(s, "另一个集群操作正在进行，请稍候再试", False)
+            _CLUSTER_CANCEL.set()
+            sys.stderr.write(f"cluster: {busy_kind} interrupted by leave\n")
+        else:
+            _CLUSTER_CANCEL.clear()
+        cancellable = kind in self._PREEMPTABLE
+
+        def run():
+            _CLUSTER_BATCH.cancellable = cancellable
             try:
-                msg, ok = self._run_cluster_job(job)
+                return self._run_cluster_job(job)
             finally:
-                _CLUSTER_OP_LOCK.release()
+                _CLUSTER_BATCH.cancellable = False
+                if locked:
+                    _CLUSTER_OP_LOCK.release()
+
+        if not ((form or {}).get("async") == "1" and self.is_ajax()):
+            msg, ok = run()
             return self.respond_mutation(s, msg, ok)
         with _CLUSTER_TASK_LOCK:
             _CLUSTER_TASK.update(id=_CLUSTER_TASK["id"] + 1, running=True, kind=kind, ok=None, msg="", stage="",
@@ -1264,11 +1288,11 @@ class Panel(BaseHTTPRequestHandler):
         def worker():
             msg, ok = "集群操作失败", False
             try:
-                msg, ok = self._run_cluster_job(job)
+                msg, ok = run()
             finally:
-                _CLUSTER_OP_LOCK.release()
                 with _CLUSTER_TASK_LOCK:
-                    _CLUSTER_TASK.update(running=False, ok=ok, msg=msg, stage="", finished_at=time.time())
+                    if _CLUSTER_TASK["id"] == task_id:   # an interrupted check does not overwrite the leave
+                        _CLUSTER_TASK.update(running=False, ok=ok, msg=msg, stage="", finished_at=time.time())
 
         threading.Thread(target=worker, name=f"cluster-{kind or 'task'}", daemon=True).start()
         return self.send(200, json.dumps({"ok": True, "running": True, "id": task_id}), "application/json; charset=utf-8")
@@ -1861,7 +1885,8 @@ class Panel(BaseHTTPRequestHandler):
             if any(existing.get("name") == target_name for existing in cur):
                 return self.respond_mutation(s, "节点名称重复，添加失败", False)
             try:
-                inb = build_inbound(raw_kind, form, env)
+                # 1.44: with custom server on, the locked options may be typed in (adv_*); blank = default
+                inb = build_inbound(raw_kind, form, env, advanced=bool(load_panel_settings().get("custom_server_enabled")))
                 save_inbounds(cur + [inb])
                 record_pending_reload(
                     op="add",
@@ -2276,7 +2301,7 @@ class Panel(BaseHTTPRequestHandler):
         q = parse_qs(urlparse(self.path).query)
         msg, ok = q.get("msg", [""])[0], q.get("ok", ["1"])[0] == "1"
         tab_q = q.get("tab", [""])[0]
-        if tab_q in ("inbounds", "outbounds", "readable", "advanced", "certs", "settings", "cluster"):
+        if tab_q in ("inbounds", "outbounds", "readable", "advanced", "certs", "settings", "cluster", "about"):
             initial_tab = tab_q
         env = read_env()
         st = mihomo_status()

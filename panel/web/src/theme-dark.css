@@ -295,9 +295,90 @@ html[data-theme="dark"] .cg-ver-up:hover:not(:disabled) {
   background: #19273a;
   border-color: #1c334e;
 }
-html[data-theme="dark"] .cg-spin {
-  border: 2px solid #19273a;
-  border-top-color: #1d6fe0;
+html[data-theme="dark"] .cg-spinner {
+  color: #2c7cee;
+}
+html[data-theme="dark"] .cg-progress {
+  background: #1b2332;
+}
+html[data-theme="dark"] .cg-progress::after {
+  background: linear-gradient(90deg, rgba(29, 111, 224, 0), #1d6fe0 45%, rgba(29, 111, 224, 0));
+}
+html[data-theme="dark"] .cg-step {
+  color: #73839b;
+}
+html[data-theme="dark"] .cg-step.is-now {
+  color: #d6e3fe;
+}
+html[data-theme="dark"] .cg-step.is-done .cg-step-mark {
+  background: #15241d;
+  color: #2a985b;
+}
+html[data-theme="dark"] .cg-about-hero {
+  background-image: radial-gradient(120% 140% at 0% 0%, rgba(29, 111, 224, 0.12), transparent 55%),
+    radial-gradient(90% 120% at 100% 100%, rgba(19, 138, 78, 0.08), transparent 60%),
+    linear-gradient(#15191e, #15191e);
+}
+html[data-theme="dark"] .cg-about-logo {
+  box-shadow: 0 10px 24px -12px rgba(29, 111, 224, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.132);
+}
+html[data-theme="dark"] .cg-about-pill {
+  color: #91a1b7;
+  background: rgba(21, 25, 30, 0.85);
+  border: 1px solid #22282f;
+}
+html[data-theme="dark"] .cg-about-pill.is-main {
+  background: #1d6fe0;
+  border-color: #1d6fe0;
+}
+html[data-theme="dark"] .cg-about-back {
+  color: #91a1b7;
+  background: rgba(21, 25, 30, 0.8);
+  border: 1px solid #22282f;
+}
+html[data-theme="dark"] .cg-about-back:hover {
+  color: #2c7cee;
+  background: #15191e;
+}
+html[data-theme="dark"] .cg-about-tag {
+  color: #2a985b;
+  background: #15241d;
+}
+html[data-theme="dark"] .cg-timeline::before {
+  background: linear-gradient(#212e41, #1d2126);
+}
+html[data-theme="dark"] .cg-timeline-dot {
+  background: #15191e;
+  border: 2px solid #2a3749;
+}
+html[data-theme="dark"] .cg-timeline-item.is-current .cg-timeline-dot {
+  border-color: #1d6fe0;
+  background: #1d6fe0;
+}
+html[data-theme="dark"] .cg-timeline-ver {
+  color: #d6e3fe;
+}
+html[data-theme="dark"] .cg-timeline-item:not(.is-current) .cg-timeline-ver {
+  color: #91a1b7;
+}
+html[data-theme="dark"] .cg-credit {
+  border: 1px solid #23272f;
+  background: #15191e;
+}
+html[data-theme="dark"] .cg-credit:hover {
+  border-color: #263753;
+}
+html[data-theme="dark"] .cg-credit-mark {
+  background: linear-gradient(135deg, #1d6fe0, #5b9cf5);
+}
+html[data-theme="dark"] .cg-credit + .cg-credit .cg-credit-mark {
+  background: linear-gradient(135deg, #d6e3fe, #91a1b7);
+}
+html[data-theme="dark"] .cg-credit-go {
+  color: #4e5b6e;
+}
+html[data-theme="dark"] .cg-credit:hover .cg-credit-go {
+  color: #2c7cee;
 }
 html[data-theme="dark"] .cg-move {
   border: 1px solid #23272f;

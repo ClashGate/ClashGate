@@ -20,6 +20,7 @@ CORE_UPDATE_FAILED
 CS_ROOT
 CUSTOM_CONF
 CUSTOM_SAVED
+ClusterCancelled
 ClusterError
 ClusterRemoteError
 ClusterTimeout
@@ -93,6 +94,7 @@ VERSION
 _CERT_FILE_EXT
 _CERT_SECTIONS
 _CLUSTER_BATCH
+_CLUSTER_CANCEL
 _CLUSTER_OP_LOCK
 _CLUSTER_PORT_HOLD
 _CLUSTER_TASK
@@ -124,6 +126,7 @@ _apply_auto_update
 _batching
 _beginner_routing_state
 _blank_update_slot
+_cancel_check
 _cf_json
 _check_due_updates
 _clean_inbounds
@@ -174,6 +177,7 @@ _rs_encode
 _save_sessions_file
 _section_items
 _seed_dir
+_set_stage
 _snapshot_files
 _snell_needs_v6
 _sync_custom_conf_listeners
