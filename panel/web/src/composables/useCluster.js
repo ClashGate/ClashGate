@@ -29,7 +29,9 @@ export function useCluster(p) {
   }
 
   // expectId: the task this page started (null when the start request failed and the id is unknown).
-  async function pollClusterTask(expectId = null) {
+  // quiet (the automatic 检查 when the cluster page opens): no toasts, the list shows the result.
+  async function pollClusterTask(expectId = null, quiet = false) {
+    const toast = (msg, ok) => { if (!quiet) showToast(msg, ok) }
     const deadline = Date.now() + 15 * 60 * 1000
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 1000))
@@ -50,19 +52,19 @@ export function useCluster(p) {
       if (d.state) applyServerState(d.state)
       if (expectId === null || d.id !== expectId) {
         // Our start request never answered and nothing is running: do not show an older task's result.
-        showToast(t('网络连接中断或服务正在重启，请稍后刷新页面查看状态'), false)
+        toast(t('网络连接中断或服务正在重启，请稍后刷新页面查看状态'), false)
         return null
       }
-      if (d.done) showToast(d.msg || (d.ok ? t('操作成功') : t('操作失败')), !!d.ok)
+      if (d.done) toast(d.msg || (d.ok ? t('操作成功') : t('操作失败')), !!d.ok)
       return d
     }
-    showToast(t('集群操作还没有结束，请稍后刷新页面查看'), false)
+    toast(t('集群操作还没有结束，请稍后刷新页面查看'), false)
     return null
   }
 
-  async function runClusterTask(url, params, key, kind, { overlay = false } = {}) {
+  async function runClusterTask(url, params, key, kind, { overlay = false, quiet = false } = {}) {
     if (clusterBusy.value || (overlay && busyKey.value)) {
-      showToast(t('上一个操作还在进行，请稍候'), false)
+      if (!quiet) showToast(t('上一个操作还在进行，请稍候'), false)
       return null
     }
     clusterBusy.value = key
@@ -81,10 +83,10 @@ export function useCluster(p) {
       }
       if (data && !data.running) {   // refused before starting (another operation, bad input)
         if (data.state) applyServerState(data.state)
-        showToast(data.msg || (data.ok ? t('操作成功') : t('操作失败')), !!data.ok, data.detail)
+        if (!quiet) showToast(data.msg || (data.ok ? t('操作成功') : t('操作失败')), !!data.ok, data.detail)
         return data
       }
-      return await pollClusterTask(data ? data.id : null)
+      return await pollClusterTask(data ? data.id : null, quiet)
     } finally {
       clusterBusy.value = ''
       if (overlay) {
@@ -184,8 +186,19 @@ export function useCluster(p) {
 
   const listSep = computed(() => ({ zh: '、', fa: '، ' })[lang.value] || ', ')
 
+  // 检查. Also with no members: another panel may have added this one since the page was loaded.
   function syncCluster() {
     return runClusterTask('/cluster/sync', {}, 'cluster-sync', 'sync')
+  }
+
+  // Opening the cluster page checks once by itself (quietly, the button shows 「检查中…」), at most
+  // every 30 seconds and never while something else runs.
+  let lastAutoCheck = 0
+  function autoCheckCluster() {
+    if (busyKey.value || clusterBusy.value || document.hidden) return null
+    if (Date.now() - lastAutoCheck < 30000) return null
+    lastAutoCheck = Date.now()
+    return runClusterTask('/cluster/sync', {}, 'cluster-sync', 'sync', { quiet: true })
   }
 
   // 「重试」 on a member that failed (or whose links are incomplete).
@@ -229,5 +242,6 @@ export function useCluster(p) {
     resumeClusterTaskIfRunning,
     dismissPending,
     retryClusterMember,
+    autoCheckCluster,
   }
 }

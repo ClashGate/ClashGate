@@ -305,11 +305,10 @@ const {
                       <p class="text-xs text-slate-500 mt-1 leading-relaxed">{{ t('集群里每两台面板之间都有一条双向的 VLESS 后量子加密连接。') }}</p>
                     </div>
                     <button
-                      v-if="state.cluster.members.length || state.cluster.pending.length"
                       type="button"
                       :disabled="!!busyKey || !!clusterBusy"
                       :aria-busy="clusterBusy === 'cluster-sync' ? 'true' : undefined"
-                      @click="syncCluster"
+                      @click="syncCluster()"
                       class="-my-1 h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-semibold bg-white hover:bg-sky-50 text-slate-700 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer shrink-0"
                     ><span v-if="clusterBusy === 'cluster-sync'" class="cg-spin cg-spin-sm" aria-hidden="true"></span>{{ clusterBusy === 'cluster-sync' ? t('检查中…') : t('检查') }}</button>
                   </div>
@@ -367,7 +366,7 @@ const {
                       <button
                         type="button"
                         :disabled="!!busyKey || !!clusterBusy"
-                        @click="syncCluster"
+                        @click="syncCluster()"
                         class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-slate-700 bg-white hover:bg-sky-50 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer"
                       ><span v-if="clusterBusy === 'cluster-sync'" class="cg-spin cg-spin-sm" aria-hidden="true"></span>{{ clusterBusy === 'cluster-sync' ? t('重试中…') : t('重试') }}</button>
                       <button

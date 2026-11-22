@@ -65,33 +65,110 @@ core_asset_candidates() { # <arch> <tag>
   fi
 }
 
-install_core() {
-  log "安装最新稳定版 Mihomo 内核"
-  install -d -m 1775 "$CS_ROOT"
-  local a rel tag url tmp name tried=0
+# Latest stable release: the GitHub API first (with the file list); if it fails (rate limit, a TLS
+# reset like "unexpected eof while reading"), the tag from the releases/latest redirect, and the
+# download URLs are built from the file names. Sets CORE_TAG and CORE_REL (API JSON, may be empty).
+CORE_TAG=""; CORE_REL=""; CORE_ERR=""
+core_latest() {
+  CORE_TAG=""; CORE_REL=""
+  local i rel loc
+  for i in 1 2; do
+    if rel=$(curl -fsSL --connect-timeout 10 --max-time 20 "$REPO_API" 2>/dev/null); then
+      CORE_TAG=$(jq -r '.tag_name // empty' <<<"$rel" 2>/dev/null) || CORE_TAG=""
+      if [[ $CORE_TAG =~ ^v[0-9]+(\.[0-9]+)+$ ]]; then CORE_REL=$rel; return 0; fi
+    fi
+    sleep 2
+  done
+  for i in 1 2; do
+    loc=$(curl -fsSIL --connect-timeout 10 --max-time 20 -o /dev/null -w '%{url_effective}' \
+      "https://github.com/MetaCubeX/mihomo/releases/latest" 2>/dev/null) || loc=""
+    CORE_TAG=${loc##*/tag/}
+    [[ $CORE_TAG =~ ^v[0-9]+(\.[0-9]+)+$ ]] && return 0
+    CORE_TAG=""; sleep 2
+  done
+  return 1
+}
+
+# Download $CORE_TAG for this CPU and install it. The running core is only replaced by a file that
+# runs here (`-v`). On failure nothing changes and CORE_ERR is download | run | nobuild.
+core_download() {
+  local a url tmp name tried=0 got=0
   a=$(arch)
-  rel=$(curl -fsSL --retry 3 "$REPO_API") || die "无法获取 Mihomo 版本信息（请确认服务器可以访问 GitHub）"
-  tag=$(jq -r .tag_name <<<"$rel")
   tmp=$(mktemp)
   while read -r name; do
-    url=$(jq -r --arg n "$name" '.assets[] | select(.name==$n) | .browser_download_url' <<<"$rel")
-    [[ -n "$url" ]] || continue
+    if [[ -n $CORE_REL ]]; then
+      url=$(jq -r --arg n "$name" '.assets[] | select(.name==$n) | .browser_download_url' <<<"$CORE_REL" 2>/dev/null)
+      [[ -n "$url" ]] || continue
+    else
+      url="https://github.com/MetaCubeX/mihomo/releases/download/${CORE_TAG}/${name}"
+    fi
     tried=$((tried + 1))
-    curl -fsSL --retry 3 -o "$tmp" "$url" || die "下载失败：$url"
-    gzip -dc "$tmp" > "$BIN.new" || { rm -f "$BIN.new"; continue; }
+    curl -fsSL --retry 3 --connect-timeout 15 -o "$tmp" "$url" 2>/dev/null || continue
+    got=1
+    gzip -dc "$tmp" > "$BIN.new" 2>/dev/null || { rm -f "$BIN.new"; continue; }
     chmod 755 "$BIN.new"
     if "$BIN.new" -v >/dev/null 2>&1; then
       rm -f "$tmp"
       mv "$BIN.new" "$BIN"
       ln -sfn "$BIN" /usr/local/bin/mihomo
-      info "已安装 $tag -> $BIN"
       return 0
     fi
     rm -f "$BIN.new"   # this CPU cannot run that build: quietly try the next one
-  done < <(core_asset_candidates "$a" "$tag")
+  done < <(core_asset_candidates "$a" "$CORE_TAG")
   rm -f "$tmp"
-  ((tried)) || die "版本 $tag 中没有找到适合 $a 的 Mihomo 内核文件"
-  die "下载的 Mihomo 无法运行"
+  if ((got)); then CORE_ERR=run; elif ((tried)) || [[ -z $CORE_REL ]]; then CORE_ERR=download; else CORE_ERR=nobuild; fi
+  return 1
+}
+
+core_err_text() {
+  case $CORE_ERR in
+    run) echo "下载的 Mihomo 无法运行" ;;
+    nobuild) echo "版本 $CORE_TAG 中没有找到适合 $(arch) 的 Mihomo 内核文件" ;;
+    *) echo "下载 Mihomo 内核失败（请确认服务器可以访问 GitHub）" ;;
+  esac
+}
+
+install_core() { # fresh install: a core is required
+  log "安装最新稳定版 Mihomo 内核"
+  install -d -m 1775 "$CS_ROOT"
+  core_latest || die "无法获取 Mihomo 版本信息（请确认服务器可以访问 GitHub）"
+  core_download || die "$(core_err_text)"
+  info "已安装 $CORE_TAG -> $BIN"
+}
+
+# clashgate update: download the core only when it is not the latest. When the version cannot be
+# fetched or the download fails, the panel update goes on and the end of the update says so
+# (CORE_NOTE, also left in core_update_failed for the panel). CORE_UPDATED=1: a new binary.
+CORE_UPDATED=0; CORE_NOTE=""
+update_core() {
+  log "检查 Mihomo 内核"
+  install -d -m 1775 "$CS_ROOT"
+  rm -f "$CS_ROOT/core_update_failed"
+  local cur
+  cur=$("$BIN" -v 2>/dev/null | grep -oE 'v[0-9]+(\.[0-9]+)+' | head -n1) || cur=""
+  if ! core_latest; then
+    CORE_NOTE="Mihomo 内核更新失败：无法获取最新版本信息，已跳过内核更新，面板照常更新（当前内核 ${cur:--}）"
+    printf 'fetch\t%s\t\n' "${cur:--}" > "$CS_ROOT/core_update_failed"
+    info "无法获取 Mihomo 最新版本信息，跳过内核更新"
+    return 0
+  fi
+  if [[ -n $cur && $cur == "$CORE_TAG" ]]; then
+    info "Mihomo 内核已是最新版本 $cur"
+    return 0
+  fi
+  if core_download; then
+    CORE_UPDATED=1
+    info "已更新 Mihomo 内核：${cur:--} -> $CORE_TAG"
+    return 0
+  fi
+  case $CORE_ERR in
+    run) CORE_NOTE="Mihomo 内核更新失败：下载的内核无法在这台服务器上运行，已跳过内核更新，面板照常更新（当前内核 ${cur:--}，最新 $CORE_TAG）" ;;
+    nobuild) CORE_NOTE="Mihomo 内核更新失败：最新版本没有适合这台服务器的内核文件，已跳过内核更新，面板照常更新（当前内核 ${cur:--}，最新 $CORE_TAG）" ;;
+    *) CORE_NOTE="Mihomo 内核更新失败：下载失败，已跳过内核更新，面板照常更新（当前内核 ${cur:--}，最新 $CORE_TAG）" ;;
+  esac
+  printf '%s\t%s\t%s\n' "$CORE_ERR" "${cur:--}" "$CORE_TAG" > "$CS_ROOT/core_update_failed"
+  info "Mihomo 内核下载失败，跳过内核更新"
+  return 0
 }
 
 IPV4_RE='^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'

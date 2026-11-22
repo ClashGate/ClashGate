@@ -268,15 +268,21 @@ do_update() {
   STEP=0; TOTAL=4
   install_deps
   if [[ $MODE == auto-cert ]]; then ensure_python; fi
-  install_core
+  update_core
   ensure_geodata || warn "地理数据下载失败：$GEO_FAILED（请确认服务器可以访问 jsDelivr 或 GitHub）"
   update_self
   log "重启服务"
   validate_conf || die "配置未通过校验（mihomo -t），未重启"
-  systemctl restart mihomo
+  # A new core binary needs a restart; otherwise a hot reload keeps the open connections.
+  if ((CORE_UPDATED)) || ! systemctl is-active --quiet mihomo; then
+    systemctl restart mihomo
+  else
+    systemctl reload mihomo || systemctl restart mihomo
+  fi
   [[ $MODE == auto-cert ]] && systemctl restart clashgate
   sleep 1
   info "Mihomo：$(svc_state mihomo)"
+  [[ -z $CORE_NOTE ]] || warn "$CORE_NOTE"
   return 0
 }
 

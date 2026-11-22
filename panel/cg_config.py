@@ -2051,6 +2051,52 @@ def _sync_custom_conf_providers(providers: dict):
         sys.stderr.write(f"_sync_custom_conf_providers warning: {e}\n")
 
 
+def core_expected_ports() -> set:
+    """Ports the running core must listen on: install nodes, panel inbounds, cluster inbounds."""
+    ports = {int(n["port"]) for n in read_nodes()} | {int(i["port"]) for i in load_inbounds()}
+    try:
+        ports |= cluster_ports()
+    except Exception:
+        pass
+    return {p for p in ports if p}
+
+
+def _wait_core_ports(want: set, timeout: float = 10.0) -> bool:
+    """Wait until every port in `want` is listening by the running core. Where systemd cannot tell
+    (status unknown: no systemd, test trees) there is nothing to check."""
+    deadline = time.monotonic() + timeout
+    while True:
+        st = mihomo_status()
+        if st["active"] == "unknown":
+            return True
+        if st["active"] in ("active", "reloading") and want.issubset(set(st["listening"])):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.2)
+
+
+def reload_core(expect_ports=None, wait=None, timeout: float = 10.0) -> tuple:
+    """Load config.yaml into the running core without a restart (1.43). SIGHUP makes Mihomo apply the
+    file in place: listeners whose settings did not change keep running with their connections, the
+    controller is rebuilt, new connections only wait while the switch runs (about a second).
+    `systemctl reload` returns as soon as the signal is sent, so the expected ports are awaited before
+    anything is judged; a restart (it drops every connection) happens only when the reload is refused
+    (core not running) or the ports still are not listening after `timeout` seconds.
+    Not for a new core binary or renewed certificates: listeners keep the certificate they loaded."""
+    want = {int(p) for p in (expect_ports if expect_ports is not None else core_expected_ports()) if p}
+    waiter = wait or (lambda w: _wait_core_ports(w, timeout))
+    rc, out = run([SYSTEMCTL, "reload", "mihomo"])
+    if rc == 0 and (not want or waiter(want)):
+        return 0, out
+    if rc == 0:
+        sys.stderr.write(f"core reload: ports {sorted(want)} not listening after {timeout:.0f}s, restarting\n")
+    rc, out = run([SYSTEMCTL, "restart", "mihomo"])
+    if rc == 0 and want and not waiter(want):
+        return 1, (out or "") + "重载后端口未能开始监听"
+    return rc, out
+
+
 def wait_mihomo_ports(timeout=2.0):
     """Poll ss for up to ~2s so all expected ports are listening before responding."""
     expected = {int(n["port"]) for n in read_nodes()} | {int(i["port"]) for i in load_inbounds()}
@@ -2368,7 +2414,7 @@ def refresh_template_if_flagged() -> bool:
     atomic_write(CONF, new_conf, 0o640)
     rc, out = validate_config()
     if rc == 0:
-        rc, out = run([SYSTEMCTL, "reload", "mihomo"])
+        rc, out = reload_core()
     if rc != 0:
         if backup is not None:
             atomic_write(CONF, backup, 0o640)
@@ -2537,9 +2583,9 @@ def apply_custom_config(raw_yaml: str):
         atomic_write(INBOUNDS, json.dumps(new_inbounds, indent=2, ensure_ascii=False), 0o600)
         atomic_write(PROXIES_JSON, json.dumps(new_proxies, indent=2, ensure_ascii=False), 0o600)
         atomic_write(PROVIDERS_JSON, json.dumps(new_providers, indent=2, ensure_ascii=False), 0o600)
-        rc, out = run([SYSTEMCTL, "restart", "mihomo"])
+        rc, out = reload_core({int(i["port"]) for i in new_inbounds} | cluster_ports())
         if rc != 0:
-            raise RuntimeError("重启失败：" + out[-800:])
+            raise RuntimeError("重载失败：" + out[-800:])
     except Exception:
         _restore_files(backup)
         run([SYSTEMCTL, "restart", "mihomo"])
@@ -2640,9 +2686,9 @@ def disable_custom_config() -> str:
             sys.stderr.write(f"disable_custom_config: {name} state failed mihomo -t, trying next\n")
         if not used:
             raise RuntimeError("配置校验失败（mihomo -t）：" + last_err)
-        rc, out = run([SYSTEMCTL, "restart", "mihomo"])
+        rc, out = reload_core()
         if rc != 0:
-            raise RuntimeError("重启失败：" + out[-800:])
+            raise RuntimeError("重载失败：" + out[-800:])
         for p in state_files:
             bak_p = p + ".tplbak"
             if os.path.exists(bak_p):
@@ -2684,9 +2730,9 @@ def reset_to_template_config():
         rc, out = validate_config()
         if rc != 0:
             raise RuntimeError("配置校验失败（mihomo -t）：" + out[-800:])
-        rc, out = run([SYSTEMCTL, "restart", "mihomo"])
+        rc, out = reload_core()
         if rc != 0:
-            raise RuntimeError("重启失败：" + out[-800:])
+            raise RuntimeError("重载失败：" + out[-800:])
         for p in (NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON):
             bak_p = p + ".tplbak"
             if os.path.exists(bak_p):

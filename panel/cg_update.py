@@ -262,9 +262,9 @@ def migrate_snell_to_v6() -> int:
         rc, out = validate_config()
         if rc != 0:
             raise RuntimeError("mihomo -t: " + out[-400:])
-        rc, out = run([SYSTEMCTL, "restart", "mihomo"])
+        rc, out = reload_core()   # same binary, changed listeners: a hot reload is enough
         if rc != 0:
-            raise RuntimeError("restart: " + out[-400:])
+            raise RuntimeError("reload: " + out[-400:])
     except Exception as e:
         _restore_files(backup)
         run([SYSTEMCTL, "restart", "mihomo"])
@@ -542,16 +542,40 @@ def start_upgrade_job(cmd_bin: str) -> str:
         return str(e)
 
 
+def _latest_tag_from_redirect() -> str:
+    """The tag of github.com/MetaCubeX/mihomo/releases/latest (its redirect), when the API is not usable."""
+    req = urllib.request.Request("https://github.com/MetaCubeX/mihomo/releases/latest", method="HEAD",
+                                 headers={"User-Agent": f"clashgate/{VERSION}"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        url = resp.geturl()
+    tag = url.rsplit("/tag/", 1)[-1] if "/tag/" in url else ""
+    return tag if re.fullmatch(r"v\d+(?:\.\d+)+", tag) else ""
+
+
 def fetch_latest_mihomo_release() -> dict:
-    txt = _http_get_text(MIHOMO_REPO_API, timeout=20, headers={"Accept": "application/vnd.github+json"})
+    """Latest stable release. 1.43: the API is tried twice (a TLS reset such as "unexpected eof while
+    reading" is often a one-off), then the tag from the releases/latest redirect, with download URLs
+    built from the file names (no "assets" list: callers try the names in turn)."""
+    err = None
+    for attempt in range(2):
+        try:
+            txt = _http_get_text(MIHOMO_REPO_API, timeout=20, headers={"Accept": "application/vnd.github+json"})
+            data = json.loads(txt)
+            if isinstance(data, dict) and str(data.get("tag_name") or "").strip():
+                return data
+            err = RuntimeError("未能从 GitHub 获取 Mihomo 最新版本标签")
+        except ValueError:
+            err = RuntimeError("解析 GitHub 返回的版本数据失败")
+        except RuntimeError as e:
+            err = e
+        time.sleep(1.5 * (attempt + 1))
     try:
-        data = json.loads(txt)
+        tag = _latest_tag_from_redirect()
     except Exception:
-        raise RuntimeError("解析 GitHub 返回的版本数据失败") from None
-    tag = str(data.get("tag_name") or "").strip()
-    if not tag:
-        raise RuntimeError("未能从 GitHub 获取 Mihomo 最新版本标签")
-    return data
+        tag = ""
+    if tag:
+        return {"tag_name": tag, "assets": [], "_from_redirect": True}
+    raise err or RuntimeError("未能从 GitHub 获取 Mihomo 最新版本标签")
 
 
 def _blank_update_slot(current: str = "") -> dict:
@@ -772,6 +796,9 @@ def update_mihomo_core_direct() -> tuple:
     arch = detect_cpu_arch()
     by_name = {str(a.get("name") or ""): str(a.get("browser_download_url") or "")
                for a in (rel.get("assets") or []) if isinstance(a, dict)}
+    if rel.get("_from_redirect"):   # no file list: the release download URLs follow the file names
+        by_name = {n: f"https://github.com/MetaCubeX/mihomo/releases/download/{latest_tag}/{n}"
+                   for n in mihomo_asset_candidates(arch, latest_tag)}
     candidates = [(n, by_name[n]) for n in mihomo_asset_candidates(arch, latest_tag) if by_name.get(n)]
     if not candidates:
         raise RuntimeError(f"GitHub 版本 {latest_tag} 中没有适合 {arch} 的 Mihomo 内核文件")
@@ -782,30 +809,38 @@ def update_mihomo_core_direct() -> tuple:
     tmp_bin = bin_path + ".new"
     old_bin = bin_path + ".old"
     try:
-        v_out = ""
+        v_out, last_err, ran = "", None, False
         for asset_name, download_url in candidates:
+            # 1.43: a failed download (or a 404 for a name the release does not have) moves on to the
+            # next build instead of ending the update; the last error is reported if none works.
             req = urllib.request.Request(download_url, headers={"User-Agent": f"clashgate/{VERSION}"})
             try:
                 with urllib.request.urlopen(req, timeout=180) as resp, open(tmp_gz, "wb") as out_f:
                     shutil.copyfileobj(resp, out_f)
             except urllib.error.HTTPError as e:
-                raise RuntimeError(f"下载内核文件失败（HTTP {e.code}）") from None
+                last_err = RuntimeError(f"下载内核文件失败（HTTP {e.code}）")
+                continue
             except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as e:
                 reason = getattr(e, "reason", e)
-                raise RuntimeError(f"下载内核文件超时或网络中断，请稍后重试（{reason}）") from None
+                last_err = RuntimeError(f"下载内核文件超时或网络中断，请稍后重试（{reason}）")
+                continue
             try:
                 with gzip.open(tmp_gz, "rb") as gz_f, open(tmp_bin, "wb") as bin_f:
                     shutil.copyfileobj(gz_f, bin_f)
             except Exception as e:
-                raise RuntimeError(f"解压内核文件失败：{e}") from None
+                last_err = RuntimeError(f"解压内核文件失败：{e}")
+                continue
             os.chmod(tmp_bin, 0o755)
             rc, v_out = run([tmp_bin, "-v"], timeout=10)
+            ran = True
             if rc == 0:
                 break
             # e.g. "can only be run on AMD64 processors with v3 microarchitecture support": try the next build
             sys.stderr.write(f"core update: {asset_name} does not run here: {v_out[:200]}\n")
         else:
-            raise RuntimeError(f"下载的 Mihomo 内核无法运行：{v_out}")
+            if ran:
+                raise RuntimeError(f"下载的 Mihomo 内核无法运行：{v_out}")
+            raise last_err or RuntimeError(f"GitHub 版本 {latest_tag} 中没有适合 {arch} 的 Mihomo 内核文件")
         # Validate the live config with the NEW binary before swapping it in, so a
         # failed check leaves the working core untouched.
         rc, out = validate_config(bin_path=tmp_bin)

@@ -47,6 +47,7 @@ export const EN = {
  "重试": "Retry",
  "恢复并关闭自定义服务端": "Restore and turn off custom server",
  "重试中…": "Retrying…",
+ "面板已升级到 {v}，但 Mihomo 内核这次没有更新成功，可以稍后在首页单独更新内核": "The panel was updated to {v}, but the Mihomo core could not be updated this time; you can update the core from the home page later",
  "请求超时（120s），请稍后刷新查看状态": "Request timed out (120s); refresh later to check status",
  "已应用配置并更新客户端订阅": "Config applied and client subscription updated",
  "确定重置 Zashboard API 密钥？需点击顶部「应用配置」后直连地址才会更新。": "Reset the Zashboard API secret? The direct-connect URL will be updated after clicking “Apply config” at the top.",

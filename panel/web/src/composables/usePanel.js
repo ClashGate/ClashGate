@@ -884,7 +884,7 @@ export function usePanel() {
     resumeUpgradeIfRunning()
     if (pageMode.value === 'dashboard') {
       resumeCertTaskIfRunning()
-      resumeClusterTaskIfRunning()
+      resumeClusterTaskIfRunning().then(() => { if (activeTab.value === 'cluster') autoCheckCluster() })
     }
     window.addEventListener('blur', maskAllSensitive)
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -980,7 +980,10 @@ export function usePanel() {
     resumeClusterTaskIfRunning,
     dismissPending,
     retryClusterMember,
+    autoCheckCluster,
   } = useCluster(shared)
+  // 1.43: opening the cluster page runs 检查 once (quietly): another panel may have added this one
+  watch(activeTab, (tab) => { if (tab === 'cluster' && pageMode.value === 'dashboard') autoCheckCluster() })
   const {
     converterInput,
     converterOutput,
@@ -1210,6 +1213,7 @@ export function usePanel() {
     clusterBusy,
     dismissPending,
     retryClusterMember,
+    autoCheckCluster,
     loadFileInto,
     fillCurrentInboundsToConverter,
     convertConfigFormat,

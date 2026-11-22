@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.42 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.43 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -247,9 +247,9 @@ from cg_qr import (  # noqa: E402
     qr_png_data_url,
 )
 
-# Versions compare as integer tuples (parse_version_tuple): 1.42 > 1.41 > 1.40 > 1.39 > 1.38 > 1.37 > 1.36 > 1.35 > 1.34 > 1.33 > 1.32 > 1.31 > 1.30 > 1.29 > 1.28 > 1.27 > 1.26 > 1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
-# would sort below 1.09 on every installed panel); the next releases are 1.43, 1.44, ...
-VERSION = "1.42"
+# Versions compare as integer tuples (parse_version_tuple): 1.43 > 1.42 > 1.41 > 1.40 > 1.39 > 1.38 > 1.37 > 1.36 > 1.35 > 1.34 > 1.33 > 1.32 > 1.31 > 1.30 > 1.29 > 1.28 > 1.27 > 1.26 > 1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
+# would sort below 1.09 on every installed panel); the next releases are 1.44, 1.45, ...
+VERSION = "1.43"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")
@@ -339,6 +339,7 @@ _RECENT_ADD_REQS = {}
 
 
 UPGRADE_STATUS_JSON = CS_ROOT + "/upgrade_status.json"
+CORE_UPDATE_FAILED = CS_ROOT + "/core_update_failed"   # written by `clashgate update` (1.43)
 UPGRADE_LOG = CS_ROOT + "/upgrade.log"
 
 
@@ -374,6 +375,9 @@ KIND_ZH = {
 import cg_config  # noqa: E402
 from cg_config import (  # noqa: E402
     pick_reality_sni,
+    reload_core,
+    core_expected_ports,
+    _wait_core_ports,
     reformat_flow_entries,
     _section_items,
     _SNI_HOST,

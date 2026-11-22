@@ -502,11 +502,22 @@ def main():
     r = a.post("/action/reload")
     check(r["ok"] and "B-Node" in conf_names(read(cs["A"] + "/config.yaml")), f"cluster outbound survives reload: {r['msg']}")
 
+    print("[应用配置 with a new inbound is a hot reload (1.43: no restart)]")
+    pid_a = read(roots["A"] + "/mihomo.pid").strip()
+    r = a.post("/inbounds/add", kind="shadowsocks", name="HotSS", port="30556")
+    check(r["ok"], f"draft inbound HotSS on A: {r.get('msg')}")
+    r = a.post("/action/reload")
+    check(r["ok"] and listening(30556), f"HotSS listens after 应用配置: {r['msg']}")
+    check(read(roots["A"] + "/mihomo.pid").strip() == pid_a, "A's core was reloaded, not restarted")
+
     print("[C adds A: C is linked with A and B automatically]")
+    pids = {w: read(roots[w] + "/mihomo.pid").strip() for w in ("A", "B", "C")}
     t0 = time.time()
     r = c.post("/cluster/add", url=url["A"], password=PW["A"])
     check(r["ok"] and "B-Node" in r["msg"], f"add A to C: {r['msg']} ({time.time() - t0:.1f}s)")
     mesh_ok(["A", "B", "C"])
+    check(all(read(roots[w] + "/mihomo.pid").strip() == pids[w] for w in ("A", "B", "C")),
+          "adding a member hot-reloads every core (no restart)")
 
     print("[duplicates, name clash, renames]")
     r = c.post("/cluster/add", url=url["B"], password=PW["B"])

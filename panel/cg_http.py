@@ -698,6 +698,14 @@ class Panel(BaseHTTPRequestHandler):
         if path == "/api/upgrade-status":
             d = load_upgrade_status()
             d["version"] = VERSION
+            # 1.43: `clashgate update` goes on without the core when it cannot get or download it
+            # (core_update_failed); the page says so after the panel update succeeded.
+            try:
+                if d.get("state") == "done" and os.path.getmtime(CORE_UPDATE_FAILED) >= float(d.get("started_at") or 0):
+                    with open(CORE_UPDATE_FAILED) as f:
+                        d["core_failed"] = (f.read().split("\t") + [""])[0].strip() or "download"
+            except (OSError, ValueError):
+                pass
             if d.get("state") == "done" and d.get("rc") == 0 and not d.get("recorded"):
                 try:
                     record_panel_check(VERSION, False)
@@ -1550,12 +1558,10 @@ class Panel(BaseHTTPRequestHandler):
             old_specs = mod._PENDING_UFW_BASELINE if mod._PENDING_UFW_BASELINE is not None else new_specs
             sync_ufw(old_specs, new_specs)
             mod._PENDING_UFW_BASELINE = new_specs
-            rc, out = run([SYSTEMCTL, action, "mihomo"])
-            if rc == 0 and action == "reload":
-                expected_ports = {int(n["port"]) for n in cur_nodes} | {int(i["port"]) for i in cur_inbs}
-                st_now = mihomo_status()
-                if st_now["listening"] and not expected_ports.issubset(set(st_now["listening"])):
-                    rc, out = run([SYSTEMCTL, "restart", "mihomo"])
+            # 1.43: the ports were checked right after `systemctl reload`, which returns before the core
+            # has applied the file, so adding an inbound nearly always ended in a restart (every
+            # connection dropped). reload_core waits for the ports first.
+            rc, out = reload_core({int(n["port"]) for n in cur_nodes} | {int(i["port"]) for i in cur_inbs} | cluster_ports())
             if rc != 0:
                 restore()
                 run([SYSTEMCTL, "restart", "mihomo"])

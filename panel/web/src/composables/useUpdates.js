@@ -247,6 +247,12 @@ export function useUpdates(p) {
         }
         if (!d || d.state !== 'done') continue
         if (Number(d.rc) === 0) {
+          if (d.core_failed) {
+            // 1.43: the panel was updated, the Mihomo core could not be (no version info / download failed)
+            showToast(t('面板已升级到 {v}，但 Mihomo 内核这次没有更新成功，可以稍后在首页单独更新内核', { v: d.version || '' }), false)
+            await reloadSoon(4000, d.version)
+            return
+          }
           showToast(t('升级成功！当前版本 {v}，即将刷新页面', { v: d.version || '' }), true)
           await reloadSoon(800, d.version)
           return
