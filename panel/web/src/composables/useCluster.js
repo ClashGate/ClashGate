@@ -12,8 +12,12 @@ export function useCluster(p) {
   // blocking overlay with the current step (it waits for both cores); 检查 / 重试 / 移除 / 退出 run
   // quietly: their own button says so (clusterBusy), the rest of the panel stays usable, and the
   // result arrives as a toast.
-  const clusterTask = reactive({ show: false, kind: '', stage: '', elapsed: 0 })
+  const clusterTask = reactive({ show: false, kind: '', stage: '', elapsed: 0, steps: [] })
   const clusterBusy = ref('')
+  // Each run gets a number; a run that was taken over (退出集群 during 检查) stops polling quietly.
+  let runSeq = 0
+  const PREEMPTABLE = ['cluster-sync']
+  const isPreemptable = (key) => PREEMPTABLE.includes(key) || key.startsWith('cl-rt-')
 
   async function fetchClusterTask() {
     const res = await fetch('/api/cluster-task-status', {
@@ -30,11 +34,12 @@ export function useCluster(p) {
 
   // expectId: the task this page started (null when the start request failed and the id is unknown).
   // quiet (the automatic 检查 when the cluster page opens): no toasts, the list shows the result.
-  async function pollClusterTask(expectId = null, quiet = false) {
+  async function pollClusterTask(expectId = null, quiet = false, seq = runSeq) {
     const toast = (msg, ok) => { if (!quiet) showToast(msg, ok) }
     const deadline = Date.now() + 15 * 60 * 1000
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 1000))
+      if (seq !== runSeq) return null   // taken over by another run
       let d = null
       try {
         d = await fetchClusterTask()
@@ -43,9 +48,14 @@ export function useCluster(p) {
       }
       if (!d) continue
       if (d.gone) return null
+      if (seq !== runSeq) return null
       if (d.running) {
         if (expectId === null) expectId = d.id   // the start request was lost but the task did start
-        clusterTask.stage = d.stage || ''
+        const next = d.stage || ''
+        if (next && clusterTask.stage && next !== clusterTask.stage && !clusterTask.steps.includes(clusterTask.stage)) {
+          clusterTask.steps.push(clusterTask.stage)   // the overlay lists the steps done so far
+        }
+        if (next) clusterTask.stage = next
         clusterTask.elapsed = Number(d.elapsed || 0)
         continue
       }
@@ -62,15 +72,18 @@ export function useCluster(p) {
     return null
   }
 
-  async function runClusterTask(url, params, key, kind, { overlay = false, quiet = false } = {}) {
-    if (clusterBusy.value || (overlay && busyKey.value)) {
+  async function runClusterTask(url, params, key, kind, { overlay = false, quiet = false, preempt = false } = {}) {
+    // preempt (退出集群): a running 检查 / 重试 gives way; the server stops it at its next step
+    const takeOver = preempt && clusterBusy.value && isPreemptable(clusterBusy.value)
+    if ((clusterBusy.value && !takeOver) || (overlay && busyKey.value)) {
       if (!quiet) showToast(t('上一个操作还在进行，请稍候'), false)
       return null
     }
+    const seq = ++runSeq
     clusterBusy.value = key
     if (overlay) {
       busyKey.value = key
-      Object.assign(clusterTask, { show: true, kind, stage: '', elapsed: 0 })
+      Object.assign(clusterTask, { show: true, kind, stage: '', elapsed: 0, steps: [] })
     }
     try {
       let data = null
@@ -86,9 +99,9 @@ export function useCluster(p) {
         if (!quiet) showToast(data.msg || (data.ok ? t('操作成功') : t('操作失败')), !!data.ok, data.detail)
         return data
       }
-      return await pollClusterTask(data ? data.id : null, quiet)
+      return await pollClusterTask(data ? data.id : null, quiet, seq)
     } finally {
-      clusterBusy.value = ''
+      if (seq === runSeq) clusterBusy.value = ''
       if (overlay) {
         clusterTask.show = false
         busyKey.value = ''
@@ -103,15 +116,16 @@ export function useCluster(p) {
       const d = await fetchClusterTask()
       if (!d || !d.running || clusterBusy.value || busyKey.value) return
       const overlay = d.kind === 'add'
-      clusterBusy.value = ({ add: 'cluster-add', sync: 'cluster-sync', leave: 'cluster-leave' })[d.kind] || 'cluster-task'
+      const seq = ++runSeq
+      clusterBusy.value = ({ add: 'cluster-add', sync: 'cluster-sync', retry: 'cluster-sync', leave: 'cluster-leave' })[d.kind] || 'cluster-task'
       if (overlay) {
         busyKey.value = clusterBusy.value
-        Object.assign(clusterTask, { show: true, kind: d.kind, stage: d.stage || '', elapsed: Number(d.elapsed || 0) })
+        Object.assign(clusterTask, { show: true, kind: d.kind, stage: d.stage || '', elapsed: Number(d.elapsed || 0), steps: [] })
       }
       try {
-        await pollClusterTask(d.id)
+        await pollClusterTask(d.id, false, seq)
       } finally {
-        clusterBusy.value = ''
+        if (seq === runSeq) clusterBusy.value = ''
         if (overlay) {
           clusterTask.show = false
           busyKey.value = ''
@@ -211,13 +225,16 @@ export function useCluster(p) {
     return postAction('/cluster/dismiss', { id: p.id }, `cl-dm-${p.id}`)
   }
 
+  // 退出集群 stays clickable during 检查 / 重试 (it takes over); only other operations block it.
+  const leaveBlocked = computed(() => !!clusterBusy.value && !isPreemptable(clusterBusy.value))
+
   function leaveCluster() {
     openConfirmDialog({
       title: t('退出集群'),
       message: t('确定让本机退出集群？本机和所有成员之间的互联都会删除，其他成员之间的互联保持不变。'),
       confirmText: t('确认退出'),
       tone: 'rose',
-      onConfirm: () => runClusterTask('/cluster/leave', {}, 'cluster-leave', 'leave'),
+      onConfirm: () => runClusterTask('/cluster/leave', {}, 'cluster-leave', 'leave', { preempt: true }),
     })
   }
 
@@ -239,6 +256,7 @@ export function useCluster(p) {
     leaveCluster,
     clusterTask,
     clusterBusy,
+    leaveBlocked,
     resumeClusterTaskIfRunning,
     dismissPending,
     retryClusterMember,

@@ -1,5 +1,6 @@
 <script setup>
 import { t } from '../i18n.js'
+import CgSpinner from '../CgSpinner.vue'
 import { usePanel } from '../composables/usePanel.js'
 
 const {
@@ -64,6 +65,7 @@ const {
   scrollActiveNavIntoView,
   busyKey,
   clusterBusy,
+  leaveBlocked,
   copiedKey,
   langOpen,
   langMenuStyle,
@@ -310,7 +312,7 @@ const {
                       :aria-busy="clusterBusy === 'cluster-sync' ? 'true' : undefined"
                       @click="syncCluster()"
                       class="-my-1 h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-semibold bg-white hover:bg-sky-50 text-slate-700 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer shrink-0"
-                    ><span v-if="clusterBusy === 'cluster-sync'" class="cg-spin cg-spin-sm" aria-hidden="true"></span>{{ clusterBusy === 'cluster-sync' ? t('检查中…') : t('检查') }}</button>
+                    ><CgSpinner v-if="clusterBusy === 'cluster-sync'" :size="13" />{{ clusterBusy === 'cluster-sync' ? t('检查中…') : t('检查') }}</button>
                   </div>
                   <div
                     v-if="state.cluster.members.length === 0 && state.cluster.pending.length === 0"
@@ -344,13 +346,13 @@ const {
                           :disabled="!!busyKey || !!clusterBusy"
                           @click="retryClusterMember(m)"
                           class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-slate-700 bg-white hover:bg-sky-50 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer"
-                        ><span v-if="clusterBusy === `cl-rt-${m.id}`" class="cg-spin cg-spin-sm" aria-hidden="true"></span>{{ clusterBusy === `cl-rt-${m.id}` ? t('重试中…') : t('重试') }}</button>
+                        ><CgSpinner v-if="clusterBusy === `cl-rt-${m.id}`" :size="13" />{{ clusterBusy === `cl-rt-${m.id}` ? t('重试中…') : t('重试') }}</button>
                         <button
                           type="button"
                           :disabled="!!busyKey || !!clusterBusy"
                           @click="removeClusterMember(m)"
                           class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
-                        ><span v-if="clusterBusy === `cl-rm-${m.id}`" class="cg-spin cg-spin-sm" aria-hidden="true"></span>{{ clusterBusy === `cl-rm-${m.id}` ? t('移除中…') : t('移除') }}</button>
+                        ><CgSpinner v-if="clusterBusy === `cl-rm-${m.id}`" :size="13" inherit />{{ clusterBusy === `cl-rm-${m.id}` ? t('移除中…') : t('移除') }}</button>
                       </div>
                     </div>
                     <div v-for="p in state.cluster.pending" :key="'p-' + p.id" class="p-4 flex items-center justify-between gap-3">
@@ -368,7 +370,7 @@ const {
                         :disabled="!!busyKey || !!clusterBusy"
                         @click="syncCluster()"
                         class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-slate-700 bg-white hover:bg-sky-50 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer"
-                      ><span v-if="clusterBusy === 'cluster-sync'" class="cg-spin cg-spin-sm" aria-hidden="true"></span>{{ clusterBusy === 'cluster-sync' ? t('重试中…') : t('重试') }}</button>
+                      ><CgSpinner v-if="clusterBusy === 'cluster-sync'" :size="13" />{{ clusterBusy === 'cluster-sync' ? t('重试中…') : t('重试') }}</button>
                       <button
                         type="button"
                         :disabled="!!busyKey || !!clusterBusy"
@@ -382,10 +384,10 @@ const {
                   <div v-if="state.cluster.members.length" class="flex justify-end">
                     <button
                       type="button"
-                      :disabled="!!busyKey || !!clusterBusy"
+                      :disabled="!!busyKey || leaveBlocked"
                       @click="leaveCluster"
                       class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
-                    ><span v-if="clusterBusy === 'cluster-leave'" class="cg-spin cg-spin-sm" aria-hidden="true"></span>{{ clusterBusy === 'cluster-leave' ? t('正在退出…') : t('退出集群') }}</button>
+                    ><CgSpinner v-if="clusterBusy === 'cluster-leave'" :size="13" inherit />{{ clusterBusy === 'cluster-leave' ? t('正在退出…') : t('退出集群') }}</button>
                   </div>
                 </section>
               </div>

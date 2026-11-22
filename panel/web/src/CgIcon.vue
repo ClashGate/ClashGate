@@ -20,6 +20,8 @@ import {
   ChevronDown,
   Eye,
   EyeOff,
+  ExternalLink,
+  Info,
 } from 'lucide-vue-next'
 
 const icons = {
@@ -43,6 +45,8 @@ const icons = {
   chevDown: ChevronDown,
   eye: Eye,
   eyeOff: EyeOff,
+  external: ExternalLink,
+  info: Info,
 }
 
 defineProps({

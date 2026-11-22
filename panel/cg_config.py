@@ -953,7 +953,45 @@ def parse_custom_config_state(raw_yaml: str, env: dict = None) -> tuple:
 
 
 # ---------------------------------------------------------------- inbound model
-def build_inbound(kind: str, form: dict, env: dict) -> dict:
+SS_CIPHERS = ("aes-256-gcm", "aes-128-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305",
+              "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305")
+SUDOKU_AEADS = ("chacha20-poly1305", "aes-128-gcm")
+SUDOKU_TABLES = ("prefer_ascii", "prefer_entropy")
+
+
+def _adv_reader(form: dict, advanced: bool):
+    """1.44, custom server: the options the safe defaults lock (passwords, cipher, UUID ...) may be typed
+    in the add-node form (adv_* fields). Blank or not in custom mode: the default, as before."""
+    def adv(key: str, check=None, err: str = "") -> str:
+        v = str(form.get("adv_" + key) or "").strip() if advanced else ""
+        if v and check is not None and not check(v):
+            raise ValueError(err or f"参数 {key} 无效")
+        return v
+    return adv
+
+
+def _ok_secret(v: str) -> bool:
+    return 1 <= len(v) <= 128 and not re.search(r"\s", v)
+
+
+def _ok_user(v: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z0-9._-]{1,32}", v))
+
+
+def _ok_uuid(v: str) -> bool:
+    try:
+        uuidlib.UUID(v)
+        return True
+    except ValueError:
+        return False
+
+
+def _ss2022_key_len(cipher: str) -> int:
+    return 16 if cipher == "2022-blake3-aes-128-gcm" else 32
+
+
+def build_inbound(kind: str, form: dict, env: dict, advanced: bool = False) -> dict:
+    adv = _adv_reader(form, advanced)
     if kind == "shadowqiuc":
         kind = "shadowquic"
     elif kind == "soduku":
@@ -1005,57 +1043,80 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
 
     if kind == "vless-reality":
         sni = resolve_sni(form)
-        priv, pub = reality_keypair()
-        uid, sid = str(uuidlib.uuid4()), secrets.token_hex(4)
-        dec, enc = vless_x25519_keypair()
+        priv = adv("reality_key", lambda v: bool(re.fullmatch(r"[A-Za-z0-9_-]{43}=?", v)),
+                   "Reality 私钥格式无效（应为 43 位 base64url）")
+        if priv:
+            try:
+                pub = x25519_pub_from_priv(priv)
+            except Exception:
+                raise ValueError("Reality 私钥无效") from None
+        else:
+            priv, pub = reality_keypair()
+        uid = adv("uuid", _ok_uuid, "UUID 格式无效") or str(uuidlib.uuid4())
+        sid = adv("short_id", lambda v: bool(re.fullmatch(r"(?:[0-9a-fA-F]{2}){1,8}", v)),
+                  "Short ID 应为 2-16 位十六进制（偶数位）").lower() or secrets.token_hex(4)
+        use_enc = adv("vless_enc") != "off"
+        dec, enc = vless_x25519_keypair() if use_enc else ("", "")
         listener = {**base, "type": "vless", "udp": True,
                     "users": [{"username": "user", "uuid": uid, "flow": "xtls-rprx-vision"}],
-                    "decryption": dec,
+                    **({"decryption": dec} if use_enc else {}),
                     "reality-config": {"dest": f"{sni}:443", "private-key": priv,
                                        "short-id": [sid], "server-names": [sni]}}
         client = {"name": label, "type": "vless", "server": ip, "port": port,
                   "uuid": uid, "tls": True, "flow": "xtls-rprx-vision", "client-fingerprint": "safari",
-                  "encryption": enc,
+                  **({"encryption": enc} if use_enc else {}),
                   "reality-opts": {"public-key": pub, "short-id": sid},
                   "network": "tcp", "udp": True, "servername": sni}
 
     elif kind == "shadowsocks":
-        cipher = "aes-256-gcm"
-        pw = secrets.token_urlsafe(16)
+        cipher = adv("cipher", lambda v: v in SS_CIPHERS, "不支持的加密方式") or "aes-256-gcm"
+        if cipher.startswith("2022-"):
+            # 2022 ciphers need a base64 key of the cipher's key length
+            def ok_key(v, n=_ss2022_key_len(cipher)):
+                try:
+                    return len(base64.b64decode(v, validate=True)) == n
+                except Exception:
+                    return False
+            pw = adv("password", ok_key, f"{cipher} 的密码必须是 {_ss2022_key_len(cipher)} 字节密钥的 base64") \
+                or base64.b64encode(secrets.token_bytes(_ss2022_key_len(cipher))).decode()
+        else:
+            pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(16)
         listener = {"name": name, "type": "shadowsocks", "udp": True, "port": port,
                     "listen": "0.0.0.0", "password": pw, "cipher": cipher}
         client = {"name": label, "type": "ss", "server": ip, "port": port,
                   "cipher": cipher, "password": pw, "udp": True}
 
     elif kind == "hysteria2":
-        pw = secrets.token_urlsafe(18)
-        obfs_pw = secrets.token_urlsafe(16)
+        pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(18)
+        use_obfs = adv("obfs") != "off"
+        obfs_pw = (adv("obfs_password", _ok_secret, "混淆密码无效（1-128 位，不能有空格）")
+                   or secrets.token_urlsafe(16)) if use_obfs else ""
+        obfs = {"obfs": "salamander", "obfs-password": obfs_pw} if use_obfs else {}
         listener = {**base, "type": "hysteria2", "users": {"user": pw},
                     "certificate": CERT, "private-key": KEY, "alpn": ["h3"],
-                    "ignore-client-bandwidth": False,
-                    "obfs": "salamander", "obfs-password": obfs_pw}
+                    "ignore-client-bandwidth": False, **obfs}
         client = {"name": label, "type": "hysteria2", "server": domain, "port": port,
-                  "password": pw, "sni": domain, "alpn": ["h3"],
-                  "obfs": "salamander", "obfs-password": obfs_pw, "udp": True}
+                  "password": pw, "sni": domain, "alpn": ["h3"], **obfs, "udp": True}
 
     elif kind == "snell":
         if not mihomo_supports_snell_v6():
             raise ValueError(f"Snell V6 需要 Mihomo 内核 v{SNELL_V6_MIN_CORE} 或更高版本，请先到「设置」页点「更新内核」")
         # Snell v6 (Mihomo v1.19.34+): PSK-derived traffic shaping replaces simple-obfs,
         # so no obfs-opts; mode omitted = "default" on both sides.
-        psk = new_snell_psk()
+        psk = adv("psk", lambda v: bool(re.fullmatch(r"[A-Za-z0-9._~+/=-]{8,128}", v)),
+                  "PSK 无效（8-128 位字母、数字或 base64 字符）") or new_snell_psk()
         listener = {**base, "type": "snell", "psk": psk, "version": SNELL_VERSION, "udp": True}
         client = {"name": label, "type": "snell", "server": ip, "port": port,
                   "psk": psk, "version": SNELL_VERSION, "udp": True}
 
     elif kind == "trusttunnel":
-        user = form.get("tt_user", "").strip() or "user"
+        user = adv("username", _ok_user, "用户名无效（1-32 位字母、数字及 . _ -）") or form.get("tt_user", "").strip() or "user"
         if not re.fullmatch(r"[A-Za-z0-9._-]{1,32}", user):
             raise ValueError("TrustTunnel 用户名无效（1-32 位字母、数字及 . _ -）")
         cc = (form.get("tt_cc") or "bbr").strip()
         if cc not in ("bbr", "cubic"):
             cc = "bbr"
-        pw = secrets.token_urlsafe(18)
+        pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(18)
         listener = {**base, "type": "trusttunnel", "users": [{"username": user, "password": pw}],
                     "certificate": CERT, "private-key": KEY, "network": ["tcp", "udp"],
                     "congestion-controller": cc}
@@ -1064,8 +1125,8 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
                   "udp": True}
 
     elif kind == "http":
-        user = (form.get("http_user") or "user").strip()
-        pw = secrets.token_urlsafe(14)
+        user = adv("username", _ok_user, "用户名无效（1-32 位字母、数字及 . _ -）") or (form.get("http_user") or "user").strip()
+        pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(14)
         use_tls = form.get("http_tls") == "1"
         listener = {**base, "type": "http", "users": [{"username": user, "password": pw}]}
         if use_tls:
@@ -1078,8 +1139,8 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
             client["sni"] = domain
 
     elif kind == "socks":
-        user = (form.get("socks_user") or "user").strip()
-        pw = secrets.token_urlsafe(14)
+        user = adv("username", _ok_user, "用户名无效（1-32 位字母、数字及 . _ -）") or (form.get("socks_user") or "user").strip()
+        pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(14)
         use_tls = form.get("socks_tls") == "1"
         listener = {**base, "type": "socks", "udp": True, "users": [{"username": user, "password": pw}]}
         if use_tls:
@@ -1090,9 +1151,9 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
                   "username": user, "password": pw, "tls": use_tls, "udp": True}
 
     elif kind == "anytls":
-        user = (form.get("anytls_user") or "user").strip() or "user"
+        user = adv("username", _ok_user, "用户名无效（1-32 位字母、数字及 . _ -）") or (form.get("anytls_user") or "user").strip() or "user"
         fp = random.choice(ANYTLS_FP_POOL)
-        pw = secrets.token_urlsafe(18)
+        pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(18)
         listener = {**base, "type": "anytls", "users": {user: pw},
                     "certificate": CERT, "private-key": KEY,
                     "padding-scheme": random_anytls_padding()}
@@ -1101,18 +1162,18 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
                   "udp": True}
 
     elif kind == "mieru":
-        user = (form.get("mieru_user") or "user").strip() or "user"
+        user = adv("username", _ok_user, "用户名无效（1-32 位字母、数字及 . _ -）") or (form.get("mieru_user") or "user").strip() or "user"
         transport = (form.get("mieru_transport") or "TCP").strip().upper()
         if transport not in ("TCP", "UDP"):
             transport = "TCP"
-        pw = secrets.token_urlsafe(16)
+        pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(16)
         listener = {**base, "type": "mieru", "transport": transport, "users": {user: pw}}
         client = {"name": label, "type": "mieru", "server": ip, "port": port,
                   "transport": transport, "username": user, "password": pw, "udp": True}
 
     elif kind == "sudoku":
-        aead = "chacha20-poly1305"
-        table = "prefer_ascii"
+        aead = adv("aead", lambda v: v in SUDOKU_AEADS, "不支持的 AEAD 加密") or "chacha20-poly1305"
+        table = adv("table", lambda v: v in SUDOKU_TABLES, "不支持的表格类型") or "prefer_ascii"
         pure_dl = True
         priv_k, pub_k = sudoku_keypair()
         listener = {**base, "type": "sudoku", "key": pub_k, "aead-method": aead,
@@ -1123,8 +1184,8 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
                   "table-type": table, "enable-pure-downlink": pure_dl, "udp": True}
 
     elif kind == "tuic":
-        uid = str(uuidlib.uuid4())
-        pw = secrets.token_urlsafe(18)
+        uid = adv("uuid", _ok_uuid, "UUID 格式无效") or str(uuidlib.uuid4())
+        pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(18)
         cc = (form.get("tuic_cc") or "bbr").strip()
         if cc not in ("bbr", "cubic", "new_reno"):
             cc = "bbr"
@@ -1138,12 +1199,12 @@ def build_inbound(kind: str, form: dict, env: dict) -> dict:
                   "reduce-rtt": True, "udp": True}
 
     else:  # shadowquic
-        user = (form.get("sq_user") or "user").strip() or "user"
+        user = adv("username", _ok_user, "用户名无效（1-32 位字母、数字及 . _ -）") or (form.get("sq_user") or "user").strip() or "user"
         jls_host = resolve_sni(form)
         jls_addr = f"{jls_host}:443"
         cc = "bbr"
         zero_rtt = True
-        pw = secrets.token_urlsafe(18)
+        pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(18)
         listener = {**base, "type": "shadowquic",
                     "users": [{"username": user, "password": pw}],
                     "jls-upstream": {"addr": jls_addr},

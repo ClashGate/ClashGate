@@ -345,5 +345,26 @@ const {
               </button>
             </div>
           </section>
+
+          <!-- 1.44: 关于 (version, recent changes, credits) -->
+          <section id="settings-about-card" class="cg-surface rounded-2xl flex lg:col-span-2">
+            <button
+              type="button"
+              class="w-full p-5 sm:p-6 text-start rounded-2xl hover:bg-[#f7f9fc] transition cursor-pointer flex items-center justify-between gap-4"
+              @click="selectTab('about')"
+            >
+              <span class="min-w-0 flex items-center gap-3">
+                <img src="/assets/logo.png" alt="" class="w-9 h-9 rounded-xl shrink-0" />
+                <span class="min-w-0 block">
+                  <span class="block text-base font-bold text-slate-900 tracking-tight">{{ t('关于 ClashGate') }}</span>
+                  <span class="block text-xs text-slate-500 mt-1 leading-relaxed">{{ t('版本、最近的更新和鸣谢。') }}</span>
+                </span>
+              </span>
+              <span class="cg-tool shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border bg-white border-slate-200 text-slate-800 inline-flex items-center gap-1">
+                <span dir="ltr">v{{ state.version }}</span>
+                <CgIcon name="chevron" :size="14" class="rtl:rotate-180" />
+              </span>
+            </button>
+          </section>
         </div>
 </template>

@@ -1,6 +1,7 @@
 <script setup>
 import { t, lang, setLang, LANGS, langLabel } from './i18n.js'
 import CgIcon from './CgIcon.vue'
+import CgSpinner from './CgSpinner.vue'
 import XmasArt from './XmasArt.vue'
 import { theme, setTheme } from './theme.js'
 import { usePanel } from './composables/usePanel.js'
@@ -13,6 +14,7 @@ import ReadablePage from './pages/ReadablePage.vue'
 import AdvancedPage from './pages/AdvancedPage.vue'
 import CertsPage from './pages/CertsPage.vue'
 import SettingsPage from './pages/SettingsPage.vue'
+import AboutPage from './pages/AboutPage.vue'
 
 const {
   boot,
@@ -395,14 +397,22 @@ const {
           aria-labelledby="cluster-task-title"
           aria-describedby="cluster-task-stage"
           tabindex="-1"
-          class="cg-modal-panel w-full max-w-sm bg-white rounded-2xl border border-slate-200/90 p-6 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18)] outline-none"
+          class="cg-modal-panel w-full max-w-sm bg-white rounded-2xl border border-slate-200/90 p-6 overflow-hidden shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18)] outline-none"
         >
+          <div class="cg-progress -mx-6 -mt-6 mb-5 rounded-none rounded-t-2xl" aria-hidden="true"></div>
           <div class="flex items-center gap-3">
-            <span class="cg-spin" aria-hidden="true"></span>
             <h3 id="cluster-task-title" class="flex-1 text-base font-bold text-slate-900 tracking-tight">{{ t('正在添加到集群') }}</h3>
             <span class="shrink-0 text-xs text-slate-500 tabular-nums">{{ t('{s} 秒', { s: clusterTask.elapsed }) }}</span>
           </div>
-          <p id="cluster-task-stage" class="mt-2 min-h-[20px] ps-8 text-sm text-slate-600 cg-wrap" aria-live="polite">{{ clusterTask.stage }}</p>
+          <!-- Steps so far: done ones with a check, the current one with the spinner (last few only). -->
+          <div id="cluster-task-stage" class="cg-steps mt-4" aria-live="polite">
+            <div v-for="(s, i) in clusterTask.steps.slice(-3)" :key="'done-' + i + s" class="cg-step is-done">
+              <span class="cg-step-mark"><CgIcon name="check" :size="12" /></span><span class="cg-wrap">{{ s }}</span>
+            </div>
+            <div class="cg-step is-now">
+              <span class="cg-step-mark"><CgSpinner :size="16" /></span><span class="cg-wrap">{{ clusterTask.stage || t('正在连接…') }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </Transition>
@@ -642,7 +652,7 @@ const {
           >
             <CgIcon :name="state.custom_server_enabled ? 'server' : 'lock'" />{{ t('自定义服务端') }}
           </button>
-          <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'settings' }" @click="selectTab('settings')">
+          <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'settings' || activeTab === 'about' }" @click="selectTab('settings')">
             <CgIcon name="settings" />{{ t('设置') }}
           </button>
         </nav>
@@ -924,7 +934,7 @@ const {
         >
           <CgIcon :name="state.custom_server_enabled ? 'server' : 'lock'" :size="15" />{{ t('自定义服务端') }}
         </button>
-        <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'settings' }" @click="selectTab('settings')">
+        <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'settings' || activeTab === 'about' }" @click="selectTab('settings')">
           <CgIcon name="settings" :size="15" />{{ t('设置') }}
         </button>
       </nav>
@@ -953,6 +963,7 @@ const {
 
       <!-- Settings -->
         <SettingsPage v-else-if="activeTab === 'settings'" key="settings" />
+        <AboutPage v-else-if="activeTab === 'about'" key="about" />
       </Transition>
     </main>
     <div v-if="isXmas" class="cg-xmas-foot" aria-hidden="true"><XmasArt kind="scene" /></div>

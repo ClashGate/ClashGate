@@ -1,5 +1,6 @@
 <script setup>
 import { t } from '../i18n.js'
+import CgSpinner from '../CgSpinner.vue'
 import { usePanel } from '../composables/usePanel.js'
 
 const {
@@ -72,6 +73,7 @@ const {
   toggleLangMenu,
   pickLang,
   showToast,
+  ADV_FIELDS,
   PROTOCOLS,
   DEFAULT_NAMES,
   PROTOCOL_MAP,
@@ -379,11 +381,11 @@ const {
             </div>
           </section>
 
-            <!-- Right: Locked-Default Add Node Form -->
-            <section class="cg-home-add cg-surface rounded-2xl p-5 sm:p-6">
+            <!-- Right, under Zashboard (1.44): Add Node Form -->
+            <section class="cg-home-add cg-surface rounded-2xl p-5 sm:p-6" :class="{ 'is-first': state.mode === 'no-cert' }">
               <div class="flex items-center justify-between gap-2 mb-4">
                 <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('添加节点') }}</h2>
-                <span class="px-2.5 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                <span v-if="!state.custom_server_enabled" class="px-2.5 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60">
                   {{ t('安全默认策略') }}
                 </span>
               </div>
@@ -441,7 +443,7 @@ const {
 
                 <!-- Protocol options + locked note, stacked over invisible copies for every protocol (stable height). -->
                 <div class="cg-stack">
-                  <div v-for="p in PROTOCOLS" :key="'opt-' + p.value" class="cg-stack-ghost space-y-4" aria-hidden="true">
+                  <div v-for="p in (state.custom_server_enabled ? [] : PROTOCOLS)" :key="'opt-' + p.value" class="cg-stack-ghost space-y-4" aria-hidden="true">
                     <div v-if="PROTOCOL_HAS_OPTION.has(p.value)">
                       <div class="block text-xs font-semibold mb-1.5">&nbsp;</div>
                       <div class="h-10 border border-transparent"></div>
@@ -534,8 +536,33 @@ const {
                       </div>
                     </template>
 
-                    <!-- Locked security defaults notice -->
-                    <div class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
+                    <!-- 1.44, custom server: the options the safe defaults lock can be typed in; blank = default -->
+                    <div v-if="state.custom_server_enabled && (ADV_FIELDS[inboundForm.kind] || []).length" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div v-for="f in ADV_FIELDS[inboundForm.kind]" :key="inboundForm.kind + f.key" :class="{ 'sm:col-span-2': f.wide }">
+                        <label :for="'adv-' + f.key" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t(f.desc) }}</label>
+                        <select
+                          v-if="f.options"
+                          :id="'adv-' + f.key"
+                          v-model="inboundForm.adv[f.key]"
+                          class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
+                        >
+                          <option v-for="o in f.options" :key="o.value" :value="o.value">{{ t(o.desc) }}</option>
+                        </select>
+                        <input
+                          v-else
+                          :id="'adv-' + f.key"
+                          v-model="inboundForm.adv[f.key]"
+                          dir="ltr"
+                          autocomplete="off"
+                          spellcheck="false"
+                          :placeholder="t('留空自动生成')"
+                          class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <!-- Locked security defaults notice (hidden in custom server mode) -->
+                    <div v-if="!state.custom_server_enabled" class="rounded-xl bg-[#f1f6fe] border border-emerald-200/70 px-3.5 py-2.5 text-xs text-emerald-900 leading-relaxed">
                       {{ t(currentProtocol.lockedNote) }}
                     </div>
                   </div>
@@ -544,9 +571,9 @@ const {
                 <button
                   type="submit"
                   :disabled="busyKey === 'add-inbound'"
-                  class="cg-btn-primary w-full h-10 mt-1 rounded-xl disabled:opacity-50 text-sm font-semibold cursor-pointer"
+                  class="cg-btn-primary w-full h-10 mt-1 rounded-xl disabled:opacity-50 text-sm font-semibold cursor-pointer inline-flex items-center justify-center gap-2"
                 >
-                  {{ busyKey === 'add-inbound' ? t('正在添加…') : t('添加入站节点') }}
+                  <CgSpinner v-if="busyKey === 'add-inbound'" :size="14" light />{{ busyKey === 'add-inbound' ? t('正在添加…') : t('添加入站节点') }}
                 </button>
               </form>
             </section>

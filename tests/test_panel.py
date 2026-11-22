@@ -83,7 +83,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -358,6 +358,82 @@ console.log(JSON.stringify(out))
         self.assertIn("cgSlotAfterUpgrade(", body)
         self.assertRegex(vue, r"const panelHasUpdate = computed\(\(\) =>\s*cgShowUpdate\(panelUpdate\.value, state\.version, "
                               r"upgradeInProgress\.value \|\| busyKey\.value === '/action/upgrade-self'\)")
+
+
+class CustomInboundOptionsTest(unittest.TestCase):
+    """1.44: with custom server on, the add-node form also shows the options the safe defaults lock
+    (passwords, cipher, UUID ...). Blank: the default, as before; not in custom mode: ignored."""
+
+    def setUp(self):
+        self.env = P.read_env()
+
+    def build(self, kind, advanced=True, **adv):
+        form = {"port": "", "name": ""}
+        form.update({"adv_" + k: v for k, v in adv.items()})
+        return P.build_inbound(kind, form, self.env, advanced=advanced)
+
+    def test_typed_options_are_used(self):
+        ss = self.build("shadowsocks", cipher="chacha20-ietf-poly1305", **{"pass" + "word": "my-pass"})
+        self.assertEqual((ss["listener"]["cipher"], ss["listener"]["password"]), ("chacha20-ietf-poly1305", "my-pass"))
+        self.assertEqual((ss["client"]["cipher"], ss["client"]["password"]), ("chacha20-ietf-poly1305", "my-pass"))
+        k = self.build("shadowsocks", cipher="2022-blake3-aes-128-gcm")   # key generated with the right length
+        import base64
+        self.assertEqual(len(base64.b64decode(k["listener"]["password"])), 16)
+        hy = self.build("hysteria2", obfs="off", **{"pass" + "word": "hy-pass"})
+        self.assertEqual(hy["listener"]["users"], {"user": "hy-pass"})
+        self.assertNotIn("obfs", hy["listener"])
+        self.assertNotIn("obfs", hy["client"])
+        uid = "11111111-2222-4333-8444-555555555555"
+        vr = self.build("vless-reality", uuid=uid, short_id="ABCD", vless_enc="off")
+        self.assertEqual((vr["listener"]["users"][0]["uuid"], vr["listener"]["reality-config"]["short-id"]), (uid, ["abcd"]))
+        self.assertNotIn("decryption", vr["listener"])
+        self.assertNotIn("encryption", vr["client"])
+        so = self.build("socks", username="alice", **{"pass" + "word": "pw-alice"})
+        self.assertEqual(so["listener"]["users"], [{"username": "alice", "password": "pw-alice"}])
+        su = self.build("sudoku", aead="aes-128-gcm", table="prefer_entropy")
+        self.assertEqual((su["listener"]["aead-method"], su["listener"]["table-type"]), ("aes-128-gcm", "prefer_entropy"))
+
+    def test_blank_or_not_custom_keeps_the_defaults(self):
+        ss = self.build("shadowsocks")
+        self.assertEqual(ss["listener"]["cipher"], "aes-256-gcm")
+        self.assertGreaterEqual(len(ss["listener"]["password"]), 16)
+        ss = self.build("shadowsocks", advanced=False, cipher="chacha20-ietf-poly1305", **{"pass" + "word": "x"})
+        self.assertEqual(ss["listener"]["cipher"], "aes-256-gcm")
+        self.assertNotEqual(ss["listener"]["password"], "x")
+        hy = self.build("hysteria2", advanced=False, obfs="off")
+        self.assertEqual(hy["listener"]["obfs"], "salamander")
+
+    def test_bad_values_are_refused(self):
+        for kind, adv in (("shadowsocks", {"cipher": "rc4"}), ("shadowsocks", {"password": "a b"}),
+                          ("shadowsocks", {"cipher": "2022-blake3-aes-256-gcm", "password": "short"}),
+                          ("vless-reality", {"uuid": "nope"}), ("vless-reality", {"short_id": "xyz"}),
+                          ("vless-reality", {"reality_key": "bad"}), ("socks", {"username": "a b"}),
+                          ("snell", {"psk": "short"}), ("sudoku", {"aead": "rc4"})):
+            with self.assertRaises(ValueError, msg=(kind, adv)):
+                self.build(kind, **adv)
+
+    def test_form_shows_the_locked_options_in_custom_mode(self):
+        src = os.path.join(REPO, "panel/web/src")
+        page = read(os.path.join(src, "pages/InboundsPage.vue"))
+        badge = page[:page.index("t('安全默认策略')")][-200:]
+        self.assertIn('v-if="!state.custom_server_enabled"', badge)
+        self.assertIn('v-if="!state.custom_server_enabled" class="rounded-xl bg-[#f1f6fe]', page)   # locked note
+        self.assertIn('v-if="state.custom_server_enabled && (ADV_FIELDS[inboundForm.kind] || []).length"', page)
+        self.assertNotIn("submitAddRaw", page)
+        self.assertNotIn("cg-seg", page)
+        ib = read(os.path.join(src, "composables/useInbounds.js"))
+        self.assertIn("if (state.custom_server_enabled) {", ib)
+        self.assertIn("payload['adv_' + f.key] = v", ib)
+        kinds = set(re.findall(r"^    '?([a-z0-9-]+)'?: \[", ib[ib.index("const ADV_FIELDS"):ib.index("const DEFAULT_NAMES")], re.M))
+        self.assertEqual(kinds, {p for p in re.findall(r"value: '([a-z0-9-]+)',\n      label", ib)})   # every protocol
+        h = read(os.path.join(REPO, "panel/cg_http.py"))
+        self.assertIn('advanced=bool(load_panel_settings().get("custom_server_enabled"))', h)
+        self.assertNotIn("/inbounds/add-raw", h)
+        st = read(os.path.join(src, "composables/useSettings.js"))
+        tog = st[st.index("async function toggleCustomServer"):]
+        tog = tog[:tog.index("\n  }\n")]
+        self.assertIn("if (!next) {", tog)   # always asks before turning custom server off
+        self.assertIn("恢复默认服务端模板", tog)
 
 
 class ClusterTest(unittest.TestCase):
@@ -990,6 +1066,100 @@ class ClusterTest(unittest.TestCase):
         h.do_cluster_sync({}, {})
         self.assertEqual(got, {"ok": True, "msg": "集群里还没有其他面板"})   # answers at once, with fresh state
 
+    def test_cluster_overlay_lists_the_steps(self):
+        """1.44: the add overlay has a progress bar and lists the steps done so far (CgSpinner)."""
+        src = os.path.join(REPO, "panel/web/src")
+        app = read(os.path.join(src, "App.vue"))
+        ov = app[app.index('id="cluster-task-overlay"'):]
+        ov = ov[:ov.index("</Transition>")]
+        for needle in ('class="cg-progress', "clusterTask.steps.slice(-3)", "<CgSpinner", 'class="cg-step is-now"'):
+            self.assertIn(needle, ov)
+        cl = read(os.path.join(src, "composables/useCluster.js"))
+        self.assertIn("clusterTask.steps.push(clusterTask.stage)", cl)
+        for f in ("App.vue", "pages/ClusterPage.vue", "pages/InboundsPage.vue"):
+            self.assertNotIn('class="cg-spin', read(os.path.join(src, f)), f)
+        self.assertIn("@keyframes cg-spinner-dash", read(os.path.join(src, "style.css")))
+
+    def test_about_page(self):
+        """1.44: 设置 -> 关于: version, a short changelog (current version marked) and the credits."""
+        src = os.path.join(REPO, "panel/web/src")
+        page = read(os.path.join(src, "pages/AboutPage.vue"))
+        for url in ("https://github.com/MetaCubeX/mihomo", "https://github.com/XTLS/Xray-core"):
+            self.assertIn(f"url: '{url}'", page)
+        self.assertIn('target="_blank"', page)
+        self.assertIn('rel="noopener noreferrer"', page)
+        first = page[page.index("const CHANGELOG = ["):].split("\n")[1]
+        self.assertTrue(first.strip().startswith(f"{{ v: '{P.VERSION}'"), first)   # newest first: this version
+        self.assertLessEqual(page.count("{ v: '"), 8)   # short
+        panel = read(os.path.join(src, "composables/usePanel.js"))
+        self.assertIn("'about'", panel[panel.index("const VALID_TABS"):panel.index("const TAB_PATHS")])
+        self.assertIn("about: '/about'", panel)
+        self.assertIn("selectTab('about')", read(os.path.join(src, "pages/SettingsPage.vue")))
+        self.assertIn("<AboutPage v-else-if=\"activeTab === 'about'\"", read(os.path.join(src, "App.vue")))
+        self.assertIn('if path == "/about":', read(os.path.join(REPO, "panel/cg_http.py")))
+
+    def test_home_layout_zashboard_right(self):
+        css = read(os.path.join(REPO, "panel/web/src/style.css"))
+        self.assertIn(".cg-home-zb { grid-column: 2; grid-row: 1; }", css)
+        self.assertIn(".cg-home-add { grid-column: 2; grid-row: 2; }", css)
+        self.assertIn(".cg-home-add.is-first { grid-row: 1 / span 2; }", css)
+
+    def test_leave_interrupts_a_running_check(self):
+        """1.44: 退出集群 during 检查 is not refused: the check stops at its next step and the leave runs."""
+        h = object.__new__(P.Panel)
+        h.headers = {"X-Requested-With": "fetch"}
+        sent, got = [], {}
+        h.send = lambda code, body, ctype="", headers=None, cache_key=None: sent.append((code, json.loads(body)))
+        h.build_client_state = lambda s, *a: {}
+        h.tr = lambda m: m
+        h.respond_mutation = lambda s, msg, ok=True, detail="": got.update(ok=ok, msg=msg)
+        go, steps = threading.Event(), []
+
+        def check():
+            P.cluster_stage("正在检查「东京-1」")
+            go.wait(5)
+            steps.append("after-wait")
+            P.cluster_stage("正在检查「大阪」")   # cancelled here
+            steps.append("not reached")
+            return "集群成员都在线，互联完整", True
+
+        h._cluster_job({}, check, {"async": "1"}, "sync")
+        check_id = sent[-1][1]["id"]
+        for _ in range(50):
+            if P._CLUSTER_TASK.get("stage"):
+                break
+            time.sleep(0.02)
+        h._cluster_job({}, lambda: ("已添加", True), {"async": "1"}, "add")   # other operations still wait
+        self.assertEqual(got["msg"], "另一个集群操作正在进行，请稍候再试")
+        h._cluster_job({}, lambda: ("本机已退出集群，正在后台通知其他成员", True), {"async": "1"}, "leave")
+        leave_id = sent[-1][1]["id"]
+        self.assertEqual((sent[-1][0], sent[-1][1]["running"]), (200, True))
+        self.assertNotEqual(leave_id, check_id)
+        self.assertTrue(P._CLUSTER_CANCEL.is_set())
+        for _ in range(100):
+            h.cluster_task_status({})
+            if not sent[-1][1]["running"]:
+                break
+            time.sleep(0.02)
+        self.assertEqual((sent[-1][1]["id"], sent[-1][1]["msg"]), (leave_id, "本机已退出集群，正在后台通知其他成员"))
+        go.set()
+        for _ in range(100):
+            if P._CLUSTER_OP_LOCK.acquire(blocking=False):
+                break
+            time.sleep(0.02)
+        else:
+            self.fail("the interrupted check never released the lock")
+        P._CLUSTER_OP_LOCK.release()
+        self.assertEqual(steps, ["after-wait"])
+        h.cluster_task_status({})
+        self.assertEqual(sent[-1][1]["id"], leave_id)   # the check's end did not overwrite the leave
+        P._CLUSTER_CANCEL.clear()
+        page = read(os.path.join(REPO, "panel/web/src/pages/ClusterPage.vue"))
+        btn = page[:page.index("t('退出集群') }}</button>")]
+        self.assertIn(':disabled="!!busyKey || leaveBlocked"', btn[btn.rindex("<button"):])
+        cl = read(os.path.join(REPO, "panel/web/src/composables/useCluster.js"))
+        self.assertIn("'cluster-leave', 'leave', { preempt: true }", cl)
+
     def test_node_name_validation(self):
         for name in NODE_NAMES_OK:
             self.assertEqual(P.validate_node_name(name), name.strip(), name)
@@ -1330,7 +1500,7 @@ class ClusterTest(unittest.TestCase):
         ov = app[app.index('id="cluster-task-overlay"'):]
         ov = ov[:ov.index("</Transition>")]
         for needle in ('v-if="clusterTask.show"', "v-cg-dialog", 'role="alertdialog"', 'aria-busy="true"',
-                       "clusterTask.stage", "clusterTask.elapsed", 'class="cg-spin"'):
+                       "clusterTask.stage", "clusterTask.elapsed", "<CgSpinner"):
             self.assertIn(needle, ov)
         self.assertNotIn("✕", ov)   # nothing to close: it ends with the operation
         self.assertIn("t('正在添加到集群')", ov)
@@ -1343,7 +1513,7 @@ class ClusterTest(unittest.TestCase):
         self.assertRegex(cl, r"runClusterTask\(\s*'/cluster/add'[^)]*\{ overlay: true \}")
         page = read(os.path.join(src, "pages/ClusterPage.vue"))
         for key in ("'cluster-sync'", "'cluster-leave'", "`cl-rt-${m.id}`", "`cl-rm-${m.id}`"):
-            self.assertIn(f'<span v-if="clusterBusy === {key}" class="cg-spin cg-spin-sm"', page, key)
+            self.assertRegex(page, r'<CgSpinner v-if="clusterBusy === ' + re.escape(key) + r'" :size="13"', key)
         self.assertIn("resumeClusterTaskIfRunning()", read(os.path.join(src, "composables/usePanel.js")))
 
     def test_core_build_matches_the_cpu(self):

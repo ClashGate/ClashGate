@@ -623,7 +623,9 @@ def cluster_apply_staged() -> bool:
 def _cluster_commit(mutate) -> dict:
     """Under LOCK: load, mutate(st) (may raise), save, apply live; restore everything on failure.
     While deferring (cluster_batch, or a join / connect with defer=1) the change is only saved and staged."""
+    _cancel_check()
     with LOCK:
+        _cancel_check()
         backup = _snapshot_files((CLUSTER_JSON, FRAG_CLUSTER_PROXIES, FRAG_CLUSTER_LISTENERS))
         st = load_cluster()
         if _STAGED["on"]:   # what is live is still what it was before the first staged change
@@ -681,11 +683,16 @@ class cluster_batch:
     def __exit__(self, exc_type, exc, tb):
         if not self.outer:
             return False
+        if exc_type is not None and issubclass(exc_type, ClusterCancelled):
+            # 退出集群 took over: it drops every link and applies once; staged changes go with it
+            _CLUSTER_BATCH.defer = 0
+            _CLUSTER_BATCH.new, _CLUSTER_BATCH.touch = {}, set()
+            return False
         new = dict(getattr(_CLUSTER_BATCH, "new", {}) or {})
         touch = set(getattr(_CLUSTER_BATCH, "touch", set()) or set())
         try:
             if touch:
-                cluster_stage("正在让各面板的新配置生效")
+                _set_stage("正在让各面板的新配置生效")
             for inst in sorted(touch):
                 l = _link_by(load_cluster(), instance=inst)
                 if not l:
@@ -707,7 +714,7 @@ class cluster_batch:
             _CLUSTER_BATCH.new, _CLUSTER_BATCH.touch = {}, set()
         try:
             if _STAGED["on"]:
-                cluster_stage("本机正在让集群配置生效")
+                _set_stage("本机正在让集群配置生效")
             cluster_apply_staged()
         except Exception as e:
             for base, my_inst, key in new.values():   # do not leave half links on the other panels
@@ -779,8 +786,28 @@ _CLUSTER_TASK = {"id": 0, "running": False, "kind": "", "ok": None, "msg": "", "
 _CLUSTER_TASK_LOCK = threading.Lock()
 
 
+# 1.44: 退出集群 may cut a running 检查 / 重试 short. The leave sets _CLUSTER_CANCEL; the check's thread
+# (marked cancellable) stops at its next step or change (ClusterCancelled) without applying anything.
+_CLUSTER_CANCEL = threading.Event()
+
+
+class ClusterCancelled(Exception):
+    """The running check gave way to 退出集群."""
+
+
+def _cancel_check():
+    if getattr(_CLUSTER_BATCH, "cancellable", False) and _CLUSTER_CANCEL.is_set():
+        raise ClusterCancelled()
+
+
 def cluster_stage(text: str):
-    """Report what the running cluster operation is doing now (a no-op outside a page task)."""
+    """Report what the running cluster operation is doing now (a no-op outside a page task).
+    A cancelled check stops here (each step reports itself first)."""
+    _cancel_check()
+    _set_stage(text)
+
+
+def _set_stage(text: str):
     with _CLUSTER_TASK_LOCK:
         if _CLUSTER_TASK["running"]:
             _CLUSTER_TASK["stage"] = text
@@ -852,7 +879,7 @@ def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
                 cluster_http(base, "/api/cluster/leave", {"instance": my_inst, "key": key}, timeout=60)
             except ClusterError:
                 pass
-            if isinstance(e, ClusterError):
+            if isinstance(e, (ClusterError, ClusterCancelled)):
                 raise
             raise ClusterError(f"添加失败：{e}")
     finally:
@@ -1047,6 +1074,8 @@ def cluster_sync() -> dict:
     # 1.42: members that answered and still use a dedicated inbound here move to the shared one
     try:
         cluster_migrate_links(only=set(views))
+    except ClusterCancelled:
+        raise
     except Exception as e:
         sys.stderr.write(f"cluster: migration during 检查 failed: {e}\n")
 

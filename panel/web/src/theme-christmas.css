@@ -264,4 +264,5 @@ html[data-theme="christmas"] .cg-top::after {
 @media (prefers-reduced-motion: reduce) {
   .cg-xmas-snow { display: none; }
 }
-html[data-theme="christmas"] .cg-spin { border-color: #d8f0e0; border-top-color: var(--cgx-green); }
+html[data-theme="christmas"] .cg-spinner:not(.is-light) { color: var(--cgx-green); }
+html[data-theme="christmas"] .cg-progress::after { background: linear-gradient(90deg, transparent, var(--cgx-green) 45%, transparent); }
