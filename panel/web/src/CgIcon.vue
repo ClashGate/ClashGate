@@ -16,6 +16,8 @@ import {
   Waypoints,
   Network,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   Eye,
   EyeOff,
 } from 'lucide-vue-next'
@@ -37,6 +39,8 @@ const icons = {
   routing: Waypoints,
   cluster: Network,
   chevron: ChevronRight,
+  chevUp: ChevronUp,
+  chevDown: ChevronDown,
   eye: Eye,
   eyeOff: EyeOff,
 }

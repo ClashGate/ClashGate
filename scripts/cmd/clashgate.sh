@@ -24,6 +24,7 @@ Usage: clashgate [subcommand]
   sub               show the subscription link (certificate modes)
   reset-sub         change the subscription link; the old link stops working immediately
   reset-password    reset the panel password (random)
+  cert [domain]     change the domain and get a new certificate; nodes and the subscription link are regenerated
   restart           restart the core
   update            update core, scripts and panel
   log               show recent logs
@@ -48,6 +49,7 @@ ClashGate (clashgate) - команда управления прокси-сер�
   sub               показать ссылку подписки (режимы с сертификатом)
   reset-sub         сменить ссылку подписки; старая ссылка сразу перестаёт работать
   reset-password    сбросить пароль панели (случайный)
+  cert [домен]      сменить домен и получить новый сертификат; узлы и ссылка подписки создаются заново
   restart           перезапустить ядро
   update            обновить ядро, скрипты и панель
   log               показать последние журналы
@@ -71,6 +73,7 @@ ClashGate (clashgate) —— 代理服务端管理命令 (v$CS_VERSION)
   sub               查看订阅链接（证书模式）
   reset-sub         更换订阅链接，旧链接立即失效
   reset-password    重置面板密码（随机生成）
+  cert [域名]       更换域名并申请新证书，节点与订阅链接全部重新生成
   restart           重启内核
   update            更新内核、脚本与面板
   log               查看最近日志
@@ -443,6 +446,197 @@ do_reset_password() {
   printf '管理面板：%s\n用户名：admin\n新密码：%s\n' "$(panel_url)" "$PANEL_PASS"
 }
 
+# clashgate cert [域名]：换一个域名并重新申请证书。新证书就绪之前什么都不改；之后像重装一样
+# 退出集群、删除全部入站节点并生成新的默认 VLESS Reality 节点，订阅 token 与 Zashboard API 密钥一并更换。
+# 面板密码、面板端口、服务端出站与分流保持不变。
+CERT_BAK=""
+CERT_FILES=()
+
+cert_backup() { # 改动前的文件、证书与 acme.sh 记录（申请新证书时 certctl 会删掉旧域名的记录）
+  # Subcommands run with errexit off (`do_x || exit`), so every step checks its own result.
+  local f
+  CERT_BAK=$(mktemp -d /tmp/clashgate-cert.XXXXXX) || return 1
+  trap 'rm -rf "$CERT_BAK"' EXIT
+  install -d -m 700 "$CERT_BAK/files" || return 1
+  for f in "${CERT_FILES[@]}"; do
+    if [[ -e $f ]]; then cp -a "$f" "$CERT_BAK/files/" || return 1; fi
+  done
+  if [[ -d $CONF_DIR/certs ]]; then cp -a "$CONF_DIR/certs" "$CERT_BAK/certs" || return 1; fi
+  if [[ -d $ACME_HOME ]]; then cp -a "$ACME_HOME" "$CERT_BAK/acme" || return 1; fi
+  return 0
+}
+
+cert_restore() {
+  local f b
+  for f in "${CERT_FILES[@]}"; do
+    b=$CERT_BAK/files/$(basename "$f")
+    if [[ -e $b ]]; then cp -a "$b" "$f"; else rm -f "$f"; fi
+  done
+  if [[ -d $CERT_BAK/certs ]]; then rm -rf "$CONF_DIR/certs"; cp -a "$CERT_BAK/certs" "$CONF_DIR/certs"; fi
+  if [[ -d $CERT_BAK/acme ]]; then rm -rf "$ACME_HOME"; cp -a "$CERT_BAK/acme" "$ACME_HOME"; fi
+  return 0
+}
+
+cert_domain_ok() { # 新域名格式（同安装：端口模式不支持通配符）
+  if [[ ${CERT_MODE:-port} != port ]]; then
+    if [[ $1 =~ $WILDCARD_DOMAIN_RE ]]; then return 0; fi
+  elif [[ $1 == \*.* ]]; then
+    printf '通配符域名仅支持「DNS API 模式」或「手动证书模式」，请输入具体域名\n'
+    return 1
+  elif [[ $1 =~ $DOMAIN_RE ]]; then
+    return 0
+  fi
+  if [[ -n $1 ]]; then printf '域名格式不正确：%s\n' "$1"; fi
+  return 1
+}
+
+cert_ask_domain() {
+  local d
+  while :; do
+    case ${CERT_MODE:-port} in
+      dns)    d=$(ask '请输入域名（如 example.com 或 *.example.com）：' '') ;;
+      manual) d=$(ask '请输入证书对应的域名（如 example.com）：' '') ;;
+      *)      d=$(ask '请输入域名（需已将 A 记录解析到本机）：' '') ;;
+    esac
+    d=${d,,}
+    if cert_domain_ok "$d"; then break; fi
+  done
+  NEW_DOMAIN=$d
+}
+
+cert_dns_points_here() { # 端口模式：Let's Encrypt 要能通过新域名连到本机，解析不对就不去申请（省下申请次数）
+  local ips
+  if [[ $SERVER_IP == *:* ]]; then
+    ips=$(getent ahostsv6 "$1" 2>/dev/null | awk '$1 !~ /^::ffff:/ {print $1}' | sort -u | tr '\n' ' ' || true)
+  else
+    ips=$(getent ahostsv4 "$1" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' || true)
+  fi
+  ips=${ips% }
+  if [[ " ${ips,,} " == *" ${SERVER_IP,,} "* ]]; then return 0; fi
+  die "域名 $1 没有解析到本机 $SERVER_IP（当前解析：${ips:-—}）。请先修改 DNS 记录（Cloudflare 请设为灰云 DNS only），生效后再运行"
+}
+
+do_cert() {
+  require_installed; load_env; require_panel
+  local old=$DOMAIN nd=$CONF_DIR/certs.new in_cluster=0 out rc=0 tok ports=()
+  NEW_DOMAIN=${ACTION_ARG:-}
+  if [[ -s $CUSTOM_CONF ]]; then die "已启用自定义服务端配置，请先在面板「设置」页关闭后再更换域名"; fi
+  if has_panel_drafts; then die "面板里有尚未应用的修改，请先在面板点「应用配置」或「丢弃草稿」后再更换域名"; fi
+  if [[ -z $NEW_DOMAIN ]]; then
+    has_tty || die "请指定新域名：clashgate cert 新域名"
+    cert_ask_domain
+  fi
+  NEW_DOMAIN=${NEW_DOMAIN,,}
+  if ! cert_domain_ok "$NEW_DOMAIN" >&2; then exit 1; fi
+  if [[ $NEW_DOMAIN == "$old" ]]; then die "新域名与当前域名相同：$old"; fi
+  if [[ ${CERT_MODE:-port} == port && $TLS != internal ]]; then cert_dns_points_here "$NEW_DOMAIN"; fi
+  if [[ ${CERT_MODE:-port} == dns ]] && has_tty; then
+    while :; do
+      tok=$(ask 'Cloudflare API Token（回车沿用当前的 Token）：' '')
+      if [[ -z $tok || ! $tok =~ [[:space:]\"\'] ]]; then break; fi
+      printf 'API Token 不能包含空格或引号\n'
+    done
+    if [[ -n $tok ]]; then CF_TOKEN=$tok; fi
+  fi
+  if [[ ${CERT_MODE:-port} == manual ]]; then
+    if [[ ! -s $nd/fullchain.pem || ! -s $nd/privkey.pem ]]; then
+      die "请先把新域名的证书放入 $nd/（fullchain.pem 与 privkey.pem），再运行 clashgate cert"
+    fi
+    if ! cert_pair_ok "$nd/fullchain.pem" "$nd/privkey.pem" "$NEW_DOMAIN"; then die "新证书校验未通过，没有做任何修改"; fi
+  fi
+  if has_tty; then
+    printf '\n将把域名从 %s 更换为 %s：\n' "$old" "$NEW_DOMAIN"
+    if [[ ${CERT_MODE:-port} == manual ]]; then
+      printf '  1. 启用 %s 里的新证书\n' "$nd/"
+    else
+      printf '  1. 先为新域名申请证书，申请失败时什么都不改\n'
+    fi
+    printf '  2. 证书就绪后退出集群（已加入时），删除全部入站节点，重新生成一个 VLESS Reality 节点\n'
+    printf '  3. 订阅链接和 Zashboard API 密钥一并更换，客户端需要重新导入订阅；面板密码和端口不变\n'
+    if [[ $(ask '确定更换？[y/N]：' n) != [yY]* ]]; then echo "已取消"; return 0; fi
+  fi
+
+  STEP=0; TOTAL=6
+  CERT_FILES=("$ENV_FILE" "$PANEL_CFG" "$STATE" "$CS_ETC/inbounds.json" "$FRAG_REALITY" "$FRAG_EXTRA" "$FRAG_CONTROLLER" "$CONF")
+  cert_backup || die "无法备份当前配置，没有做任何修改"
+  # 1. 新证书：申请失败就把一切恢复原样
+  if [[ ${CERT_MODE:-port} == manual ]]; then
+    log "启用 $NEW_DOMAIN 的新证书"
+    install -d -m 750 "$CONF_DIR/certs"
+    if ! cp -f "$nd/fullchain.pem" "$CONF_DIR/certs/fullchain.pem" || ! cp -f "$nd/privkey.pem" "$CONF_DIR/certs/privkey.pem"; then
+      cert_restore
+      die "无法写入新证书，已恢复原来的证书"
+    fi
+    chown root:mihomo "$CONF_DIR/certs" "$CONF_DIR/certs/fullchain.pem" "$CONF_DIR/certs/privkey.pem" 2>/dev/null || true
+    chmod 640 "$CONF_DIR/certs/fullchain.pem" "$CONF_DIR/certs/privkey.pem"
+    DOMAIN=$NEW_DOMAIN; save_env
+  else
+    log "申请 $NEW_DOMAIN 的证书（$(cert_mode_label)）"
+    DOMAIN=$NEW_DOMAIN; save_env
+    out=$("$LIB_DIR/scripts/certctl.sh" reissue 2>&1) || rc=$?
+    ( umask 077; builtin printf '%s\n' "$out" > "$CS_ETC/cert-change.log" )
+    if ((rc != 0)); then
+      builtin printf '%s\n' "$out" | grep -iE '^certctl:|error|invalid|fail|timeout|refused|unauthorized|connection' | tail -n 8 >&2 || true
+      cert_restore
+      die "证书申请失败，域名、证书、节点和集群都没有改动（完整输出：$CS_ETC/cert-change.log）"
+    fi
+  fi
+  # 2. 新凭据与新节点（同重装）；配置通不过校验就整体恢复
+  SUB_TOKEN=$(new_sub_token)
+  MIHOMO_SECRET=$(openssl rand -hex 10)
+  PANEL_HASH=$(panel_cfg_get password_hash)
+  if [[ -z $SUB_TOKEN || -z $MIHOMO_SECRET || -z $PANEL_HASH ]]; then
+    cert_restore
+    die "无法生成新的凭据，已恢复原来的域名和证书"
+  fi
+  save_env
+  write_panel_cfg
+  builtin printf '[]\n' > "$CS_ETC/inbounds.json"; chmod 600 "$CS_ETC/inbounds.json"
+  : > "$FRAG_EXTRA"
+  gen_nodes
+  if ! ( render_server ); then
+    cert_restore
+    systemctl restart mihomo || true
+    die "新配置未通过校验（mihomo -t），已恢复原来的域名、证书和节点"
+  fi
+  STEP=$((STEP + 1))   # render_server ran in a subshell
+  # 3. 退出集群；没能通知到的成员也在本机删掉连接
+  if [[ $(cluster_link_count) =~ ^[1-9] ]]; then
+    in_cluster=1
+    leave_cluster
+    if [[ -f $CS_ROOT/cluster.json ]] && jq '.links = [] | .pending = []' "$CS_ROOT/cluster.json" > "$CS_ROOT/cluster.json.new"; then
+      chmod 600 "$CS_ROOT/cluster.json.new"; mv -f "$CS_ROOT/cluster.json.new" "$CS_ROOT/cluster.json"
+    fi
+    rm -f "$CS_ROOT/cluster.json.new"
+    : > "$FRAG_CLUSTER_PROXIES"; : > "$FRAG_CLUSTER_LISTENERS"
+    assemble_config
+    validate_conf || die "退出集群后的配置未通过校验（mihomo -t），请运行 clashgate restart 查看原因"
+  fi
+  render_client
+  open_firewall
+  log "重启服务"
+  systemctl restart mihomo
+  systemctl restart clashgate
+  verify
+  rm -rf "$nd"
+  rm -f "$CS_ROOT/template_refresh"
+
+  if [[ ${CERT_MODE:-port} == port ]]; then ports+=(80); fi
+  if [[ ! ( $PANEL_PORT == 80 && ${CERT_MODE:-port} == port ) ]]; then ports+=("$PANEL_PORT"); fi
+  ports+=("$CONTROLLER_PORT")
+  mapfile -t -O "${#ports[@]}" ports < <(cut -f2 "$STATE")
+  printf '\n\033[1;32m✔ 域名已更换为 %s\033[0m\n' "$NEW_DOMAIN"
+  printf '请在云服务商防火墙放行 TCP 端口：%s\n' "${ports[*]}"
+  printf '面板：%s（用户名 admin，密码不变）\n' "$(panel_url)"
+  printf '订阅链接：\033[1;36m%s\033[0m\n' "$(sub_url)"
+  printf '所有入站节点、订阅链接和 Zashboard API 密钥都已重新生成，请在客户端重新导入订阅\n'
+  if ((in_cluster)); then printf '已退出集群，需要时请在面板「集群」页重新添加成员\n'; fi
+  if ((${#WARNINGS[@]})); then
+    printf '\n\033[1;33m需要注意：\033[0m\n'; printf '  - %s\n' "${WARNINGS[@]}"
+  fi
+  return 0
+}
+
 do_restart() {
   require_installed
   validate_conf || die "当前配置未通过校验（mihomo -t），未重启"
@@ -488,8 +682,8 @@ do_menu() {
   local items=() labels=() i c item rc
   items+=(status info);          labels+=("查看运行状态" "查看节点配置")
   if [[ $MODE == auto-cert ]]; then
-    items+=(sub reset-sub reset-password)
-    labels+=("查看订阅链接" "更换订阅链接" "重置面板密码（随机）")
+    items+=(sub reset-sub reset-password cert)
+    labels+=("查看订阅链接" "更换订阅链接" "重置面板密码（随机）" "更换域名证书")
   fi
   items+=(restart log update lang uninstall); labels+=("重启内核" "查看日志" "更新内核 + 脚本与面板" "语言 / Language" "卸载")
   while :; do
@@ -515,8 +709,8 @@ do_menu() {
       ( STEP=0; "do_${item//-/_}" ) || rc=$?
       [[ $item == uninstall && ! -f $STATE ]] && return 0
       ask '按回车返回菜单……' '' >/dev/null
-      # 更新后用新版本的脚本重新打开菜单（版本号、菜单项随之更新）
-      if [[ $item == update ]] && ((rc == 0)); then exec bash "$CS_HOME/scripts/cmd/clashgate.sh" menu; fi
+      # 更新后用新版本的脚本、换域名后用新域名重新打开菜单
+      if [[ $item == update || $item == cert ]] && ((rc == 0)); then exec bash "$CS_HOME/scripts/cmd/clashgate.sh" menu; fi
     else
       printf '无效选项：%s\n' "$c"
     fi
@@ -588,7 +782,7 @@ do_uninstall() {
 ACTION=""
 while (($#)); do
   case "$1" in
-    install|update|uninstall|info|status|sub|restart|log|menu|reset-password|reset-sub|lang) ACTION=$1 ;;
+    install|update|uninstall|info|status|sub|restart|log|menu|reset-password|reset-sub|lang|cert) ACTION=$1 ;;
     help) usage; exit 0 ;;
     # 以下为开发/测试用隐藏参数，不写入用户文档
     -d|--domain) DOMAIN=${2:?缺少域名}; MODE=auto-cert; MODE_SET=1; shift ;;
@@ -604,8 +798,9 @@ while (($#)); do
     --tls-internal) TLS=internal ;;
     -h|--help) usage; exit 0 ;;
     *)
-      [[ $ACTION == lang && -z ${LANG_ARG:-} ]] || die "未知参数：$1（查看帮助：-h）"
-      LANG_ARG=$1 ;;
+      # one positional argument: the language for `lang`, the new domain for `cert`
+      [[ ( $ACTION == lang || $ACTION == cert ) && -z ${ACTION_ARG:-} ]] || die "未知参数：$1（查看帮助：-h）"
+      ACTION_ARG=$1; LANG_ARG=$1 ;;
   esac
   shift
 done

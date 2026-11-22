@@ -114,6 +114,25 @@ check_manual_cert_files() {
   return 0
 }
 
+cert_pair_ok() { # cert_pair_ok <证书> <私钥> <域名>：未过期、包含该域名、与私钥匹配；不通过时把原因打到 stderr
+  local crt=$1 key=$2 dom=${3#\*.} a b
+  if ! openssl x509 -noout -checkend 0 -in "$crt" >/dev/null 2>&1; then
+    printf '证书无效或已过期：%s\n' "$crt" >&2
+    return 1
+  fi
+  if ! openssl x509 -noout -checkhost "$dom" -in "$crt" 2>/dev/null | grep -q 'does match'; then
+    printf '证书不包含域名 %s（请检查证书与所填域名是否一致）：%s\n' "$dom" "$crt" >&2
+    return 1
+  fi
+  a=$(openssl x509 -noout -pubkey -in "$crt" 2>/dev/null | openssl pkey -pubin -pubout -outform DER 2>/dev/null | openssl dgst -sha256 -r | cut -d' ' -f1)
+  b=$(openssl pkey -in "$key" -pubout -outform DER 2>/dev/null | openssl dgst -sha256 -r | cut -d' ' -f1)
+  if [[ -z $a || $a != "$b" ]]; then
+    printf '证书与私钥不匹配：%s 与 %s\n' "$crt" "$key" >&2
+    return 1
+  fi
+  return 0
+}
+
 setup_manual_cert() {
   log "配置并校验手动证书（$DOMAIN）"
   install -d -m 750 -o root -g mihomo "$CONF_DIR/certs"

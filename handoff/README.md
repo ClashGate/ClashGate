@@ -1,6 +1,6 @@
 # ClashGate Agent Handoff Guide
 
-This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.36**. Next version number: **1.37**. Public repository: https://github.com/ClashGate/ClashGate
+This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.37**. Next version number: **1.38**. Public repository: https://github.com/ClashGate/ClashGate
 
 ---
 
@@ -12,6 +12,7 @@ ClashGate is a Mihomo proxy server for beginners. Simplicity matters more than 1
 - **Keep user-facing output and docs minimal.** Do not explain “why”; over-explaining is a mistake.
 - **The installer must set up every dependency up front** (including geo data `geoip.metadb`, `GeoSite.dat`, and `ASN.mmdb`). Users must not hit errors later when they first use a feature.
 - **Updates must fix existing installs automatically.** Do not require a manual step.
+- **Panel skins:** 默认 (default, light), 深色 (dark) and 圣诞 (christmas), picked in Settings and kept per browser (`theme.js`, `<html data-theme>`). The default stays light; do not make another skin the default. `src/theme-dark.css` is generated: after changing colours in `style.css` or adding an arbitrary colour class (`bg-[#...]`), run `python3 panel/web/dark-theme.py` (a test fails while it is out of date).
 - **Fix rough UI spots directly**; do not ask first. Keep cards and forms symmetric. Accent color is `#1d6fe0`. The brand icon is a cat.
 - **Panel languages:** Chinese / English / Русский / فارسی, default Chinese. Installer and CLI: Chinese / English / Русский (`clashgate lang` or `CLASHGATE_LANG`).
 - **Development language** (dev docs, code comments, commit messages) is English. User-facing content is currently mainly Chinese, with i18n in progress.
@@ -77,7 +78,7 @@ Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snel
 | `panel/cg_qr.py` | QR codes |
 | `panel/routing_mgr.py` | Server-side routing: `/etc/clashgate/routing/` + `routing.json`, assembled into the template |
 | `panel/i18n_en.py` | English translations of server API messages (source strings stay Chinese) |
-| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.36.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
+| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.37.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
 | `panel/dist/` | **Committed build output.** After frontend changes, run `cd panel/web && npm ci && npm run build` and commit the `panel/dist` updates (CI checks `git diff --exit-code -- panel/dist`) |
 | `resources/server.yaml.tpl`, `resources/client.yaml.tpl` | Server / client config templates |
 | `resources/routing/` | Default routing groups (节点选择 / node select, 漏网之鱼 / final / unmatched) |
@@ -94,7 +95,7 @@ Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snel
 
 ---
 
-## 3. Current CLI commands (v1.36)
+## 3. Current CLI commands (v1.37)
 
 With no argument: opens the management menu if already installed, otherwise starts install. `clashgate help` lists every subcommand.
 
@@ -107,13 +108,14 @@ With no argument: opens the management menu if already installed, otherwise star
 | `clashgate sub` | Show the subscription URL (certificate modes only) |
 | `clashgate reset-sub` | Rotate the subscription URL; the old URL stops working immediately (certificate modes only) |
 | `clashgate reset-password` | Reset the panel password to a random value (certificate modes only) |
+| `clashgate cert [domain]` | Change the domain (certificate modes only). Gets the new certificate first (manual mode: from `/etc/clashgate/certs.new/`); if that fails, nothing changes. Then, like a reinstall: leaves the cluster, deletes every inbound node and creates one new default VLESS Reality node, and rotates the subscription token and the Zashboard API secret. Keeps the panel password and port, server outbounds and routing. Refuses while panel drafts are pending or the custom server config is on |
 | `clashgate update` | Update the core, scripts, and panel together (the panel's 「升级」 (Upgrade) action and auto-update also call this) |
 | `clashgate lang [zh\|en\|ru]` | Switch and save the CLI language (no argument: choose from a list) |
 | `clashgate install` | Reinstall (choose the mode when prompted) |
 | `clashgate uninstall` | Uninstall: leave the cluster first if linked, then delete the install. **Do not touch firewall ports** (do not add logic that closes ports that were opened) |
 | `clashgate help` | Help |
 
-Removed; do not add them back: `clashgate passwd`, `clashgate reset-secret`, `clashgate cert`, and the split `update core` / `update self` commands. Changing the panel password, resetting the Zashboard secret, and managing certificates are all done in the panel.
+Removed; do not add them back: `clashgate passwd`, `clashgate reset-secret`, and the split `update core` / `update self` commands. Changing the panel password and resetting the Zashboard secret are done in the panel; certificate renewal and the certificate method are on the panel's 「HTTPS 证书」 page. `clashgate cert` came back in 1.37 with a different job (changing the domain, see above) at the owner's request.
 
 Hidden flags for development and testing (do not put these in user docs): `--domain`, `--cert-mode port|dns|manual`, `--cf-token`, `--panel-port`, `--controller-port`, `--staging` / `--tls-staging`, `--production`, `--tls-internal`. For certificate tests, use staging or reuse an existing certificate. **Do not re-issue certificates against the Let's Encrypt production environment in tests.**
 
@@ -142,7 +144,7 @@ The public default branch is `main` (stable). `test` is the test channel.
 2. The project owner verifies on a real machine (the owner clicks 「检查更新」 (Check for updates) in the panel).
 3. **Push to `main` only after the owner explicitly agrees.** A version that fails acceptance is retired and must not be reused.
 
-Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.36`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.37`, `1.38`, and so on.
+Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.37`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.38`, `1.39`, and so on.
 
 Commit messages are in English. **Never force push.**
 
@@ -240,8 +242,9 @@ Tests **must not** re-issue certificates against the Let's Encrypt production en
 | 1.34 | Reverts the opt-in panel skins to restore the 1.31 UI; keeps only the removal of the duplicate copy button in the subscription QR modal |
 | 1.35 | `clashgate update` keeps the live config while panel drafts are pending; the panel clears drafts that an older update already made live |
 | 1.36 | Node status counts only the core's own sockets; a manual inbound port held by another program is rejected; `/api/*` answers 401 when the session expired; certificate issue / mode switch runs as a background job the page polls (with elapsed time); `clashgate reset-sub` drops a pending panel link change; the CLI menu confirms link / password resets and reopens after `update`; the panel never closes firewall ports; an update that waited for panel drafts lands once they are applied or discarded; IPv6-only servers; 「应用配置」 asks first when nothing is pending; the global login cap spares sources that signed in before; `usePanel.js` split into per-page composables; home status rail redesigned (live nodes online + core uptime, pending count or 「已全部生效」, traffic split + speed between two refreshes, per-component update shortcuts); the page links `/assets/app.js` and `style.css` with a `?v=<content hash>` (cached for a year, ETag / 304 otherwise) instead of inlining ~450 kB on every visit |
+| 1.37 | Added `clashgate cert [domain]` (menu: 「更换域名证书」): change the domain; the new certificate comes first and a failure changes nothing; then the cluster is left, the inbound nodes are reset to one new VLESS Reality node and the subscription token / Zashboard secret are rotated. Panel UI: nodes deleted in the draft stay listed as 「待删除」 until applied; routing groups get up / down buttons (dragging does not work on touch screens); the four modals are real dialogs (focus moves in, Tab stays inside, focus returns; ✕ has a label); Zashboard card moved to the home page; Settings order: password, update channel, auto update, core, panel version (new, with 检查更新), skin, custom server last; the tab title shows the pending count; new opt-in 「深色」 skin (owner request) |
 
-Next version: **1.37**.
+Next version: **1.38**.
 
 ---
 

@@ -198,6 +198,14 @@ export function useRouting(p) {
     if (!(res && res.ok) && !(res && res.state && res.state.routing) && state.routing) state.routing.groups = before
   }
 
+  // Up / down buttons: the same reorder without dragging (touch screens, keyboard).
+  function moveRoutingGroup(idx, delta) {
+    const to = idx + delta
+    if (to < 0 || to >= routingGroups.value.length) return
+    routingDragIdx.value = idx
+    return onRoutingDrop(to)
+  }
+
   return {
     createRoutingForm,
     importRoutingForm,
@@ -222,5 +230,6 @@ export function useRouting(p) {
     routingDragOver,
     onRoutingDragStart,
     onRoutingDrop,
+    moveRoutingGroup,
   }
 }

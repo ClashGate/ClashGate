@@ -246,3 +246,30 @@ DNS API 模式缺少 Cloudflare API Token	DNS API mode is missing the Cloudflare
 确定重置面板密码？[y/N]：	Reset the panel password? [y/N]: 
 域名 %s 没有指向本机 %s 的 AAAA 记录。请添加 AAAA 记录指向本机（Cloudflare 请设为灰云 DNS only）	The domain %s has no AAAA record pointing to this host (%s). Add an AAAA record pointing here (on Cloudflare, use the grey cloud / DNS only)
 已取消。请先把域名 AAAA 记录指向 %s，再重新运行安装命令。\n	Cancelled. Point the domain AAAA record to %s first, then rerun the install command.\n
+\n将把域名从 %s 更换为 %s：\n	\nThe domain will change from %s to %s:\n
+  1. 启用 %s 里的新证书\n	  1. Use the new certificate in %s\n
+  1. 先为新域名申请证书，申请失败时什么都不改\n	  1. Get a certificate for the new domain first; if that fails, nothing changes\n
+  2. 证书就绪后退出集群（已加入时），删除全部入站节点，重新生成一个 VLESS Reality 节点\n	  2. Then leave the cluster (if joined), delete all inbound nodes and create a new VLESS Reality node\n
+  3. 订阅链接和 Zashboard API 密钥一并更换，客户端需要重新导入订阅；面板密码和端口不变\n	  3. The subscription link and Zashboard API secret change too, so clients must import the subscription again; the panel password and port stay the same\n
+\n\033[1;32m✔ 域名已更换为 %s\033[0m\n	\n\033[1;32m✔ Domain changed to %s\033[0m\n
+面板：%s（用户名 admin，密码不变）\n	Panel: %s (user admin, password unchanged)\n
+所有入站节点、订阅链接和 Zashboard API 密钥都已重新生成，请在客户端重新导入订阅\n	All inbound nodes, the subscription link and the Zashboard API secret are new; import the subscription again in your clients\n
+已退出集群，需要时请在面板「集群」页重新添加成员\n	Left the cluster; add the members again on the panel's Cluster page if needed\n
+Cloudflare API Token（回车沿用当前的 Token）：	Cloudflare API Token (Enter = keep the current token): 
+确定更换？[y/N]：	Change it? [y/N]: 
+已启用自定义服务端配置，请先在面板「设置」页关闭后再更换域名	A custom server config is on; turn it off on the panel's Settings page before changing the domain
+面板里有尚未应用的修改，请先在面板点「应用配置」或「丢弃草稿」后再更换域名	The panel has changes that are not applied yet; click “Apply config” or “Discard drafts” in the panel before changing the domain
+请指定新域名：clashgate cert 新域名	Specify the new domain: clashgate cert <domain>
+新域名与当前域名相同：%s	The new domain is the same as the current one: %s
+域名 %s 没有解析到本机 %s（当前解析：%s）。请先修改 DNS 记录（Cloudflare 请设为灰云 DNS only），生效后再运行	The domain %s does not resolve to this host %s (it resolves to: %s). Update the DNS record first (on Cloudflare, use the grey cloud / DNS only), then run this again once it is live
+请先把新域名的证书放入 %s/（fullchain.pem 与 privkey.pem），再运行 clashgate cert	Put the new domain's certificate in %s/ (fullchain.pem and privkey.pem) first, then run clashgate cert
+新证书校验未通过，没有做任何修改	The new certificate did not pass the check; nothing was changed
+启用 %s 的新证书	Use the new certificate for %s
+申请 %s 的证书（%s）	Get a certificate for %s (%s)
+证书申请失败，域名、证书、节点和集群都没有改动（完整输出：%s）	Getting the certificate failed; the domain, certificate, nodes and cluster are unchanged (full output: %s)
+新配置未通过校验（mihomo -t），已恢复原来的域名、证书和节点	The new config failed the check (mihomo -t); the previous domain, certificate and nodes are restored
+退出集群后的配置未通过校验（mihomo -t），请运行 clashgate restart 查看原因	The config after leaving the cluster failed the check (mihomo -t); run clashgate restart to see why
+更换域名证书	Change domain / certificate
+无法备份当前配置，没有做任何修改	Could not back up the current config; nothing was changed
+无法写入新证书，已恢复原来的证书	Could not write the new certificate; the previous one is restored
+无法生成新的凭据，已恢复原来的域名和证书	Could not create new credentials; the previous domain and certificate are restored

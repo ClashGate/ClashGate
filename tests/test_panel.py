@@ -82,7 +82,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -1081,7 +1081,7 @@ class V121Test(unittest.TestCase):
         run_at = menu.index('"do_${item//-/_}"')
         for item in ("reset-sub", "reset-password"):
             self.assertLess(menu.index(f"[[ $item == {item} ]] && [[ $(ask"), run_at)
-        self.assertIn("[[ $item == update ]] && ((rc == 0)); then exec bash", menu)
+        self.assertIn("[[ $item == update || $item == cert ]] && ((rc == 0)); then exec bash", menu)
 
     def test_firewall_is_only_opened_never_closed(self):
         g = P.sync_ufw.__globals__
@@ -1293,6 +1293,53 @@ class V121Test(unittest.TestCase):
             self.assertTrue(hdrs.get("ETag", "").startswith('W/"'), path)
             if code == 304:
                 self.assertEqual(body, b"")
+
+    def test_deleted_nodes_stay_listed_until_applied(self):
+        node, inbs = write_default_state(extra_kinds=("shadowsocks",))
+        P.clear_pending_reload()
+        P._ensure_pending_baseline()
+        ss = inbs[0]
+        P.save_inbounds([])
+        P.record_pending_reload(op="delete", kind="shadowsocks", name=ss["name"], port=ss["port"], detail="-")
+        try:
+            items = P.Panel._pending_delete_items({ss["port"]}, P.load_pending_reload()["items"], P.read_nodes(), [])
+            self.assertEqual([(i["name"], i["pending_delete"], i["listening"], i["delete_url"]) for i in items],
+                             [(ss["name"], True, True, "")])
+            # Re-added under the same name in the draft: listed once, as the draft node.
+            self.assertEqual(P.Panel._pending_delete_items(set(), P.load_pending_reload()["items"], P.read_nodes(), [ss]), [])
+        finally:
+            P.discard_pending_reload()
+
+    def test_ui_1_37_details(self):
+        src = os.path.join(REPO, "panel/web/src")
+        app = read(os.path.join(src, "App.vue"))
+        self.assertEqual(app.count("v-cg-dialog"), 4)
+        self.assertEqual(app.count('role="dialog"'), 4)
+        self.assertEqual(app.count('aria-modal="true"'), 4)
+        self.assertNotRegex(app, r"<button(?![^>]*aria-label)[^>]*>\s*✕")
+        home = read(os.path.join(src, "pages/InboundsPage.vue"))
+        self.assertIn('id="zashboard-card"', home)
+        self.assertNotIn('id="zashboard-card"', read(os.path.join(src, "pages/OutboundsPage.vue")))
+        self.assertIn("item.pending_delete", home)
+        self.assertIn("moveRoutingGroup(idx, -1)", read(os.path.join(src, "pages/RoutingPage.vue")))
+        settings = read(os.path.join(src, "pages/SettingsPage.vue"))
+        settings = settings[settings.index("<template>"):settings.rindex("</template>")]
+        order = [settings.index(k) for k in ('id="settings-password-card"', "setUpdateChannel('stable')",
+                                             "toggleAutoUpdate", 'id="settings-core-card"', 'id="settings-panel-card"',
+                                             "setTheme('dark')", "toggleCustomServer")]
+        self.assertEqual(order, sorted(order))
+        self.assertIn("'dark'", read(os.path.join(src, "theme.js")))
+        self.assertIn("t==='dark'", P.render_spa_html("x", {}))
+
+    def test_dark_theme_css_is_generated(self):
+        r = subprocess.run([sys.executable, os.path.join(REPO, "panel/web/dark-theme.py"), "--check"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, "panel/web/src/theme-dark.css is out of date: run python3 panel/web/dark-theme.py")
+        css = read(os.path.join(REPO, "panel/web/src/theme-dark.css"))
+        self.assertNotIn("prefers-color-scheme", css)   # a skin the user picks, not the default
+        for line in css.splitlines():
+            if line.startswith("html") and "{" in line and not line.startswith("html["):
+                self.fail("selector without the dark-skin prefix: " + line)
 
     def test_uninstall_leaves_cluster_first(self):
         un = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))

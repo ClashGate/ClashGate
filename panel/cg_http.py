@@ -133,10 +133,11 @@ def render_spa_html(title: str, boot_data: dict, fallback_html: str = "") -> str
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{html.escape(title)}</title>"
         "<link rel=icon type=image/png href=/favicon.png><link rel='shortcut icon' href=/favicon.ico>"
-        "<style>html{background:#f3f6fb}html:not(.cg-ready) #app{visibility:hidden}</style>"
+        "<style>html{background:#f3f6fb}html[data-theme=dark]{background:#0f1318;color-scheme:dark}"
+        "html:not(.cg-ready) #app{visibility:hidden}</style>"
         # Panel skin (Settings): applied before first paint so the page never flashes the default look.
-        "<script>try{if(localStorage.getItem('clashgate_theme')==='christmas')"
-        "document.documentElement.dataset.theme='christmas'}catch(e){}</script>"
+        "<script>try{var t=localStorage.getItem('clashgate_theme');if(t==='christmas'||t==='dark')"
+        "document.documentElement.dataset.theme=t}catch(e){}</script>"
         f"<link rel=stylesheet href=\"{css_url}\">"
         f"<script>window.__CS_BOOT__ = {boot_json};</script>"
         "</head>"
@@ -386,6 +387,9 @@ class Panel(BaseHTTPRequestHandler):
                 "readable_config": "\n".join(dump_yaml_map(proxy, indent=2, first_dash=True)),
             })
 
+        # Nodes deleted in the draft are still served until 「应用配置」: keep them in the list, marked.
+        inbound_items += self._pending_delete_items(listening, pending_items, nodes, inbs)
+
         all_proxies_yaml = (
             "proxies:\n" + "\n".join("  - " + json.dumps(p, ensure_ascii=False) for p in all_proxies)
             if all_proxies else ""
@@ -518,6 +522,39 @@ class Panel(BaseHTTPRequestHandler):
                 else get_routing().public_state()
             ), req_lang),
         }
+
+    @staticmethod
+    def _pending_delete_items(listening: set, pending_items: list, nodes: list, inbs: list) -> list:
+        """Live nodes the draft deletes: shown greyed (「待删除」) with no actions until the config is applied."""
+        deleted = {it.get("name") for it in pending_items if it.get("op") == "delete" and it.get("name")}
+        if not deleted:
+            return []
+        draft = {n["name"] for n in nodes} | {i["name"] for i in inbs}
+        try:
+            live_n, live_i = live_nodes_and_inbounds()
+        except Exception:
+            return []
+        out = []
+        for kind, name, port in ([("vless-reality", n["name"], n["port"]) for n in live_n]
+                                 + [(i["kind"], i["name"], i["port"]) for i in live_i]):
+            if name not in deleted or name in draft:
+                continue
+            out.append({
+                "key": f"gone:{name}",
+                "name": name,
+                "kind": kind,
+                "kind_label": KIND_ZH.get(kind, kind),
+                "port": port,
+                "listening": port in listening,
+                "pending_reload": True,
+                "pending_delete": True,
+                "can_reset_password": False,
+                "reset_url": "",
+                "delete_url": "",
+                "single_config": "",
+                "readable_config": "",
+            })
+        return out
 
     @staticmethod
     def _live_node_counts(listening: set) -> dict:
