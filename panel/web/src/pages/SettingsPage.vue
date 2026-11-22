@@ -196,25 +196,51 @@ const {
 
 <template>
 <div id="settings-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <section id="settings-password-card" class="cg-surface rounded-2xl flex">
+            <button
+              type="button"
+              class="w-full p-5 sm:p-6 text-start rounded-2xl hover:bg-[#f7f9fc] transition cursor-pointer flex items-center justify-between gap-4"
+              @click="openPasswordModal"
+            >
+              <span class="min-w-0 block">
+                <span class="block text-base font-bold text-slate-900 tracking-tight">{{ t('修改面板密码') }}</span>
+                <span class="block text-xs text-slate-500 mt-1 leading-relaxed">{{ t('更新当前登录密码。') }}</span>
+              </span>
+              <span class="cg-tool shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border bg-white border-slate-200 text-slate-800 inline-flex items-center gap-1">
+                <span>{{ t('修改') }}</span>
+                <CgIcon name="chevron" :size="14" class="rtl:rotate-180" />
+              </span>
+            </button>
+          </section>
+
           <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
             <div class="flex items-center justify-between gap-4">
-              <div>
-                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('自定义服务端') }}</h2>
-                <p class="text-xs text-slate-500 mt-1 leading-relaxed max-w-xl">
-                  {{ t('高级功能，打开后可自由编辑 Mihomo 服务端配置。') }}
+              <div class="min-w-0">
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('更新通道') }}</h2>
+                <p class="text-xs mt-1 leading-relaxed" :class="state.update_channel === 'test' ? 'text-amber-700' : 'text-slate-500'">
+                  {{ state.update_channel === 'test' ? t('当前为测试通道') : t('当前为正式通道') }} · {{ t('测试版可能不稳定，请谨慎使用。') }}
                 </p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                :aria-checked="state.custom_server_enabled ? 'true' : 'false'"
-                :disabled="busyKey === '/action/settings'"
-                @click="toggleCustomServer"
-                class="cg-switch"
-                :class="{ 'is-on': state.custom_server_enabled }"
-              >
-                <span></span>
-              </button>
+              <div class="flex shrink-0 rounded-lg border border-slate-200 p-0.5 bg-white" role="radiogroup" :aria-label="t('更新通道')">
+                <button
+                  type="button"
+                  role="radio"
+                  :aria-checked="state.update_channel === 'stable' ? 'true' : 'false'"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                  :class="state.update_channel === 'stable' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  :disabled="busyKey === '/action/settings'"
+                  @click="setUpdateChannel('stable')"
+                >{{ t('正式') }}</button>
+                <button
+                  type="button"
+                  role="radio"
+                  :aria-checked="state.update_channel === 'test' ? 'true' : 'false'"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                  :class="state.update_channel === 'test' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  :disabled="busyKey === '/action/settings'"
+                  @click="setUpdateChannel('test')"
+                >{{ t('测试') }}</button>
+              </div>
             </div>
           </section>
 
@@ -237,33 +263,6 @@ const {
               >
                 <span></span>
               </button>
-            </div>
-          </section>
-
-          <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
-            <div class="flex items-center justify-between gap-4">
-              <div class="min-w-0">
-                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('更新通道') }}</h2>
-                <p class="text-xs mt-1 leading-relaxed" :class="state.update_channel === 'test' ? 'text-amber-700' : 'text-slate-500'">
-                  {{ state.update_channel === 'test' ? t('当前为测试通道') : t('当前为正式通道') }} · {{ t('测试版可能不稳定，请谨慎使用。') }}
-                </p>
-              </div>
-              <div class="flex shrink-0 rounded-lg border border-slate-200 p-0.5 bg-white">
-                <button
-                  type="button"
-                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
-                  :class="state.update_channel === 'stable' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
-                  :disabled="busyKey === '/action/settings'"
-                  @click="setUpdateChannel('stable')"
-                >{{ t('正式') }}</button>
-                <button
-                  type="button"
-                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
-                  :class="state.update_channel === 'test' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
-                  :disabled="busyKey === '/action/settings'"
-                  @click="setUpdateChannel('test')"
-                >{{ t('测试') }}</button>
-              </div>
             </div>
           </section>
 
@@ -290,23 +289,6 @@ const {
             </div>
           </section>
 
-          <section id="settings-password-card" class="cg-surface rounded-2xl flex">
-            <button
-              type="button"
-              class="w-full p-5 sm:p-6 text-start rounded-2xl hover:bg-[#f7f9fc] transition cursor-pointer flex items-center justify-between gap-4"
-              @click="openPasswordModal"
-            >
-              <span class="min-w-0 block">
-                <span class="block text-base font-bold text-slate-900 tracking-tight">{{ t('修改面板密码') }}</span>
-                <span class="block text-xs text-slate-500 mt-1 leading-relaxed">{{ t('更新当前登录密码。') }}</span>
-              </span>
-              <span class="cg-tool shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border bg-white border-slate-200 text-slate-800 inline-flex items-center gap-1">
-                <span>{{ t('修改') }}</span>
-                <CgIcon name="chevron" :size="14" class="rtl:rotate-180" />
-              </span>
-            </button>
-          </section>
-
           <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
             <div class="flex items-center justify-between gap-4">
               <div class="min-w-0">
@@ -325,12 +307,42 @@ const {
                 <button
                   type="button"
                   role="radio"
+                  :aria-checked="theme === 'dark' ? 'true' : 'false'"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                  :class="theme === 'dark' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  @click="setTheme('dark')"
+                >{{ t('深色') }}</button>
+                <button
+                  type="button"
+                  role="radio"
                   :aria-checked="theme === 'christmas' ? 'true' : 'false'"
                   class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
                   :class="theme === 'christmas' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
                   @click="setTheme('christmas')"
                 >{{ t('圣诞') }}</button>
               </div>
+            </div>
+          </section>
+
+          <section class="cg-surface rounded-2xl p-5 sm:p-6 flex flex-col justify-center">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('自定义服务端') }}</h2>
+                <p class="text-xs text-slate-500 mt-1 leading-relaxed max-w-xl">
+                  {{ t('高级功能，打开后可自由编辑 Mihomo 服务端配置。') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="state.custom_server_enabled ? 'true' : 'false'"
+                :disabled="busyKey === '/action/settings'"
+                @click="toggleCustomServer"
+                class="cg-switch"
+                :class="{ 'is-on': state.custom_server_enabled }"
+              >
+                <span></span>
+              </button>
             </div>
           </section>
         </div>

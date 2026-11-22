@@ -753,6 +753,39 @@ html[lang="fa"] textarea.font-mono {
   }
 }
 
+/* Routing group order: up / down next to the drag handle (dragging does not work on touch screens). */
+.cg-move {
+  display: inline-flex;
+  border: 1px solid #e3e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.cg-move-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  background: #ffffff;
+  color: #4e5b6b;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.cg-move-btn + .cg-move-btn {
+  border-inline-start: 1px solid #e3e8f0;
+}
+
+.cg-move-btn:hover:not(:disabled) {
+  background: #f5f7fb;
+}
+
+.cg-move-btn:disabled {
+  color: #c3ccd8;
+  cursor: default;
+}
+
 /* Shared small action buttons: one height and shape everywhere; one primary per row. */
 .cg-btn-sm {
   display: inline-flex;
@@ -888,8 +921,9 @@ html[lang="fa"] textarea.font-mono {
   }
 
   .cg-home-sub { grid-column: 1; grid-row: 1; }
-  .cg-home-in { grid-column: 1; grid-row: 2; }
-  .cg-home-add { grid-column: 2; grid-row: 1 / span 2; }
+  .cg-home-zb { grid-column: 1; grid-row: 2; }
+  .cg-home-in { grid-column: 1; grid-row: 3; }
+  .cg-home-add { grid-column: 2; grid-row: 1 / span 3; }
 }
 
 @media (max-width: 1023px) {

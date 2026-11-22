@@ -4,6 +4,7 @@ import CgIcon from './CgIcon.vue'
 import XmasArt from './XmasArt.vue'
 import { theme, setTheme } from './theme.js'
 import { usePanel } from './composables/usePanel.js'
+import { vCgDialog } from './dialog.js'
 import InboundsPage from './pages/InboundsPage.vue'
 import OutboundsPage from './pages/OutboundsPage.vue'
 import RoutingPage from './pages/RoutingPage.vue'
@@ -106,6 +107,7 @@ const {
   certExpiresDisplay,
   certDaysValue,
   certIsTemp,
+  certAlert,
   certBaselineMode,
   certModeDirty,
   certRegenDisabled,
@@ -355,13 +357,19 @@ const {
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/25 backdrop-blur-[2px]"
         @click.self="closeRenameDialog"
       >
-        <div class="cg-modal-panel w-full max-w-md bg-white rounded-2xl border border-slate-200/90 p-6 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18)] space-y-4">
+        <div
+          v-cg-dialog
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="rename-dialog-title"
+          tabindex="-1"
+          class="cg-modal-panel w-full max-w-md bg-white rounded-2xl border border-slate-200/90 p-6 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18)] space-y-4">
           <div class="flex items-center justify-between gap-2">
-            <h3 class="text-base font-bold text-slate-900 tracking-tight">{{ t('重命名') }}</h3>
-            <button type="button" @click="closeRenameDialog" class="text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-sm w-7 h-7 flex items-center justify-center rounded-lg transition cursor-pointer">✕</button>
+            <h3 id="rename-dialog-title" class="text-base font-bold text-slate-900 tracking-tight">{{ t('重命名') }}</h3>
+            <button type="button" @click="closeRenameDialog" class="text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-sm w-7 h-7 flex items-center justify-center rounded-lg transition cursor-pointer" :aria-label="t('关闭')">✕</button>
           </div>
           <label class="block text-xs font-medium text-slate-500">{{ t('新名称') }}
-            <input id="rename-input" v-model="renameDialog.name" @keydown.enter.prevent="acceptRenameDialog" @keydown.esc="closeRenameDialog" class="cg-input mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 text-sm" />
+            <input id="rename-input" data-autofocus v-model="renameDialog.name" @keydown.enter.prevent="acceptRenameDialog" @keydown.esc="closeRenameDialog" class="cg-input mt-1 w-full h-10 px-3 rounded-xl border border-slate-200 text-sm" />
           </label>
           <div class="flex items-center justify-end gap-2.5 pt-2">
             <button type="button" @click="closeRenameDialog" class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 transition cursor-pointer">{{ t('取消') }}</button>
@@ -380,14 +388,20 @@ const {
         @click.self="closeConfirmDialog"
       >
         <div
+          v-cg-dialog
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-dialog-title"
+          tabindex="-1"
           class="cg-modal-panel w-full max-w-md bg-white rounded-2xl border border-slate-200/90 p-6 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18)] space-y-4"
         >
           <div class="flex items-center justify-between gap-2">
-            <h3 class="text-base font-bold text-slate-900 tracking-tight">{{ confirmDialog.title }}</h3>
+            <h3 id="confirm-dialog-title" class="text-base font-bold text-slate-900 tracking-tight">{{ confirmDialog.title }}</h3>
             <button
               type="button"
               @click="closeConfirmDialog"
               class="text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-sm w-7 h-7 flex items-center justify-center rounded-lg transition cursor-pointer"
+              :aria-label="t('关闭')"
             >
               ✕
             </button>
@@ -429,17 +443,23 @@ const {
         @click.self="closePasswordModal"
       >
         <div
+          v-cg-dialog
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="password-dialog-title"
+          tabindex="-1"
           class="cg-modal-panel w-full max-w-md bg-white rounded-2xl border border-emerald-100/90 p-6 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18)] space-y-4"
         >
           <div class="flex items-start justify-between gap-2">
             <div>
-              <h3 class="text-base font-bold text-slate-900 tracking-tight">{{ t('修改面板密码') }}</h3>
+              <h3 id="password-dialog-title" class="text-base font-bold text-slate-900 tracking-tight">{{ t('修改面板密码') }}</h3>
               <p class="text-xs text-slate-500 mt-1">{{ t('更新管理员账号 admin 的登录密码，修改后当前会话保持有效。') }}</p>
             </div>
             <button
               type="button"
               @click="closePasswordModal"
               class="text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-sm w-7 h-7 flex items-center justify-center rounded-lg transition cursor-pointer"
+              :aria-label="t('关闭')"
             >
               ✕
             </button>
@@ -450,6 +470,7 @@ const {
               <label for="cp-current" class="block text-xs font-semibold text-slate-700 mb-1.5">{{ t('当前密码') }}</label>
               <input
                 id="cp-current"
+                data-autofocus
                 v-model="passwordForm.current_password"
                 name="current_password"
                 type="password"
@@ -515,14 +536,20 @@ const {
         @click.self="showSubQrModal = false"
       >
         <div
+          v-cg-dialog
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="subqr-dialog-title"
+          tabindex="-1"
           class="cg-modal-panel w-full max-w-sm bg-white rounded-2xl border border-emerald-100/90 p-6 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18)] space-y-4"
         >
           <div class="flex items-center justify-between gap-2">
-            <h3 class="text-base font-bold text-slate-900 tracking-tight">{{ t('订阅二维码') }}</h3>
+            <h3 id="subqr-dialog-title" class="text-base font-bold text-slate-900 tracking-tight">{{ t('订阅二维码') }}</h3>
             <button
               type="button"
               @click="showSubQrModal = false"
               class="text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-sm w-7 h-7 flex items-center justify-center rounded-lg transition cursor-pointer"
+              :aria-label="t('关闭')"
             >
               ✕
             </button>
@@ -570,8 +597,8 @@ const {
           <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
             <CgIcon :name="state.custom_server_enabled ? 'lock' : 'routing'" />{{ t('服务端分流') }}
           </button>
-          <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'cluster' }" @click="selectTab('cluster')">
-            <CgIcon :name="state.custom_server_enabled ? 'lock' : 'cluster'" />{{ t('集群') }}
+          <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'cluster' }" @click="selectTab('cluster')">
+            <CgIcon name="cluster" />{{ t('集群') }}
           </button>
           <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
             <CgIcon name="convert" />{{ t('节点转换') }}
@@ -782,6 +809,21 @@ const {
           </div>
         </div>
 
+        <!-- Certificate problem only (temporary / missing / expiring): the fix is on the HTTPS 证书 page. -->
+        <button
+          v-if="certAlert"
+          id="cert-alert"
+          type="button"
+          class="w-full flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-start text-sm text-amber-900 hover:bg-amber-100/70 transition cursor-pointer"
+          @click="selectTab('certs')"
+        >
+          <span class="flex items-center gap-2 min-w-0">
+            <CgIcon name="shield" :size="15" />
+            <span class="cg-wrap">{{ certAlert }}</span>
+          </span>
+          <span class="shrink-0 inline-flex items-center gap-1 text-xs font-semibold">{{ t('去处理') }}<CgIcon name="chevron" :size="13" /></span>
+        </button>
+
         <Transition name="cg-collapse">
           <div
             v-if="showPendingDiff"
@@ -837,8 +879,8 @@ const {
         <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'routing' }" @click="selectTab('routing')">
           <CgIcon :name="state.custom_server_enabled ? 'lock' : 'routing'" :size="15" />{{ t('服务端分流') }}
         </button>
-        <button type="button" class="cg-nav" :class="state.custom_server_enabled ? 'is-locked' : { 'is-active': activeTab === 'cluster' }" @click="selectTab('cluster')">
-          <CgIcon :name="state.custom_server_enabled ? 'lock' : 'cluster'" :size="15" />{{ t('集群') }}
+        <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'cluster' }" @click="selectTab('cluster')">
+          <CgIcon name="cluster" :size="15" />{{ t('集群') }}
         </button>
         <button type="button" class="cg-nav" :class="{ 'is-active': activeTab === 'readable' }" @click="selectTab('readable')">
           <CgIcon name="convert" :size="15" />{{ t('节点转换') }}

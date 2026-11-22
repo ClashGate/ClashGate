@@ -184,6 +184,7 @@ certs_present
 check_core_update
 check_manual_cert
 check_panel_update
+check_reality_dest
 clear_pending_reload
 cluster_call
 cluster_hello
@@ -202,6 +203,7 @@ cluster_report_text
 cluster_sync
 cluster_ufw_specs
 collect_ufw_specs
+custom_conf_with_cluster
 default_node_name
 derive_vless_encryption
 detect_cpu_arch

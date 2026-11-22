@@ -1,6 +1,7 @@
 """Panel HTTP server. Moved out of panel.py unchanged."""
 import sys
 import argparse
+import base64
 import hashlib
 import hmac
 import html
@@ -121,24 +122,37 @@ def asset_url(rel: str) -> str:
     return f"/{rel}?v={ver}" if ver else f"/{rel}"
 
 
+# Panel skin (Settings): applied before first paint so the page never flashes the default look.
+# The only inline script on the page; the CSP below allows exactly this text by its hash.
+_THEME_JS = ("try{var t=localStorage.getItem('clashgate_theme');if(t==='christmas'||t==='dark')"
+             "document.documentElement.dataset.theme=t}catch(e){}")
+_THEME_JS_SHA = base64.b64encode(hashlib.sha256(_THEME_JS.encode()).digest()).decode()
+# Scripts only from this panel (the bundles) plus the skin snippet; no eval, no other origins.
+# Styles allow inline (Vue :style bindings, the small <style> in the page head).
+CSP = ("default-src 'self'; "
+       f"script-src 'self' 'sha256-{_THEME_JS_SHA}'; "
+       "style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+       "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+
+
 def render_spa_html(title: str, boot_data: dict, fallback_html: str = "") -> str:
     # The JS / CSS bundles (~450 kB) are separate, content-versioned files the browser caches;
     # only this small page (boot data) is sent on every visit.
     css_url = html.escape(asset_url("assets/style.css"), quote=True)
     js_url = html.escape(asset_url("assets/app.js"), quote=True)
-    boot_json = json.dumps(boot_data, ensure_ascii=False).replace("</", "<\\/")
+    # A JSON data block, not a script (src/boot.js reads it): "<" escaped so no text can end the element.
+    boot_json = json.dumps(boot_data, ensure_ascii=False).replace("<", "\\u003c")
     noscript = f"<noscript>{fallback_html}</noscript>" if fallback_html else ""
     return (
         "<!doctype html><html lang=zh-CN><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{html.escape(title)}</title>"
         "<link rel=icon type=image/png href=/favicon.png><link rel='shortcut icon' href=/favicon.ico>"
-        "<style>html{background:#f3f6fb}html:not(.cg-ready) #app{visibility:hidden}</style>"
-        # Panel skin (Settings): applied before first paint so the page never flashes the default look.
-        "<script>try{if(localStorage.getItem('clashgate_theme')==='christmas')"
-        "document.documentElement.dataset.theme='christmas'}catch(e){}</script>"
+        "<style>html{background:#f3f6fb}html[data-theme=dark]{background:#0f1318;color-scheme:dark}"
+        "html:not(.cg-ready) #app{visibility:hidden}</style>"
+        f"<script>{_THEME_JS}</script>"
         f"<link rel=stylesheet href=\"{css_url}\">"
-        f"<script>window.__CS_BOOT__ = {boot_json};</script>"
+        f"<script type=application/json id=cs-boot>{boot_json}</script>"
         "</head>"
         "<body class='antialiased'>"
         "<div id=app></div>"
@@ -284,6 +298,7 @@ class Panel(BaseHTTPRequestHandler):
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy", CSP)
             if "Cache-Control" not in headers:
                 self.send_header("Cache-Control", "no-store")
             for k, v in headers.items():
@@ -385,6 +400,9 @@ class Panel(BaseHTTPRequestHandler):
                 "single_config": "- " + json.dumps(proxy, ensure_ascii=False),
                 "readable_config": "\n".join(dump_yaml_map(proxy, indent=2, first_dash=True)),
             })
+
+        # Nodes deleted in the draft are still served until 「应用配置」: keep them in the list, marked.
+        inbound_items += self._pending_delete_items(listening, pending_items, nodes, inbs)
 
         all_proxies_yaml = (
             "proxies:\n" + "\n".join("  - " + json.dumps(p, ensure_ascii=False) for p in all_proxies)
@@ -511,13 +529,46 @@ class Panel(BaseHTTPRequestHandler):
             "all_proxies_yaml": all_proxies_yaml,
             "proxies": proxy_items,
             "providers": provider_items,
-            "cluster": public_cluster_state(custom_active or bool(load_panel_settings().get("custom_server_enabled")), req_lang),
+            "cluster": public_cluster_state(False, req_lang),
             "routing": _localize_routing_state(_beginner_routing_state(
                 get_routing().public_state(cur_cfg, custom_mode=True)
                 if custom_active
                 else get_routing().public_state()
             ), req_lang),
         }
+
+    @staticmethod
+    def _pending_delete_items(listening: set, pending_items: list, nodes: list, inbs: list) -> list:
+        """Live nodes the draft deletes: shown greyed (「待删除」) with no actions until the config is applied."""
+        deleted = {it.get("name") for it in pending_items if it.get("op") == "delete" and it.get("name")}
+        if not deleted:
+            return []
+        draft = {n["name"] for n in nodes} | {i["name"] for i in inbs}
+        try:
+            live_n, live_i = live_nodes_and_inbounds()
+        except Exception:
+            return []
+        out = []
+        for kind, name, port in ([("vless-reality", n["name"], n["port"]) for n in live_n]
+                                 + [(i["kind"], i["name"], i["port"]) for i in live_i]):
+            if name not in deleted or name in draft:
+                continue
+            out.append({
+                "key": f"gone:{name}",
+                "name": name,
+                "kind": kind,
+                "kind_label": KIND_ZH.get(kind, kind),
+                "port": port,
+                "listening": port in listening,
+                "pending_reload": True,
+                "pending_delete": True,
+                "can_reset_password": False,
+                "reset_url": "",
+                "delete_url": "",
+                "single_config": "",
+                "readable_config": "",
+            })
+        return out
 
     @staticmethod
     def _live_node_counts(listening: set) -> dict:
@@ -914,11 +965,6 @@ class Panel(BaseHTTPRequestHandler):
         with _SESSION_LOCK:
             self.fails[ip] = [t for t in self.fails.get(ip, []) if now - t < LOGIN_WINDOW] + [now]
 
-    def _cluster_busy_mode(self):
-        if is_custom_config_mode() or load_panel_settings().get("custom_server_enabled"):
-            return self._cjson(409, {"ok": False, "code": "custom_mode", "msg": "已启用自定义服务端配置，集群暂不可用"})
-        return None
-
     def do_cluster_hello(self):
         return self._cjson(200, {"clashgate": True, "cluster": CLUSTER_PROTOCOL, "version": VERSION,
                                  "name": local_node_name(), "instance": cluster_instance_id()})
@@ -964,9 +1010,6 @@ class Panel(BaseHTTPRequestHandler):
             with _SESSION_LOCK:
                 self.fails.pop(self.login_bucket(), None)
             self._trust(self.login_bucket(), time.time())
-        busy = self._cluster_busy_mode()
-        if busy:
-            return busy
         if inst == cluster_instance_id():
             return self._cjson(400, {"ok": False, "code": "self", "msg": "不能添加本机"})
         try:
@@ -1054,9 +1097,6 @@ class Panel(BaseHTTPRequestHandler):
         link, err = self._cluster_link_auth(form)
         if not link:
             return err
-        busy = self._cluster_busy_mode()
-        if busy:
-            return busy
         joiner, th = str(form.get("from_instance") or ""), str(form.get("ticket_hash") or "")
         if not _INST_RE.fullmatch(joiner) or not re.fullmatch(r"[0-9a-f]{64}", th):
             return self._cjson(400, {"ok": False, "code": "bad_request", "msg": "集群请求参数无效"})
@@ -1101,9 +1141,6 @@ class Panel(BaseHTTPRequestHandler):
         link, err = self._cluster_link_auth(form)
         if not link:
             return err
-        busy = self._cluster_busy_mode()
-        if busy:
-            return busy
         target = str(form.get("target_instance") or "")
         if _link_by(load_cluster(), instance=target):
             return self._cjson(200, {"ok": True, "already": True})
@@ -1135,12 +1172,7 @@ class Panel(BaseHTTPRequestHandler):
         return self._cjson(200, {"ok": True})
 
     # -- cluster: this panel's own page (session + CSRF)
-    def _cluster_locked(self) -> bool:
-        return is_custom_config_mode() or bool(load_panel_settings().get("custom_server_enabled"))
-
     def _cluster_job(self, s, job):
-        if self._cluster_locked():
-            return self.respond_mutation(s, "已启用自定义服务端配置，集群暂不可用", False)
         if not _CLUSTER_OP_LOCK.acquire(blocking=False):
             return self.respond_mutation(s, "另一个集群操作正在进行，请稍候再试", False)
         try:
@@ -1659,6 +1691,13 @@ class Panel(BaseHTTPRequestHandler):
         elif raw_kind == "soduku":
             raw_kind = "sudoku"
         raw_name = (form.get("name") or "").strip()
+        if raw_kind == "vless-reality" and (form.get("sni") or "").strip():
+            # A typed Reality SNI must work from here (checked outside LOCK: it is a network round trip).
+            try:
+                check_reality_dest(resolve_sni(form))
+            except ValueError as e:
+                detail = str(e.args[1]) if len(e.args) > 1 else ""
+                return self.respond_mutation(s, f"添加失败：{e.args[0]}", False, detail=detail)
         with LOCK:
             now = time.time()
             for k in [k for k, v in _RECENT_ADD_REQS.items() if now - v[0] > 60]:

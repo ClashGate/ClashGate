@@ -1,6 +1,7 @@
 <script setup>
 import { t } from '../i18n.js'
 import { usePanel } from '../composables/usePanel.js'
+import CgIcon from '../CgIcon.vue'
 
 const {
   boot,
@@ -177,6 +178,7 @@ const {
   routingDragOver,
   onRoutingDragStart,
   onRoutingDrop,
+  moveRoutingGroup,
   tabLockedMsg,
   selectTab,
   toggleCustomServer,
@@ -205,7 +207,7 @@ const {
             <div class="flex items-start justify-between gap-3 flex-wrap">
               <div>
                 <h3 class="text-sm font-bold text-slate-900">{{ t('分流组') }}</h3>
-                <p class="text-xs text-slate-500 mt-1">{{ t('拖动调整顺序（与主配置一致），点顶部「应用配置」后生效。') }}</p>
+                <p class="text-xs text-slate-500 mt-1">{{ t('拖动或用上下箭头调整顺序（与主配置一致），点顶部「应用配置」后生效。') }}</p>
               </div>
             </div>
             <div
@@ -246,6 +248,24 @@ const {
                     <div v-if="g.error" class="text-xs text-rose-600 mt-1">{{ g.error }}</div>
                   </div>
                   <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="cg-move">
+                      <button
+                        type="button"
+                        class="cg-move-btn"
+                        :disabled="idx === 0 || !!busyKey"
+                        :aria-label="t('上移')"
+                        :title="t('上移')"
+                        @click.stop="moveRoutingGroup(idx, -1)"
+                      ><CgIcon name="chevUp" :size="14" /></button>
+                      <button
+                        type="button"
+                        class="cg-move-btn"
+                        :disabled="idx === routingGroups.length - 1 || !!busyKey"
+                        :aria-label="t('下移')"
+                        :title="t('下移')"
+                        @click.stop="moveRoutingGroup(idx, 1)"
+                      ><CgIcon name="chevDown" :size="14" /></button>
+                    </span>
                     <button
                       v-if="!state.custom_config_mode"
                       type="button"

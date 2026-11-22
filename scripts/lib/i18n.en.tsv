@@ -246,3 +246,31 @@ DNS API 模式缺少 Cloudflare API Token	DNS API mode is missing the Cloudflare
 确定重置面板密码？[y/N]：	Reset the panel password? [y/N]: 
 域名 %s 没有指向本机 %s 的 AAAA 记录。请添加 AAAA 记录指向本机（Cloudflare 请设为灰云 DNS only）	The domain %s has no AAAA record pointing to this host (%s). Add an AAAA record pointing here (on Cloudflare, use the grey cloud / DNS only)
 已取消。请先把域名 AAAA 记录指向 %s，再重新运行安装命令。\n	Cancelled. Point the domain AAAA record to %s first, then rerun the install command.\n
+\n\033[1;32m✔ 域名已更换为 %s\033[0m\n	\n\033[1;32m✔ Domain changed to %s\033[0m\n
+Cloudflare API Token（回车沿用当前的 Token）：	Cloudflare API Token (Enter = keep the current token): 
+已启用自定义服务端配置，请先在面板「设置」页关闭后再更换域名	A custom server config is on; turn it off on the panel's Settings page before changing the domain
+面板里有尚未应用的修改，请先在面板点「应用配置」或「丢弃草稿」后再更换域名	The panel has changes that are not applied yet; click “Apply config” or “Discard drafts” in the panel before changing the domain
+请指定新域名：clashgate cert 新域名	Specify the new domain: clashgate cert <domain>
+新域名与当前域名相同：%s	The new domain is the same as the current one: %s
+域名 %s 没有解析到本机 %s（当前解析：%s）。请先修改 DNS 记录（Cloudflare 请设为灰云 DNS only），生效后再运行	The domain %s does not resolve to this host %s (it resolves to: %s). Update the DNS record first (on Cloudflare, use the grey cloud / DNS only), then run this again once it is live
+请先把新域名的证书放入 %s/（fullchain.pem 与 privkey.pem），再运行 clashgate cert	Put the new domain's certificate in %s/ (fullchain.pem and privkey.pem) first, then run clashgate cert
+新证书校验未通过，没有做任何修改	The new certificate did not pass the check; nothing was changed
+启用 %s 的新证书	Use the new certificate for %s
+申请 %s 的证书（%s）	Get a certificate for %s (%s)
+新配置未通过校验（mihomo -t），已恢复原来的域名、证书和节点	The new config failed the check (mihomo -t); the previous domain, certificate and nodes are restored
+退出集群后的配置未通过校验（mihomo -t），请运行 clashgate restart 查看原因	The config after leaving the cluster failed the check (mihomo -t); run clashgate restart to see why
+更换域名证书	Change domain / certificate
+无法备份当前配置，没有做任何修改	Could not back up the current config; nothing was changed
+无法写入新证书，已恢复原来的证书	Could not write the new certificate; the previous one is restored
+无法生成新的凭据，已恢复原来的域名和证书	Could not create new credentials; the previous domain and certificate are restored
+  1) 端口模式\n	  1) Port mode\n
+  2) DNS API 模式（Cloudflare）\n	  2) DNS API mode (Cloudflare)\n
+  3) 手动证书\n	  3) Manual certificate\n
+请输入 [1/2/3]（回车沿用当前：%s）：	Enter [1/2/3] (Enter = keep the current: %s): 
+请将新证书放入 \033[1;36m%s/\033[0m（fullchain.pem 与 privkey.pem）\n	Put the new certificate in \033[1;36m%s/\033[0m (fullchain.pem and privkey.pem)\n
+放好后按回车键开始检测（输入 q 取消）：	Press Enter to check it once it is in place (q to cancel): 
+确定更换为 %s？节点和订阅链接会重新生成 [y/N]：	Change to %s? Nodes and the subscription link are regenerated [y/N]: 
+证书申请失败，未做任何改动（完整输出：%s）	Getting the certificate failed; nothing was changed (full output: %s)
+面板：%s\n	Panel: %s\n
+Cloudflare API Token 无效或已过期，请重新创建（需要该域名的 Zone.DNS 编辑权限）	The Cloudflare API Token is invalid or expired; create a new one (it needs Zone.DNS edit permission for the domain)
+这个 Cloudflare 账号里找不到 %s 所在的域名：请确认域名已添加到该账号、Token 能访问它，或改用端口模式	This Cloudflare account has no zone for %s: make sure the domain is added to this account and the token can access it, or use port mode

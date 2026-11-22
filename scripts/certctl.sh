@@ -171,6 +171,30 @@ if [[ -n "${CS_ACME_SERVER:-}" ]]; then server=$CS_ACME_SERVER api=$CS_ACME_SERV
 extra=()
 [[ -n "${CS_ACME_INSECURE:-}" ]] && extra+=(--insecure)
 
+# DNS API 模式：申请前确认 Token 能在 Cloudflare 里找到域名所在的区域（acme.sh 的 dns_cf 也是这样找的，
+# 找不到时它只报 invalid domain）。连不上 Cloudflare API 时不拦，交给 acme.sh。
+cf_zone_check() {
+  local d=$BASE_DOMAIN resp code body
+  [[ -z ${CS_DNS_HOOK:-} && -z ${CS_ACME_SERVER:-} ]] || return 0   # 开发 / 测试用的 DNS 钩子
+  while [[ $d == *.* ]]; do
+    resp=$(curl -sS --max-time 15 -w '\n%{http_code}' -H "Authorization: Bearer $CF_TOKEN" \
+      "https://api.cloudflare.com/client/v4/zones?name=$d&per_page=1" 2>/dev/null) || return 0
+    code=${resp##*$'\n'}; body=${resp%$'\n'*}
+    case $code in
+      200) ;;
+      400|401|403) err "Cloudflare API Token 无效或已过期，请重新创建（需要该域名的 Zone.DNS 编辑权限）"; return 1 ;;
+      *) return 0 ;;
+    esac
+    if grep -q '"result":\[{' <<<"${body//[[:space:]]/}"; then return 0; fi
+    d=${d#*.}
+  done
+  err "这个 Cloudflare 账号里找不到 $BASE_DOMAIN 所在的域名：请确认域名已添加到该账号、Token 能访问它，或改用端口模式"
+  return 1
+}
+if [[ $ACTION == issue && $CERT_MODE == dns && -n ${CF_TOKEN:-} ]]; then
+  cf_zone_check || exit 1
+fi
+
 # 换过域名重装后，acme.sh 里可能还留着旧域名：删掉，免得 --cron 每小时为它申请失败
 for d in "$ACME_HOME"/*.*/; do
   [[ -d $d ]] || continue

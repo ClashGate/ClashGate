@@ -82,7 +82,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -350,8 +350,7 @@ console.log(JSON.stringify(out))
         self.assertNotRegex(vue, r"(?:v-if|:class|:title)=\"[^\"]*(?:panelUpdate|coreUpdate)\.has_update")
         self.assertIn("'is-update': panelHasUpdate", vue)
         self.assertIn("'is-update': coreHasUpdate", vue)
-        upd = read(os.path.join(REPO, "panel/web/src/composables/useUpdates.js"))
-        body = upd[upd.index("async function reloadPanelAfterUpgrade"):]
+        body = vue[vue.index("async function reloadPanelAfterUpgrade"):vue.index("const createRoutingForm")]
         self.assertIn("if (!reloading) upgradeInProgress.value = false", body)
         for m in re.finditer(r"window\.location\.reload\(\)", body):
             self.assertIn("reloading = true", body[max(0, m.start() - 400):m.start()], "reload without keeping the upgrading state")
@@ -504,6 +503,70 @@ class ClusterTest(unittest.TestCase):
         self.assertFalse([i for i in inbs if i["name"].startswith(P.CLUSTER_LISTENER_PREFIX)])
         self.assertNotIn("东京-1", [p.get("name") for p in proxies])
         self.assertIn("shadowsocks-t", [i["name"] for i in inbs])
+
+    def test_custom_mode_cluster_entries_follow_cluster_json(self):
+        """Since 1.37 the cluster works in custom-server mode: only the cluster entries of the user's
+        file change, the user's own listeners / proxies / groups stay."""
+        st, _, _ = self._state()
+        P.save_cluster(st)
+        user = ("mode: rule\n"
+                "listeners:\n  - name: my-ss\n    type: shadowsocks\n    port: 30333\n    listen: 0.0.0.0\n"
+                "    password: pw-12345678\n    cipher: aes-256-gcm\n"
+                "  - name: cg-cluster-stale\n    type: vless\n    port: 39999\n"
+                "proxies:\n  - name: mine\n    type: socks5\n    server: 1.1.1.1\n    port: 1080\n"
+                "  - name: 东京-1\n    type: socks5\n    server: 9.9.9.9\n    port: 1\n"
+                "proxy-groups:\n  - name: G\n    type: select\n    include-all: true\n"
+                "rules:\n  - MATCH,G\n")
+        out = P.custom_conf_with_cluster(user)
+        lst = P.extract_top_level_yaml_section(out, "listeners")
+        prox = P.extract_top_level_yaml_section(out, "proxies")
+        self.assertEqual([l["name"] for l in lst], ["my-ss", P.CLUSTER_LISTENER_PREFIX + "abc123"])
+        self.assertEqual([p["name"] for p in prox], ["mine", "东京-1"])
+        self.assertEqual(prox[1]["server"], "tokyo.example.com")   # from cluster.json, not the pasted text
+        self.assertIn("include-all: true", out)
+        self.assertIn("MATCH,G", out)
+        # A member that left: its outbound is dropped when it is named in old_names.
+        P.save_cluster({**st, "links": []})
+        out2 = P.custom_conf_with_cluster(out, old_names={"东京-1"})
+        self.assertEqual([p["name"] for p in P.extract_top_level_yaml_section(out2, "proxies")], ["mine"])
+        self.assertFalse([l for l in P.extract_top_level_yaml_section(out2, "listeners")
+                          if l["name"].startswith(P.CLUSTER_LISTENER_PREFIX)])
+        self.assertEqual(P.custom_conf_with_cluster(out2), out2)   # nothing to change: idempotent
+
+    def test_custom_mode_cluster_change_is_applied(self):
+        st, _, _ = self._state()
+        P.save_cluster({**st, "links": []})
+        base = P.assemble_config()
+        P.atomic_write(P.CUSTOM_CONF, base, 0o640)
+        g = P.apply_cluster_live.__globals__
+        try:
+            with mock.patch.dict(g, {"_wait_cluster_ports": lambda want, timeout=8.0: True}):
+                P._cluster_commit(lambda s: s["links"].extend(st["links"]))
+            live = read(P.CUSTOM_CONF)
+            self.assertEqual(read(P.CONF), live)
+            self.assertIn(P.CLUSTER_LISTENER_PREFIX + "abc123", live)
+            self.assertIn("tokyo.example.com", live)
+            rc, out = P.validate_config()
+            self.assertEqual(rc, 0, out)
+            # A failed check (here: a group naming a member that is being renamed away) restores everything.
+            self.assertIn("\nproxy-groups:\n", live)
+            pinned = live.replace("\nproxy-groups:\n", "\nproxy-groups:\n  - name: pin\n    type: select\n    proxies:\n      - 东京-1\n", 1)
+            P.atomic_write(P.CUSTOM_CONF, pinned, 0o640)
+            P.atomic_write(P.CONF, pinned, 0o640)
+            self.assertEqual(P.validate_config()[0], 0)   # valid while the member is called 东京-1
+            before = read(P.CUSTOM_CONF)
+
+            def rename(s):
+                s["links"][0]["name"] = "大阪-2"
+            with mock.patch.dict(g, {"_wait_cluster_ports": lambda want, timeout=8.0: True}):
+                with self.assertRaises(RuntimeError):
+                    P._cluster_commit(rename)
+            self.assertEqual(read(P.CUSTOM_CONF), before)
+            self.assertEqual(P.load_cluster()["links"][0]["name"], "东京-1")
+        finally:
+            if os.path.exists(P.CUSTOM_CONF):
+                os.remove(P.CUSTOM_CONF)
+            P.atomic_write(P.CONF, base, 0o640)
 
     def test_old_cluster_file_is_ignored(self):
         with open(P.CLUSTER_JSON, "w") as f:
@@ -1081,7 +1144,7 @@ class V121Test(unittest.TestCase):
         run_at = menu.index('"do_${item//-/_}"')
         for item in ("reset-sub", "reset-password"):
             self.assertLess(menu.index(f"[[ $item == {item} ]] && [[ $(ask"), run_at)
-        self.assertIn("[[ $item == update ]] && ((rc == 0)); then exec bash", menu)
+        self.assertIn("[[ $item == update || $item == cert ]] && ((rc == 0)); then exec bash", menu)
 
     def test_firewall_is_only_opened_never_closed(self):
         g = P.sync_ufw.__globals__
@@ -1294,6 +1357,184 @@ class V121Test(unittest.TestCase):
             if code == 304:
                 self.assertEqual(body, b"")
 
+    def test_deleted_nodes_stay_listed_until_applied(self):
+        node, inbs = write_default_state(extra_kinds=("shadowsocks",))
+        P.clear_pending_reload()
+        P._ensure_pending_baseline()
+        ss = inbs[0]
+        P.save_inbounds([])
+        P.record_pending_reload(op="delete", kind="shadowsocks", name=ss["name"], port=ss["port"], detail="-")
+        try:
+            items = P.Panel._pending_delete_items({ss["port"]}, P.load_pending_reload()["items"], P.read_nodes(), [])
+            self.assertEqual([(i["name"], i["pending_delete"], i["listening"], i["delete_url"]) for i in items],
+                             [(ss["name"], True, True, "")])
+            # Re-added under the same name in the draft: listed once, as the draft node.
+            self.assertEqual(P.Panel._pending_delete_items(set(), P.load_pending_reload()["items"], P.read_nodes(), [ss]), [])
+        finally:
+            P.discard_pending_reload()
+
+    def test_ui_1_37_details(self):
+        src = os.path.join(REPO, "panel/web/src")
+        app = read(os.path.join(src, "App.vue"))
+        self.assertEqual(app.count("v-cg-dialog"), 4)
+        self.assertEqual(app.count('role="dialog"'), 4)
+        self.assertEqual(app.count('aria-modal="true"'), 4)
+        self.assertNotRegex(app, r"<button(?![^>]*aria-label)[^>]*>\s*✕")
+        home = read(os.path.join(src, "pages/InboundsPage.vue"))
+        self.assertIn('id="zashboard-card"', home)
+        self.assertNotIn('id="zashboard-card"', read(os.path.join(src, "pages/OutboundsPage.vue")))
+        self.assertIn("item.pending_delete", home)
+        self.assertIn("moveRoutingGroup(idx, -1)", read(os.path.join(src, "pages/RoutingPage.vue")))
+        settings = read(os.path.join(src, "pages/SettingsPage.vue"))
+        order = [settings.index(k) for k in ('id="settings-password-card"', "setUpdateChannel('stable')",
+                                             "toggleAutoUpdate", 'id="settings-core-card"',
+                                             "setTheme('dark')", "toggleCustomServer")]
+        self.assertEqual(order, sorted(order))
+        self.assertNotIn("settings-panel-card", settings)   # the panel version lives on the home page
+        self.assertIn("'dark'", read(os.path.join(src, "theme.js")))
+        self.assertIn("t==='dark'", P.render_spa_html("x", {}))
+
+    def test_dark_theme_css_is_generated(self):
+        r = subprocess.run([sys.executable, os.path.join(REPO, "panel/web/dark-theme.py"), "--check"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, "panel/web/src/theme-dark.css is out of date: run python3 panel/web/dark-theme.py")
+        css = read(os.path.join(REPO, "panel/web/src/theme-dark.css"))
+        self.assertNotIn("prefers-color-scheme", css)   # a skin the user picks, not the default
+        for line in css.splitlines():
+            if line.startswith("html") and "{" in line and not line.startswith("html["):
+                self.fail("selector without the dark-skin prefix: " + line)
+
+    def test_cert_failure_message_unknown_cloudflare_zone(self):
+        for out in ("[x] invalid domain\nError adding TXT record to domain: _acme-challenge.a.b.c",
+                    "certctl: 这个 Cloudflare 账号里找不到 a.b.c 所在的域名：请确认域名已添加到该账号"):
+            msg = P.cert_failure_message(out, "dns")
+            self.assertIn("找不到该域名", msg, out)
+            self.assertIn("端口模式", msg)
+        self.assertIn("Token", P.cert_failure_message("certctl: Cloudflare API Token 无效或已过期", "dns"))
+        import i18n_en
+        self.assertNotRegex(i18n_en.tr(P.cert_failure_message("invalid domain", "dns"), "en"), r"[\u4e00-\u9fff]")
+
+    def _shell_fn(self, path, name):
+        src = read(os.path.join(REPO, path))
+        start = src.index(name + "() {")
+        return src[start:src.index("\n}\n", start) + 3]
+
+    def test_certctl_cloudflare_zone_precheck(self):
+        fn = self._shell_fn("scripts/certctl.sh", "cf_zone_check")
+        harness = r"""
+err() { builtin echo "ERR $*"; }
+curl() {   # FAKE: "<code> <zone that exists>"
+  local url=${@: -1} code zone; read -r code zone <<<"$FAKE"
+  builtin echo "$url" >> "$LOG"
+  if [[ $code == 000 ]]; then return 7; fi
+  if [[ $url == *"name=$zone&"* ]]; then builtin printf '{"result":[{"id":"z1","name":"%s"}],"success":true}\n%s' "$zone" "$code"
+  else builtin printf '{"result":[],"success":true}\n%s' "$code"; fi
+}
+BASE_DOMAIN=usgc.abce.kdns.fr CF_TOKEN=tok
+""" + fn + "\ncf_zone_check; echo rc=$?\n"
+        cases = (("200 kdns.fr", "rc=0", ""), ("200 example.com", "rc=1", "找不到 usgc.abce.kdns.fr"),
+                 ("403 kdns.fr", "rc=1", "Token 无效"), ("000 kdns.fr", "rc=0", ""), ("500 kdns.fr", "rc=0", ""))
+        for fake, rc, msg in cases:
+            log = os.path.join(tempfile.mkdtemp(), "log")
+            r = subprocess.run(["bash", "-c", harness], env=dict(os.environ, FAKE=fake, LOG=log),
+                               capture_output=True, text=True)
+            self.assertIn(rc, r.stdout, fake)
+            self.assertIn(msg, r.stdout, fake)
+        # Walks from the full name up to the parent domains, and stops at the first zone found.
+        log = os.path.join(tempfile.mkdtemp(), "log")
+        subprocess.run(["bash", "-c", harness], env=dict(os.environ, FAKE="200 abce.kdns.fr", LOG=log), capture_output=True)
+        asked = [re.search(r"name=([^&]+)", l).group(1) for l in read(log).splitlines()]
+        self.assertEqual(asked, ["usgc.abce.kdns.fr", "abce.kdns.fr"])
+        sh = read(os.path.join(REPO, "scripts/certctl.sh"))
+        self.assertLess(sh.index("cf_zone_check || exit 1"), sh.index("已移除旧域名的证书记录"))
+
+    def test_cli_status_counts_only_core_sockets(self):
+        fn = self._shell_fn("scripts/cmd/clashgate.sh", "core_sockets")
+        harness = r"""
+systemctl() {
+  case "$1 $2" in
+    "is-active --quiet") [[ $ACTIVE == 1 ]] ;;
+    "show -p") builtin echo 4242 ;;
+  esac
+}
+ss() { builtin printf '%s\n' \
+  'tcp LISTEN 0 4096 0.0.0.0:30111 0.0.0.0:* users:(("mihomo",pid=4242,fd=7))' \
+  'tcp LISTEN 0 128 0.0.0.0:30113 0.0.0.0:* users:(("nginx",pid=99,fd=6))'; }
+""" + fn + "\nout=$(core_sockets); for p in 30111 30113; do grep -q \":$p \" <<<\"$out\" && echo up=$p; done; echo end\n"
+        r = subprocess.run(["bash", "-c", harness], env=dict(os.environ, ACTIVE="1"), capture_output=True, text=True)
+        self.assertIn("up=30111", r.stdout)
+        self.assertNotIn("up=30113", r.stdout)
+        r = subprocess.run(["bash", "-c", harness], env=dict(os.environ, ACTIVE="0"), capture_output=True, text=True)
+        self.assertNotIn("up=", r.stdout)
+        self.assertIn("end", r.stdout)
+
+    def test_typed_reality_sni_must_answer_tls13(self):
+        g = P.check_reality_dest.__globals__
+
+        def refuse(addr, timeout=None):
+            raise ConnectionRefusedError(111, "Connection refused")
+
+        with mock.patch.object(g["socket"], "create_connection", refuse):
+            with self.assertRaises(ValueError) as cm:
+                P.check_reality_dest("dead.example.com")
+        self.assertIn("dead.example.com:443", cm.exception.args[0])
+        self.assertIn("refused", cm.exception.args[1].lower())
+        # The add-node request stops before touching any file, with the raw reason as 「详情」.
+        write_default_state()
+        before = read(P.INBOUNDS)
+        h = object.__new__(P.Panel)
+        got = {}
+        h.respond_mutation = lambda s, msg, ok=True, detail="": got.update(ok=ok, msg=msg, detail=detail)
+        hg = P.Panel.do_add.__globals__
+        with mock.patch.dict(hg, {"check_reality_dest": lambda host: (_ for _ in ()).throw(ValueError("无法连接 x", "why"))}):
+            h.do_add({}, {"kind": "vless-reality", "sni": "www.example.com", "name": "r2"})
+        self.assertEqual((got["ok"], got["detail"]), (False, "why"))
+        self.assertTrue(got["msg"].startswith("添加失败："))
+        self.assertEqual(read(P.INBOUNDS), before)
+        # Blank SNI: drawn from the built-in pool, no network check.
+        try:
+            with mock.patch.dict(hg, {"check_reality_dest": lambda host: self.fail("checked a pool SNI")}):
+                h.do_add({}, {"kind": "vless-reality", "sni": "", "name": "r3", "port": "31777"})
+            self.assertTrue(got["ok"], got)
+        finally:
+            P.clear_pending_reload()
+            write_default_state()
+
+    def test_csp_allows_only_the_panel_scripts(self):
+        import base64
+        import hashlib
+        g = P.Panel.send.__globals__
+        page = P.render_spa_html("x", {"page": "dashboard", "note": "</script><script>alert(1)</script>"})
+        inline = re.findall(r"<script>(.*?)</script>", page, re.S)
+        self.assertEqual(len(inline), 1)
+        sha = base64.b64encode(hashlib.sha256(inline[0].encode()).digest()).decode()
+        self.assertIn(f"'sha256-{sha}'", g["CSP"])
+        self.assertNotIn("unsafe-eval", g["CSP"])
+        self.assertNotIn("'unsafe-inline'", g["CSP"].split("script-src")[1].split(";")[0])
+        boot = re.search(r"<script type=application/json id=cs-boot>(.*?)</script>", page, re.S).group(1)
+        self.assertNotIn("<", boot)
+        self.assertEqual(json.loads(boot)["note"], "</script><script>alert(1)</script>")
+        self.assertIn("import './boot.js'", read(os.path.join(REPO, "panel/web/src/main.js")).splitlines()[0])
+        h = object.__new__(P.Panel)
+        h.headers = {}
+        h.command = "GET"
+        sent = []
+        h.send_response = lambda code: None
+        h.send_header = lambda k, v: sent.append((k, v))
+        h.end_headers = lambda: None
+        h.wfile = io.BytesIO()
+        h.send(200, "ok", "text/plain")
+        self.assertIn(("Content-Security-Policy", g["CSP"]), sent)
+
+    def test_home_cert_alert_only_on_problems(self):
+        src = os.path.join(REPO, "panel/web/src")
+        self.assertIn('v-if="certAlert"', read(os.path.join(src, "App.vue")))
+        certs = read(os.path.join(src, "composables/useCerts.js"))
+        body = certs[certs.index("const certAlert = computed"):]
+        body = body[:body.index("\n  })\n")]
+        for cond in ("state.mode === 'no-cert'", "certs_present === false", "certIsTemp.value", "d < 0", "d < 14"):
+            self.assertIn(cond, body)
+
     def test_uninstall_leaves_cluster_first(self):
         un = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))
         body = un[un.index("do_uninstall() {"):]
@@ -1317,7 +1558,7 @@ class V121Test(unittest.TestCase):
     def test_frontend_1_21(self):
         js = frontend_script_text()
         app = read(os.path.join(REPO, "panel/web/src/App.vue"))
-        self.assertIn("confirmUpdateCore", app)   # 1.36 also puts the core update on the home status rail
+        self.assertNotIn("confirmUpdateCore", app)   # the core update lives on the Settings page now
         self.assertIn("settings-update-core", read(os.path.join(REPO, "panel/web/src/pages/SettingsPage.vue")))
         certs = read(os.path.join(REPO, "panel/web/src/pages/CertsPage.vue"))
         for needle in ('id="cert-renew"', 'id="cert-port-guide-card"', 'id="cf-token-eye"', "cfTokenRevealed ? 'text' : 'password'"):

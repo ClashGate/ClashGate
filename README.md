@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Ubuntu%20%7C%20Debian%20%7C%20Rocky%20%7C%20Alma%20%7C%20Fedora%20%7C%20CentOS-blue" />
   <img alt="Init: systemd" src="https://img.shields.io/badge/init-systemd-blue" />
-  <img alt="Version: v1.36" src="https://img.shields.io/badge/version-v1.36-1d6fe0" />
+  <img alt="Version: v1.38" src="https://img.shields.io/badge/version-v1.38-1d6fe0" />
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" /></a>
 </p>
 
@@ -51,6 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/ClashGate/ClashGate/main/install.sh
 | `clashgate sub` | 查看订阅链接 |
 | `clashgate reset-sub` | 更换订阅链接，旧链接立即失效 |
 | `clashgate reset-password` | 随机重置面板密码 |
+| `clashgate cert 新域名` | 更换域名并申请新证书，节点与订阅链接全部重新生成 |
 
 以上命令仅证书模式可用。
 

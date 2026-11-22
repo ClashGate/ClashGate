@@ -552,6 +552,13 @@ export function usePanel() {
     return t('已运行 {m} 分钟', { m: Math.max(1, m) })
   })
 
+  // Nodes the core serves now (same count as 「节点 x/y 在线」 on the status rail).
+  const liveNodeCount = computed(() => {
+    const total = state.status && state.status.live_total
+    if (total !== undefined && total !== null) return Number(total)
+    return state.inbounds.filter((i) => !i.pending_reload || i.pending_delete).length
+  })
+
   function togglePendingDiff() {
     if (state.pending_reload_count > 0) showPendingDiff.value = !showPendingDiff.value
   }
@@ -827,7 +834,7 @@ export function usePanel() {
   // Pages that are locked in the current mode, with the toast that explains why.
   function tabLockedMsg(tab) {
     if (tab === 'advanced' && !state.custom_server_enabled) return t('高级功能请到设置页开启')
-    if ((tab === 'routing' || tab === 'cluster') && state.custom_server_enabled) {
+    if (tab === 'routing' && state.custom_server_enabled) {
       return t('已启用自定义服务端配置，请自行修改相关配置')
     }
     return ''
@@ -878,6 +885,13 @@ export function usePanel() {
     document.addEventListener('keydown', handleKeydown)
     nextTick(scrollActiveNavIntoView)
     if (pageMode.value === 'dashboard') {
+      // Tab title shows the pending count, e.g. "(3) ClashGate", so other open tabs show it too.
+      const baseTitle = document.title || 'ClashGate'
+      watch(
+        () => state.pending_reload_count,
+        (n) => { document.title = n > 0 ? `(${n}) ${baseTitle}` : baseTitle },
+        { immediate: true }
+      )
       noteTrafficSample()   // first sample: the page's own boot data
       statePollTimer = setInterval(refreshServerStateSilent, 15000)
     }
@@ -903,6 +917,7 @@ export function usePanel() {
     certExpiresDisplay,
     certDaysValue,
     certIsTemp,
+    certAlert,
     certBaselineMode,
     certModeDirty,
     certRegenDisabled,
@@ -935,6 +950,7 @@ export function usePanel() {
     routingDragOver,
     onRoutingDragStart,
     onRoutingDrop,
+    moveRoutingGroup,
   } = useRouting(shared)
   const {
     nodeNameInput,
@@ -1119,6 +1135,7 @@ export function usePanel() {
     certExpiresDisplay,
     certDaysValue,
     certIsTemp,
+    certAlert,
     certBaselineMode,
     certModeDirty,
     certRegenDisabled,
@@ -1131,6 +1148,7 @@ export function usePanel() {
     coreTone,
     nodesOnlineText,
     uptimeText,
+    liveNodeCount,
     togglePendingDiff,
     updateCoreDirect,
     confirmUpdateCore,
@@ -1214,6 +1232,7 @@ export function usePanel() {
     routingDragOver,
     onRoutingDragStart,
     onRoutingDrop,
+    moveRoutingGroup,
     tabLockedMsg,
     selectTab,
     toggleCustomServer,

@@ -7,6 +7,7 @@ const {
   pageMode,
   isXmas,
   state,
+  liveNodeCount,
   normalizeCluster,
   showPendingDiff,
   showVersionPanel,
@@ -200,7 +201,7 @@ const {
             >
               <div class="flex items-center justify-between gap-3 flex-wrap">
                 <div class="flex items-center gap-2.5">
-                  <span class="w-2.5 h-2.5 rounded-full bg-teal-500"></span>
+                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
                   <h2 class="text-base font-bold text-slate-900">{{ t('客户端订阅链接') }}</h2>
                   <span
                     class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/70"
@@ -270,6 +271,113 @@ const {
                 <code class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-mono text-xs">/etc/clashgate/client/</code>
               </div>
             </section>
+
+          <!-- Zashboard 控制面板 -->
+          <section
+            v-if="state.mode !== 'no-cert'"
+            id="zashboard-card"
+            class="cg-home-zb cg-surface rounded-2xl p-5 sm:p-6 flex flex-col gap-3.5"
+          >
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+              <div class="flex items-center gap-2.5">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                <h2 class="text-base font-bold text-slate-900">{{ t('Zashboard 控制面板') }}</h2>
+                <span
+                  class="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-semibold rounded-full tabular-nums"
+                  :class="
+                    state.controller_listening
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
+                      : 'bg-amber-50 text-amber-700 border border-amber-200/70'
+                  "
+                >
+                  {{ t('端口') }} <bdi dir="ltr">{{ state.controller_port }}</bdi> {{ state.controller_listening ? t('运行中') : t('未运行') }}
+                </span>
+              </div>
+              <div class="cg-btn-row">
+                <a
+                  :href="state.zb_url || '#'"
+                  target="_blank"
+                  rel="noopener"
+                  class="cg-btn-primary cg-btn-sm"
+                >
+                  {{ t('打开 Zashboard') }}
+                </a>
+                <button
+                  type="button"
+                  @click="copyRaw(state.zb_url, 'zb-url')"
+                  class="cg-btn-sm cg-btn-secondary"
+                >
+                  {{ copiedKey === 'zb-url' ? t('已复制地址') : t('复制地址') }}
+                </button>
+                <a
+                  href="/config/server.yaml"
+                  target="_blank"
+                  rel="noopener"
+                  class="cg-btn-sm cg-btn-secondary"
+                >
+                  {{ t('查看 Mihomo 服务端配置') }}
+                </a>
+              </div>
+            </div>
+
+            <div>
+              <div class="text-xs font-medium text-slate-500 mb-1.5">{{ t('免填密钥直连地址 (HTTPS)') }}</div>
+              <div
+                id="zb-url"
+                ref="zbUrlEl"
+                tabindex="0"
+                role="button"
+                :aria-expanded="zbUrlRevealed ? 'true' : 'false'"
+                @click="revealZbUrl"
+                @keydown.enter.prevent="zbUrlRevealed = !zbUrlRevealed"
+                @keydown.space.prevent="zbUrlRevealed = !zbUrlRevealed"
+                @blur="zbUrlRevealed = false"
+                class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f5f8fd] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer"
+                :class="zbUrlRevealed ? 'text-slate-700 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
+              >
+                {{ !state.zb_url ? '—' : zbUrlRevealed ? state.zb_url : '••••••••••••••••••••••••••••••••' }}
+              </div>
+            </div>
+
+            <div class="mt-auto pt-0.5 min-h-[28px] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-xs font-medium text-slate-500 shrink-0">{{ t('API 密钥 (Secret)：') }}</span>
+                <code
+                  id="zb-secret"
+                  ref="zbSecretEl"
+                  tabindex="0"
+                  role="button"
+                  :aria-expanded="zbSecretRevealed ? 'true' : 'false'"
+                  @click="revealZbSecret"
+                  @keydown.enter.prevent="zbSecretRevealed = !zbSecretRevealed"
+                  @keydown.space.prevent="zbSecretRevealed = !zbSecretRevealed"
+                  @blur="zbSecretRevealed = false"
+                  class="cg-input px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-emerald-50/60 font-mono text-xs transition cursor-pointer"
+                  :class="zbSecretRevealed ? 'text-slate-800 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
+                >
+                  {{ !state.mihomo_secret ? '—' : zbSecretRevealed ? state.mihomo_secret : '••••••••••••' }}
+                </code>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <button
+                  v-if="state.mihomo_secret"
+                  type="button"
+                  @click="copyRaw(state.mihomo_secret, 'zb-secret')"
+                  class="cg-btn-sm cg-btn-secondary"
+                >
+                  {{ copiedKey === 'zb-secret' ? t('已复制') : t('复制密钥') }}
+                </button>
+                <button
+                  type="button"
+                  :disabled="busyKey === 'reset-secret'"
+                  @click="resetZbSecret"
+                  class="cg-btn-sm cg-btn-secondary"
+                >
+                  {{ busyKey === 'reset-secret' ? t('重置中…') : t('重置 API 密钥') }}
+                </button>
+              </div>
+            </div>
+          </section>
 
             <!-- Right: Locked-Default Add Node Form -->
             <section class="cg-home-add cg-surface rounded-2xl p-5 sm:p-6">
@@ -450,8 +558,9 @@ const {
                   <h2 class="text-base font-bold text-slate-900 tracking-tight">{{ t('入站节点') }}</h2>
                   <span
                     class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 tabular-nums"
+                    :title="t('当前生效的节点数')"
                   >
-                    {{ state.inbounds.length }}
+                    {{ liveNodeCount }}
                   </span>
                 </div>
                 <div class="flex items-center gap-2">
@@ -459,7 +568,7 @@ const {
                     v-if="state.inbounds.length > 0"
                     type="button"
                     @click="copyRaw(state.all_proxies_yaml, 'all-proxies')"
-                    class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition cursor-pointer"
+                    class="cg-btn-sm cg-btn-secondary"
                   >
                     {{ copiedKey === 'all-proxies' ? t('已复制全部') : t('复制全部配置') }}
                   </button>
@@ -470,18 +579,22 @@ const {
                 v-if="state.inbounds.length === 0"
                 class="cg-empty py-6 px-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/40 text-center text-sm text-slate-500"
               >
-                {{ t('暂无入站节点，请在上方添加节点') }}
+                {{ t('暂无入站节点，请先添加节点') }}
               </div>
 
               <div v-else class="divide-y divide-slate-100 border border-slate-200/80 rounded-2xl overflow-hidden">
                 <div
                   v-for="item in state.inbounds"
                   :key="item.key"
-                  class="p-4 hover:bg-emerald-50/35 transition flex flex-wrap items-center justify-between gap-3"
+                  class="p-4 transition flex flex-wrap items-center justify-between gap-3"
+                  :class="item.pending_delete ? 'bg-slate-50/70' : 'hover:bg-emerald-50/35'"
                 >
                   <div class="space-y-1 min-w-0 flex-[1_1_12rem]">
                     <div class="flex items-center gap-2 flex-wrap">
-                      <span class="font-bold text-sm text-slate-900 cg-wrap">{{ item.name }}</span>
+                      <span
+                        class="font-bold text-sm cg-wrap"
+                        :class="item.pending_delete ? 'text-slate-400 line-through' : 'text-slate-900'"
+                      >{{ item.name }}</span>
                       <span
                         class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60"
                       >
@@ -490,25 +603,30 @@ const {
                       <span
                         class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full"
                         :class="
-                          item.listening
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
-                            : item.pending_reload
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
-                              : 'bg-rose-50 text-rose-700 border border-rose-200/60'
+                          item.pending_delete
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
+                            : item.listening
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+                              : item.pending_reload
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200/60'
+                                : 'bg-rose-50 text-rose-700 border border-rose-200/60'
                         "
                       >
                         <span
                           class="w-1.5 h-1.5 rounded-full"
-                          :class="item.listening ? 'bg-emerald-500' : item.pending_reload ? 'bg-amber-500' : 'bg-rose-500'"
+                          :class="item.pending_delete || (!item.listening && item.pending_reload) ? 'bg-amber-500' : item.listening ? 'bg-emerald-500' : 'bg-rose-500'"
                         ></span>
-                        {{ item.listening ? t('运行中') : item.pending_reload ? t('待应用') : t('未运行') }}
+                        {{ item.pending_delete ? t('待删除') : item.listening ? t('运行中') : item.pending_reload ? t('待应用') : t('未运行') }}
                       </span>
                     </div>
                     <div class="text-xs text-slate-500 tabular-nums">{{ t('端口') }} <bdi dir="ltr" class="font-mono">{{ item.port }}</bdi></div>
                   </div>
 
+                  <div v-if="item.pending_delete" class="text-xs text-slate-500">
+                    {{ t('点顶部「应用配置」后删除') }}
+                  </div>
                   <!-- Actions: 复制配置 + 重置密码 + 删除 -->
-                  <div class="flex items-center gap-2 flex-wrap min-w-0 max-w-full">
+                  <div v-else class="flex items-center gap-2 flex-wrap min-w-0 max-w-full">
                     <button
                       type="button"
                       @click="copyRaw(item.single_config, `single-${item.key}`)"

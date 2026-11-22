@@ -1,9 +1,9 @@
-// ClashGate panel skins. 'default' is the standard blue look; the choice is kept in localStorage
+// ClashGate panel skins. 'default' is the standard blue look, 'dark' its dark version (theme-dark.css); the choice is kept in localStorage
 // (per browser) and applied to <html data-theme> by an inline <head> script before first paint.
 import { ref } from 'vue'
 
 const KEY = 'clashgate_theme'
-export const THEMES = ['default', 'christmas']
+export const THEMES = ['default', 'dark', 'christmas']
 
 function detect() {
   try {
