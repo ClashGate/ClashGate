@@ -1,6 +1,6 @@
 # ClashGate Agent Handoff Guide
 
-This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.38**. Next version number: **1.39**. Public repository: https://github.com/ClashGate/ClashGate
+This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.39**. Next version number: **1.40**. Public repository: https://github.com/ClashGate/ClashGate
 
 ---
 
@@ -79,7 +79,7 @@ Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snel
 | `panel/cg_qr.py` | QR codes |
 | `panel/routing_mgr.py` | Server-side routing: `/etc/clashgate/routing/` + `routing.json`, assembled into the template |
 | `panel/i18n_en.py` | English translations of server API messages (source strings stay Chinese) |
-| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.38.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
+| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.39.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
 | `panel/dist/` | **Committed build output.** After frontend changes, run `cd panel/web && npm ci && npm run build` and commit the `panel/dist` updates (CI checks `git diff --exit-code -- panel/dist`) |
 | `resources/server.yaml.tpl`, `resources/client.yaml.tpl` | Server / client config templates |
 | `resources/routing/` | Default routing groups (节点选择 / node select, 漏网之鱼 / final / unmatched) |
@@ -96,7 +96,7 @@ Inbound protocols the panel can add: VLESS Reality, Shadowsocks, Hysteria2, Snel
 
 ---
 
-## 3. Current CLI commands (v1.38)
+## 3. Current CLI commands (v1.39)
 
 With no argument: opens the management menu if already installed, otherwise starts install. `clashgate help` lists every subcommand.
 
@@ -145,7 +145,7 @@ The public default branch is `main` (stable). `test` is the test channel.
 2. The project owner verifies on a real machine (the owner clicks 「检查更新」 (Check for updates) in the panel).
 3. **Push to `main` only after the owner explicitly agrees.** A version that fails acceptance is retired and must not be reused.
 
-Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.38`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.39`, `1.40`, and so on.
+Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.39`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.39`, `1.40`, and so on.
 
 Commit messages are in English. **Never force push.**
 
@@ -244,15 +244,17 @@ Tests **must not** re-issue certificates against the Let's Encrypt production en
 | 1.35 | `clashgate update` keeps the live config while panel drafts are pending; the panel clears drafts that an older update already made live |
 | 1.36 | Node status counts only the core's own sockets; a manual inbound port held by another program is rejected; `/api/*` answers 401 when the session expired; certificate issue / mode switch runs as a background job the page polls (with elapsed time); `clashgate reset-sub` drops a pending panel link change; the CLI menu confirms link / password resets and reopens after `update`; the panel never closes firewall ports; an update that waited for panel drafts lands once they are applied or discarded; IPv6-only servers; 「应用配置」 asks first when nothing is pending; the global login cap spares sources that signed in before; `usePanel.js` split into per-page composables; home status rail redesigned (live nodes online + core uptime, pending count or 「已全部生效」, traffic split + speed between two refreshes, per-component update shortcuts); the page links `/assets/app.js` and `style.css` with a `?v=<content hash>` (cached for a year, ETag / 304 otherwise) instead of inlining ~450 kB on every visit |
 | 1.37 | Added `clashgate cert [domain]` (menu: 「更换域名证书」): change the domain; the new certificate comes first and a failure changes nothing; then the cluster is left, the inbound nodes are reset to one new VLESS Reality node and the subscription token / Zashboard secret are rotated. Panel UI: nodes deleted in the draft stay listed as 「待删除」 until applied; routing groups get up / down buttons (dragging does not work on touch screens); the four modals are real dialogs (focus moves in, Tab stays inside, focus returns; ✕ has a label); Zashboard card moved to the home page; Settings order: password, update channel, auto update, core, panel version (new, with 检查更新), skin, custom server last; the tab title shows the pending count; new opt-in 「深色」 skin (owner request); the cluster works in custom-server mode: `custom_conf_with_cluster` replaces only the cluster listeners / member outbounds in the user's file (on every cluster change and when a custom config is saved), the user's proxy-groups decide whether members are used; a change the user's file rejects (e.g. a group naming a member that renames) is rolled back |
-| 1.38 | DNS API mode checks before asking Let's Encrypt that the token can see the domain's Cloudflare zone (clear message instead of acme.sh's `invalid domain`); `clashgate status` counts only the core's sockets; the home page shows a certificate alert only when the certificate is temporary, missing, expired or under 14 days; a typed Reality SNI must answer TLS 1.3 from the server; the Settings 面板版本 card is gone (the home status rail has it); Content-Security-Policy: scripts only from the panel plus the hashed skin snippet, boot data is a JSON block read by `src/boot.js` |
+| 1.38 | DNS API mode checks before asking Let's Encrypt that the token can see the domain's Cloudflare zone (clear message instead of acme.sh's `invalid domain`); `clashgate status` counts only the core's sockets; the home page shows a certificate alert only when the certificate is temporary, missing, expired or under 14 days; a typed Reality SNI must answer TLS 1.3 from the server; the Settings 面板版本 card is gone (the home status rail has it); Content-Security-Policy: scripts only from the panel plus the hashed skin snippet, boot data is a JSON block read by `src/boot.js`; cluster members are exits only: each cluster inbound has `proxy: DIRECT`, so traffic from another panel never follows this server's rules and A -> B -> A cannot loop (Mihomo's loopback detector only catches a core dialing itself); existing links get it on the first panel start after the update (`refresh_cluster_fragments`), in custom-server mode too (the user's file gets it back on every cluster change / save even if it was deleted by hand) |
+| 1.39 | Installer and panel core update pick the Mihomo build by x86-64 level from `/proc/cpuinfo` (v3 / plain / v2 / v1 / compatible, best first) and silently try the next one when `-v` fails (no message: it is a one-click installer, the user only sees 「已安装」): the plain amd64 build needs an x86-64-v3 CPU and stopped installs on older VPS CPUs ("can only be run on AMD64 processors with v3 microarchitecture support"); the test scripts use the `amd64-compatible` build. Cluster add / check / remove / leave run in the background from the page (`async=1`, `/api/cluster-task-status`); a blocking overlay shows the current step (connecting, the other panel reloading, this panel reloading, notifying members) and the seconds, and comes back after a page reload; other panels and the CLI still get a blocking answer. A click while another action is running now says so instead of doing nothing |
 
-Next version: **1.39**.
+Next version: **1.40**.
 
 ---
 
 ## 9. Deferred / do not
 
 - **AI config assistant:** deferred. Do not build it unless the owner explicitly asks.
+- **Cluster: no multi-hop relays.** A cluster member is an exit only: every cluster inbound keeps `proxy: DIRECT` (`cluster_listener_from_link`), so traffic from another panel leaves directly and A -> B -> A cannot loop (Mihomo's loopback detector only catches a core dialing itself). Do not remove it, and do not add chained relays (A -> B -> C); the owner decided they are not needed.
 - **The root `README.md` / `README.en.md` must not mention the historical test repository or any other internal repository name.** Compatibility logic for older installs from that repository exists in the code; do not delete it, but do not put it in user docs.
 - Do not add features, options, subcommands, or extra scope on your own. Do not do work that was not requested.
 - Do not rewrite user docs to “explain the design”; keep them short. This handoff guide is for agents; do not copy its process notes into the README.

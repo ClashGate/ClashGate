@@ -90,6 +90,8 @@ _CERT_FILE_EXT
 _CERT_SECTIONS
 _CLUSTER_OP_LOCK
 _CLUSTER_PORT_HOLD
+_CLUSTER_TASK
+_CLUSTER_TASK_LOCK
 _CLUSTER_TICKETS
 _CLUSTER_TICKETS_LOCK
 _CORE_UPDATE_TASK
@@ -200,6 +202,7 @@ cluster_proxy_from_link
 cluster_proxy_names
 cluster_push_name_async
 cluster_report_text
+cluster_stage
 cluster_sync
 cluster_ufw_specs
 collect_ufw_specs
@@ -284,6 +287,7 @@ reconcile_pending_with_live
 record_core_check
 record_panel_check
 record_pending_reload
+refresh_cluster_fragments
 refresh_template_if_flagged
 refresh_update_check_for_version
 register_cloudflare_masque

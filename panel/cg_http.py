@@ -707,6 +707,8 @@ class Panel(BaseHTTPRequestHandler):
             return self.send(200, json.dumps(d, ensure_ascii=False), "application/json; charset=utf-8")
         if path == "/api/cert-task-status":
             return self.cert_task_status(s)
+        if path == "/api/cluster-task-status":
+            return self.cluster_task_status(s)
         if path == "/api/update-core-status":
             with _CORE_UPDATE_TASK_LOCK:
                 tstate = dict(_CORE_UPDATE_TASK)
@@ -815,9 +817,9 @@ class Panel(BaseHTTPRequestHandler):
         if path == "/cluster/remove":
             return self.do_cluster_remove(s, form)
         if path == "/cluster/sync":
-            return self.do_cluster_sync(s)
+            return self.do_cluster_sync(s, form)
         if path == "/cluster/leave":
-            return self.do_cluster_leave_ui(s)
+            return self.do_cluster_leave_ui(s, form)
         if path == "/proxies/add":
             return self.do_add_proxies(s, form)
         if path == "/proxies/delete":
@@ -1172,19 +1174,55 @@ class Panel(BaseHTTPRequestHandler):
         return self._cjson(200, {"ok": True})
 
     # -- cluster: this panel's own page (session + CSRF)
-    def _cluster_job(self, s, job):
-        if not _CLUSTER_OP_LOCK.acquire(blocking=False):
-            return self.respond_mutation(s, "另一个集群操作正在进行，请稍候再试", False)
+    @staticmethod
+    def _run_cluster_job(job) -> tuple:
         try:
-            msg, ok = job()
+            return job()
         except (ClusterError, ValueError) as e:
-            msg, ok = str(e), False
+            return str(e), False
         except Exception as e:   # never drop the connection on an unexpected error
             sys.stderr.write(f"cluster job failed: {e!r}\n")
-            msg, ok = f"集群操作失败：{e}", False
-        finally:
-            _CLUSTER_OP_LOCK.release()
-        return self.respond_mutation(s, msg, ok)
+            return f"集群操作失败：{e}", False
+
+    def _cluster_job(self, s, job, form=None, kind=""):
+        """Run a cluster operation. With async=1 (the page) it runs in a background thread and the page
+        polls /api/cluster-task-status for the current step: adding a panel waits for both cores to
+        reload and can take a minute, longer than a request should hang."""
+        if not _CLUSTER_OP_LOCK.acquire(blocking=False):
+            return self.respond_mutation(s, "另一个集群操作正在进行，请稍候再试", False)
+        if not ((form or {}).get("async") == "1" and self.is_ajax()):
+            try:
+                msg, ok = self._run_cluster_job(job)
+            finally:
+                _CLUSTER_OP_LOCK.release()
+            return self.respond_mutation(s, msg, ok)
+        with _CLUSTER_TASK_LOCK:
+            _CLUSTER_TASK.update(id=_CLUSTER_TASK["id"] + 1, running=True, kind=kind, ok=None, msg="", stage="",
+                                 started_at=time.time(), finished_at=0.0)
+            task_id = _CLUSTER_TASK["id"]
+
+        def worker():
+            msg, ok = "集群操作失败", False
+            try:
+                msg, ok = self._run_cluster_job(job)
+            finally:
+                _CLUSTER_OP_LOCK.release()
+                with _CLUSTER_TASK_LOCK:
+                    _CLUSTER_TASK.update(running=False, ok=ok, msg=msg, stage="", finished_at=time.time())
+
+        threading.Thread(target=worker, name=f"cluster-{kind or 'task'}", daemon=True).start()
+        return self.send(200, json.dumps({"ok": True, "running": True, "id": task_id}), "application/json; charset=utf-8")
+
+    def cluster_task_status(self, s):
+        with _CLUSTER_TASK_LOCK:
+            t = dict(_CLUSTER_TASK)
+        if t["running"]:
+            payload = {"ok": True, "running": True, "id": t["id"], "kind": t["kind"], "stage": self.tr(t["stage"]) if t["stage"] else "",
+                       "elapsed": int(time.time() - t["started_at"])}
+        else:
+            payload = {"ok": t["ok"] is not False, "running": False, "done": t["ok"] is not None, "id": t["id"], "kind": t["kind"],
+                       "msg": t["msg"], "state": self.build_client_state(s)}
+        return self.send(200, json.dumps(payload, ensure_ascii=False), "application/json; charset=utf-8")
 
     def do_cluster_add(self, s, form):
         def job():
@@ -1197,15 +1235,15 @@ class Panel(BaseHTTPRequestHandler):
             msg = f"已和「{link['name']}」双向互联，双方都已把对方写入服务端出站并立即生效"
             extra = cluster_report_text(rep)
             return (f"{msg}；{extra}" if extra else msg), True
-        return self._cluster_job(s, job)
+        return self._cluster_job(s, job, form, "add")
 
-    def do_cluster_sync(self, s):
+    def do_cluster_sync(self, s, form=None):
         def job():
             if not load_cluster()["links"]:
                 return "集群里还没有其他面板", True
             rep = cluster_sync()
             return cluster_report_text(rep) or "集群成员都在线，互联完整", True
-        return self._cluster_job(s, job)
+        return self._cluster_job(s, job, form, "sync")
 
     def do_cluster_remove(self, s, form):
         def job():
@@ -1214,13 +1252,16 @@ class Panel(BaseHTTPRequestHandler):
             if not x:
                 return "集群成员不存在", False
             others = [l for l in st["links"] if l["instance"] != x["instance"]]
+            cluster_stage("本机正在删除互联并重载内核")
             _drop_links({x["instance"]}, tombstone=True)
             missed = []
             for y in others:
+                cluster_stage(f"正在通知「{y.get('name', '')}」")
                 try:
                     cluster_call(y, "/api/cluster/forget", {"target": x["instance"]}, timeout=40)
                 except ClusterError:
                     missed.append(y.get("name", ""))
+            cluster_stage(f"正在通知「{x.get('name', '')}」")
             try:
                 cluster_call(x, "/api/cluster/leave", {"all": "1"}, timeout=30)
             except ClusterError:
@@ -1229,9 +1270,9 @@ class Panel(BaseHTTPRequestHandler):
             if missed:
                 return f"已把「{name}」移出集群；「{'、'.join(missed)}」暂时联系不上，恢复后在任意成员上点「检查」会自动清理", True
             return f"已把「{name}」移出集群，所有成员上和它的互联都已删除", True
-        return self._cluster_job(s, job)
+        return self._cluster_job(s, job, form, "remove")
 
-    def do_cluster_leave_ui(self, s):
+    def do_cluster_leave_ui(self, s, form=None):
         def job():
             n, missed = cluster_leave_all()
             if not n:
@@ -1239,7 +1280,7 @@ class Panel(BaseHTTPRequestHandler):
             if missed:
                 return f"本机已退出集群；「{'、'.join(missed)}」暂时联系不上，恢复后在它们上面点「检查」会自动删除和本机的互联", True
             return "本机已退出集群，其他成员上和本机的互联都已删除", True
-        return self._cluster_job(s, job)
+        return self._cluster_job(s, job, form, "leave")
 
     def do_discard_pending(self, s):
         with LOCK:
@@ -2209,6 +2250,11 @@ def serve(cfg_path):
             refresh_template_if_flagged()
     except Exception as e:
         sys.stderr.write(f"pending reconcile failed: {e}\n")
+    try:
+        if refresh_cluster_fragments():
+            sys.stderr.write("cluster links updated: members are exits only (no loops)\n")
+    except Exception as e:
+        sys.stderr.write(f"cluster refresh failed: {e}\n")
     start_traffic_poller(30)
     refresh_update_check_for_version()
     start_weekly_update_check()

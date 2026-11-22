@@ -311,6 +311,31 @@ def detect_cpu_arch() -> str:
     raise RuntimeError(f"不支持的 CPU 架构：{mach}")
 
 
+def amd64_level() -> int:
+    """x86-64 microarchitecture level (1/2/3) from /proc/cpuinfo. Mihomo's plain amd64 build needs v3."""
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as f:
+            line = next((l for l in f if l.startswith("flags")), "")
+    except OSError:
+        return 1
+    flags = set(line.partition(":")[2].split())
+    if not {"cx16", "lahf_lm", "popcnt", "pni", "sse4_1", "sse4_2", "ssse3"} <= flags:
+        return 1
+    if not {"avx", "avx2", "bmi1", "bmi2", "f16c", "fma", "abm", "movbe", "xsave"} <= flags:
+        return 2
+    return 3
+
+
+def mihomo_asset_candidates(arch: str, tag: str, level: int = None) -> list:
+    """Release asset names to try for this machine, best first (same order as core.sh)."""
+    if arch != "amd64":
+        return [f"mihomo-linux-{arch}-{tag}.gz"]
+    level = amd64_level() if level is None else level
+    builds = {3: ["amd64-v3", "amd64", "amd64-v2", "amd64-v1", "amd64-compatible"],
+              2: ["amd64-v2", "amd64-v1", "amd64-compatible"]}.get(level, ["amd64-v1", "amd64-compatible"])
+    return [f"mihomo-linux-{b}-{tag}.gz" for b in builds]
+
+
 def _http_get_text(url: str, timeout: int = 20, headers: dict = None) -> str:
     hdrs = {"User-Agent": f"clashgate/{VERSION}"}
     if headers:
@@ -745,14 +770,11 @@ def update_mihomo_core_direct() -> tuple:
         record_core_check(local_ver, latest_tag, False)
         return False, local_ver, latest_tag, f"已是最新版本 {latest_tag}，无需更新"
     arch = detect_cpu_arch()
-    asset_name = f"mihomo-linux-{arch}-{latest_tag}.gz"
-    download_url = ""
-    for asset in rel.get("assets") or []:
-        if isinstance(asset, dict) and asset.get("name") == asset_name:
-            download_url = str(asset.get("browser_download_url") or "")
-            break
-    if not download_url:
-        raise RuntimeError(f"GitHub 版本 {latest_tag} 中未找到 {asset_name}")
+    by_name = {str(a.get("name") or ""): str(a.get("browser_download_url") or "")
+               for a in (rel.get("assets") or []) if isinstance(a, dict)}
+    candidates = [(n, by_name[n]) for n in mihomo_asset_candidates(arch, latest_tag) if by_name.get(n)]
+    if not candidates:
+        raise RuntimeError(f"GitHub 版本 {latest_tag} 中没有适合 {arch} 的 Mihomo 内核文件")
 
     bin_path = resolve_mihomo_bin()
     os.makedirs(os.path.dirname(bin_path) or CS_ROOT, mode=0o775, exist_ok=True)
@@ -760,23 +782,29 @@ def update_mihomo_core_direct() -> tuple:
     tmp_bin = bin_path + ".new"
     old_bin = bin_path + ".old"
     try:
-        req = urllib.request.Request(download_url, headers={"User-Agent": f"clashgate/{VERSION}"})
-        try:
-            with urllib.request.urlopen(req, timeout=180) as resp, open(tmp_gz, "wb") as out_f:
-                shutil.copyfileobj(resp, out_f)
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"下载内核文件失败（HTTP {e.code}）") from None
-        except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as e:
-            reason = getattr(e, "reason", e)
-            raise RuntimeError(f"下载内核文件超时或网络中断，请稍后重试（{reason}）") from None
-        try:
-            with gzip.open(tmp_gz, "rb") as gz_f, open(tmp_bin, "wb") as bin_f:
-                shutil.copyfileobj(gz_f, bin_f)
-        except Exception as e:
-            raise RuntimeError(f"解压内核文件失败：{e}") from None
-        os.chmod(tmp_bin, 0o755)
-        rc, v_out = run([tmp_bin, "-v"], timeout=10)
-        if rc != 0:
+        v_out = ""
+        for asset_name, download_url in candidates:
+            req = urllib.request.Request(download_url, headers={"User-Agent": f"clashgate/{VERSION}"})
+            try:
+                with urllib.request.urlopen(req, timeout=180) as resp, open(tmp_gz, "wb") as out_f:
+                    shutil.copyfileobj(resp, out_f)
+            except urllib.error.HTTPError as e:
+                raise RuntimeError(f"下载内核文件失败（HTTP {e.code}）") from None
+            except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as e:
+                reason = getattr(e, "reason", e)
+                raise RuntimeError(f"下载内核文件超时或网络中断，请稍后重试（{reason}）") from None
+            try:
+                with gzip.open(tmp_gz, "rb") as gz_f, open(tmp_bin, "wb") as bin_f:
+                    shutil.copyfileobj(gz_f, bin_f)
+            except Exception as e:
+                raise RuntimeError(f"解压内核文件失败：{e}") from None
+            os.chmod(tmp_bin, 0o755)
+            rc, v_out = run([tmp_bin, "-v"], timeout=10)
+            if rc == 0:
+                break
+            # e.g. "can only be run on AMD64 processors with v3 microarchitecture support": try the next build
+            sys.stderr.write(f"core update: {asset_name} does not run here: {v_out[:200]}\n")
+        else:
             raise RuntimeError(f"下载的 Mihomo 内核无法运行：{v_out}")
         # Validate the live config with the NEW binary before swapping it in, so a
         # failed check leaves the working core untouched.

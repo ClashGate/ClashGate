@@ -295,6 +295,10 @@ html[data-theme="dark"] .cg-ver-up:hover:not(:disabled) {
   background: #19273a;
   border-color: #1c334e;
 }
+html[data-theme="dark"] .cg-spin {
+  border: 2px solid #19273a;
+  border-top-color: #1d6fe0;
+}
 html[data-theme="dark"] .cg-move {
   border: 1px solid #23272f;
 }

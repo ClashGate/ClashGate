@@ -113,6 +113,10 @@ def cluster_listener_from_link(l: dict) -> dict:
         "listen": "0.0.0.0",
         "users": [{"username": "cluster", "uuid": str(inb["uuid"]), "flow": CLUSTER_FLOW}],
         "decryption": str(inb["decryption"]),
+        # A member is an exit, never a relay: traffic from another panel leaves here directly instead of
+        # following this server's rules, so a selection (Zashboard) that points back can never loop.
+        # (Mihomo's own loopback detector only catches a core dialing itself, not A -> B -> A.)
+        "proxy": "DIRECT",
     }
 
 
@@ -495,6 +499,32 @@ def _cluster_commit(mutate) -> dict:
         return res
 
 
+def refresh_cluster_fragments() -> bool:
+    """After an update, bring existing links to the current listener shape (1.38: exit only) in the
+    running config. Nothing to do without links or when the config already has it."""
+    st = load_cluster()
+    if not st["links"]:
+        return False
+    stale = _read_frag(FRAG_CLUSTER_LISTENERS) != render_cluster_listeners(st)
+    if not stale and is_custom_config_mode():
+        # Custom mode: the user's file holds the cluster entries (multi-line YAML), compare it directly.
+        with open(CUSTOM_CONF) as f:
+            raw = f.read()
+        stale = custom_conf_with_cluster(raw) != raw
+        if not stale:
+            return False
+    if not stale:
+        try:
+            with open(CONF) as f:
+                stale = '"proxy": "DIRECT"' not in f.read()
+        except OSError:
+            stale = True
+    if not stale:
+        return False
+    _cluster_commit(lambda s: None)
+    return True
+
+
 def _parse_node(obj: dict, prefix: str = "") -> dict:
     try:
         port = int(obj.get(prefix + "port"))
@@ -507,10 +537,24 @@ def _parse_node(obj: dict, prefix: str = "") -> dict:
     return {"port": port, "uuid": uid, "encryption": enc}
 
 
+# The running cluster operation started from this panel's page (one at a time, _CLUSTER_OP_LOCK).
+# `stage` is a short Chinese line the page shows while it waits (translated when sent).
+_CLUSTER_TASK = {"id": 0, "running": False, "kind": "", "ok": None, "msg": "", "stage": "", "started_at": 0.0, "finished_at": 0.0}
+_CLUSTER_TASK_LOCK = threading.Lock()
+
+
+def cluster_stage(text: str):
+    """Report what the running cluster operation is doing now (a no-op outside a page task)."""
+    with _CLUSTER_TASK_LOCK:
+        if _CLUSTER_TASK["running"]:
+            _CLUSTER_TASK["stage"] = text
+
+
 def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
     """Create a two-way link with the panel at `base` (auth: password or one-time ticket).
 
     Returns (link, the other panel's member list). Raises ClusterError; nothing is left behind on failure."""
+    cluster_stage(f"正在连接 {urlparse(base).hostname or base}")
     hello = cluster_hello(base)
     r_inst = str(hello["instance"])
     if expect_instance and r_inst != expect_instance:
@@ -532,6 +576,7 @@ def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
     inb = _cluster_new_inbound()
     key = secrets.token_urlsafe(32)
     try:
+        cluster_stage(f"「{rname}」正在创建集群节点并重载内核")
         status, obj, _ = cluster_http(base, "/api/cluster/join", {
             **auth, "instance": my_inst, "name": local_node_name(), "url": self_url, "version": VERSION,
             "key": key, "port": inb["port"], "uuid": inb["uuid"], "encryption": inb["_enc"]}, timeout=120)
@@ -557,6 +602,7 @@ def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
             st["pending"] = [p for p in st["pending"] if p.get("instance") != r_inst]
             st["removed"].pop(r_inst, None)
         try:
+            cluster_stage("本机正在写入集群配置并重载内核")
             _cluster_commit(add)
         except Exception as e:
             try:   # do not leave a half link on the other side
@@ -610,10 +656,12 @@ def cluster_leave_all(notify: bool = True) -> tuple:
     unreachable = []
     if notify:
         for l in links:
+            cluster_stage(f"正在通知「{l.get('name', '')}」")
             try:
                 cluster_call(l, "/api/cluster/leave", timeout=30)
             except ClusterError:
                 unreachable.append(l.get("name", ""))
+    cluster_stage("本机正在删除互联并重载内核")
     _drop_links({l["instance"] for l in links})
     return len(links), unreachable
 
@@ -655,6 +703,7 @@ def cluster_sync() -> dict:
     st = load_cluster()
     removed = dict(st["removed"])
     for l in list(st["links"]):
+        cluster_stage(f"正在检查「{l.get('name', '')}」")
         try:
             obj = cluster_call(l, "/api/cluster/status", {"name": local_node_name(), "url": local_cluster_url(), "version": VERSION}, timeout=20)
         except ClusterRemoteError as e:
@@ -731,6 +780,7 @@ def cluster_sync() -> dict:
             q_knows = {m["instance"] for m in views.get(q["instance"], [])}
             if q["instance"] in p_knows or p["instance"] in q_knows:
                 continue
+            cluster_stage(f"正在让「{p.get('name', '')}」和「{q.get('name', '')}」互联")
             try:
                 ticket = cluster_issue_ticket(q, p)
                 cluster_call(p, "/api/cluster/connect", {"target_url": q["url"], "target_instance": q["instance"],

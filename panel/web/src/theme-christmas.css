@@ -264,3 +264,4 @@ html[data-theme="christmas"] .cg-top::after {
 @media (prefers-reduced-motion: reduce) {
   .cg-xmas-snow { display: none; }
 }
+html[data-theme="christmas"] .cg-spin { border-color: #d8f0e0; border-top-color: var(--cgx-green); }

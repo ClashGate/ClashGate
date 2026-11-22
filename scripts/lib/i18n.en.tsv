@@ -130,7 +130,6 @@ apt-get update 失败，请检查软件源和网络	apt-get update failed; check
 依赖安装失败（%s）：%s	Dependency installation failed (%s): %s
 安装最新稳定版 Mihomo 内核	Installing the latest stable Mihomo core
 无法获取 Mihomo 版本信息（请确认服务器可以访问 GitHub）	Cannot fetch Mihomo release info (make sure the server can reach GitHub)
-版本 %s 中没有找到 mihomo-linux-%s-%s.gz	mihomo-linux-%s-%s.gz not found in release %s
 下载失败：%s	Download failed: %s
 下载的 Mihomo 无法运行	The downloaded Mihomo cannot run
 已安装 %s -> %s	Installed %s -> %s
@@ -274,3 +273,4 @@ Cloudflare API Token（回车沿用当前的 Token）：	Cloudflare API Token (E
 面板：%s\n	Panel: %s\n
 Cloudflare API Token 无效或已过期，请重新创建（需要该域名的 Zone.DNS 编辑权限）	The Cloudflare API Token is invalid or expired; create a new one (it needs Zone.DNS edit permission for the domain)
 这个 Cloudflare 账号里找不到 %s 所在的域名：请确认域名已添加到该账号、Token 能访问它，或改用端口模式	This Cloudflare account has no zone for %s: make sure the domain is added to this account and the token can access it, or use port mode
+版本 %s 中没有找到适合 %s 的 Mihomo 内核文件	Release %s has no Mihomo core for %s

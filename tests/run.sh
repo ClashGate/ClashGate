@@ -29,7 +29,7 @@ if [[ -z ${MIHOMO_BIN:-} ]]; then
   MIHOMO_BIN=tests/.cache/mihomo
   if ! { [[ -x $MIHOMO_BIN ]] && "$MIHOMO_BIN" -v | grep -q "$MIHOMO_VERSION"; }; then
     mkdir -p tests/.cache
-    case $(uname -m) in x86_64) a=amd64 ;; aarch64|arm64) a=arm64 ;; *) echo "unsupported arch" >&2; exit 1 ;; esac
+    case $(uname -m) in x86_64) a=amd64-compatible ;;   # plain amd64 needs an x86-64-v3 CPU aarch64|arm64) a=arm64 ;; *) echo "unsupported arch" >&2; exit 1 ;; esac
     curl -fsSL "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-${a}-${MIHOMO_VERSION}.gz" \
       | gunzip > "$MIHOMO_BIN"
     chmod +x "$MIHOMO_BIN"

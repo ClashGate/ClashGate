@@ -53,7 +53,7 @@ fi
 
 # 2. Core binary (official MetaCubeX release)
 if [[ -z ${MIHOMO_BIN:-} ]]; then
-  case $(uname -m) in x86_64) a=amd64 ;; aarch64|arm64) a=arm64 ;; *) die "unsupported arch $(uname -m)" ;; esac
+  case $(uname -m) in x86_64) a=amd64-compatible ;;   # plain amd64 needs an x86-64-v3 CPU aarch64|arm64) a=arm64 ;; *) die "unsupported arch $(uname -m)" ;; esac
   MIHOMO_BIN=$WORK/core
   curl -fsSL --max-time 120 "https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-${a}-${MIHOMO_VERSION}.gz" \
     | gunzip > "$MIHOMO_BIN" || die "core download failed"

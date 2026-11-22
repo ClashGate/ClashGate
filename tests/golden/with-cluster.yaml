@@ -129,4 +129,4 @@ listeners:
       server-names:
         - www.microsoft.com
   - {"name": "ss-fixed", "type": "shadowsocks", "port": 30101, "listen": "0.0.0.0", "password": "fixed-secret", "cipher": "chacha20-ietf-poly1305", "udp": true}
-  - {"name": "cg-cluster-abc123", "type": "vless", "port": 31001, "listen": "0.0.0.0", "users": [{"username": "cluster", "uuid": "66666666-7777-4888-9999-000000000000", "flow": "xtls-rprx-vision"}], "decryption": "mlkem768x25519plus.native.600s.fixed-in"}
+  - {"name": "cg-cluster-abc123", "type": "vless", "port": 31001, "listen": "0.0.0.0", "users": [{"username": "cluster", "uuid": "66666666-7777-4888-9999-000000000000", "flow": "xtls-rprx-vision"}], "decryption": "mlkem768x25519plus.native.600s.fixed-in", "proxy": "DIRECT"}
