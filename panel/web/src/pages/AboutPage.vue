@@ -8,6 +8,7 @@ const { state, selectTab } = usePanel()
 
 // Newest first; one line each. The current version is marked.
 const CHANGELOG = [
+  { v: '1.45', desc: '新增 VLESS Encryption 节点（替代 SS 的裸奔协议），自定义服务端下可添加 VLESS XHTTP；Hysteria2 默认不混淆，TUIC、ShadowQUIC 关闭 0-RTT，HTTP / SOCKS5 有证书时默认开启 TLS' },
   { v: '1.44', desc: '自定义服务端下可以自己填写节点的密码、加密方式等参数；检查集群时也能立即退出；新的加载动画和「关于」页面' },
   { v: '1.43', desc: '改配置改用热重载，不再频繁重启内核；更新时内核下载失败也不影响面板更新' },
   { v: '1.42', desc: '集群每台服务器只开一个入站，成员再多也只占一个端口' },

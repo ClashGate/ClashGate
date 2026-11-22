@@ -355,10 +355,7 @@ const {
             >
               <span class="min-w-0 flex items-center gap-3">
                 <img src="/assets/logo.png" alt="" class="w-9 h-9 rounded-xl shrink-0" />
-                <span class="min-w-0 block">
-                  <span class="block text-base font-bold text-slate-900 tracking-tight">{{ t('关于 ClashGate') }}</span>
-                  <span class="block text-xs text-slate-500 mt-1 leading-relaxed">{{ t('版本、最近的更新和鸣谢。') }}</span>
-                </span>
+                <span class="min-w-0 block text-base font-bold text-slate-900 tracking-tight">{{ t('关于 ClashGate') }}</span>
               </span>
               <span class="cg-tool shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border bg-white border-slate-200 text-slate-800 inline-flex items-center gap-1">
                 <span dir="ltr">v{{ state.version }}</span>

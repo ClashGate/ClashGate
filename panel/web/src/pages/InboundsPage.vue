@@ -399,9 +399,12 @@ const {
                     name="kind"
                     class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
                   >
-                    <option v-for="p in PROTOCOLS" :key="p.value" :value="p.value">
-                      {{ p.label }}
-                    </option>
+                    <!-- 1.45: customOnly protocols (VLESS XHTTP) are listed only with the custom server on -->
+                    <template v-for="p in PROTOCOLS" :key="p.value">
+                      <option v-if="!p.customOnly || state.custom_server_enabled" :value="p.value">
+                        {{ p.label }}
+                      </option>
+                    </template>
                   </select>
                   <!-- Stable height: every protocol's text is laid out invisibly in the same cell, so the card
                        keeps the size of the longest one in any language and width. -->
@@ -516,8 +519,8 @@ const {
                           name="http_tls"
                           class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
                         >
-                          <option value="0">{{ t('不启用 (默认)') }}</option>
-                          <option value="1">{{ t('启用') }}</option>
+                          <option value="1">{{ state.certs_present ? t('启用 (默认)') : t('启用') }}</option>
+                          <option value="0">{{ state.certs_present ? t('不启用') : t('不启用 (默认)') }}</option>
                         </select>
                       </div>
                     </template>
@@ -530,8 +533,8 @@ const {
                           name="socks_tls"
                           class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900"
                         >
-                          <option value="0">{{ t('不启用 (默认)') }}</option>
-                          <option value="1">{{ t('启用') }}</option>
+                          <option value="1">{{ state.certs_present ? t('启用 (默认)') : t('启用') }}</option>
+                          <option value="0">{{ state.certs_present ? t('不启用') : t('不启用 (默认)') }}</option>
                         </select>
                       </div>
                     </template>
@@ -555,7 +558,7 @@ const {
                           dir="ltr"
                           autocomplete="off"
                           spellcheck="false"
-                          :placeholder="t('留空自动生成')"
+                          :placeholder="f.key === 'host' ? t('留空使用本机域名') : t('留空自动生成')"
                           class="cg-input w-full h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-900 font-mono"
                         />
                       </div>

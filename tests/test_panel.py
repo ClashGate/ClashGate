@@ -76,14 +76,16 @@ def write_default_state(extra_kinds=()):
     port = 30100
     for kind in extra_kinds:
         port += 1
-        inbs.append(P.build_inbound(kind, {"port": str(port), "name": f"{kind}-t"}, env))
+        form = {"port": str(port), "name": f"{kind}-t"}
+        custom_only = kind == "vless-xhttp"   # 1.45: offered in custom server mode only
+        inbs.append(P.build_inbound(kind, form, env, advanced=custom_only))
     P._write_template_state([node], inbs, [], {}, env)
     return node, inbs
 
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44", "1.45"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -400,8 +402,17 @@ class CustomInboundOptionsTest(unittest.TestCase):
         ss = self.build("shadowsocks", advanced=False, cipher="chacha20-ietf-poly1305", **{"pass" + "word": "x"})
         self.assertEqual(ss["listener"]["cipher"], "aes-256-gcm")
         self.assertNotEqual(ss["listener"]["password"], "x")
-        hy = self.build("hysteria2", advanced=False, obfs="off")
-        self.assertEqual(hy["listener"]["obfs"], "salamander")
+        hy = self.build("hysteria2", advanced=False, obfs="salamander")   # 1.45: no obfuscation by default
+        self.assertNotIn("obfs", hy["listener"])
+        self.assertNotIn("obfs", hy["client"])
+        hy = self.build("hysteria2", obfs="salamander")
+        self.assertEqual((hy["listener"]["obfs"], hy["client"]["obfs"]), ("salamander", "salamander"))
+        self.assertEqual(hy["listener"]["obfs-password"], hy["client"]["obfs-password"])
+        r = P.rotate_inbound_credentials(hy)
+        self.assertNotEqual(r["listener"]["obfs-password"], hy["listener"]["obfs-password"])
+        self.assertEqual(r["listener"]["obfs-password"], r["client"]["obfs-password"])
+        plain = P.rotate_inbound_credentials(self.build("hysteria2", advanced=False))
+        self.assertNotIn("obfs", plain["listener"])   # a reset does not turn obfuscation on
 
     def test_bad_values_are_refused(self):
         for kind, adv in (("shadowsocks", {"cipher": "rc4"}), ("shadowsocks", {"password": "a b"}),
@@ -411,6 +422,77 @@ class CustomInboundOptionsTest(unittest.TestCase):
                           ("snell", {"psk": "short"}), ("sudoku", {"aead": "rc4"})):
             with self.assertRaises(ValueError, msg=(kind, adv)):
                 self.build(kind, **adv)
+
+    def test_vless_encryption_is_minimal(self):
+        """1.45: VLESS Encryption on plain TCP: one user with Vision and the ML-KEM decryption, nothing else."""
+        n = self.build("vless-enc", advanced=False)
+        lst, cli = n["listener"], n["client"]
+        self.assertEqual(set(lst), {"name", "type", "port", "listen", "users", "decryption"})
+        self.assertEqual(lst["users"][0]["flow"], "xtls-rprx-vision")
+        self.assertTrue(lst["decryption"].startswith("mlkem768x25519plus.native.600s."))
+        self.assertTrue(cli["encryption"].startswith("mlkem768x25519plus.native.0rtt."))
+        self.assertEqual((cli["type"], cli["flow"], cli["udp"]), ("vless", "xtls-rprx-vision", True))   # UDP via XUDP
+        self.assertNotIn("tls", cli)
+        self.assertEqual(P.derive_vless_encryption(lst["decryption"]), cli["encryption"])   # seed -> client key
+        self.assertEqual(P.ufw_specs_for_node("vless-enc", 31234), {"31234/tcp"})
+        uid = "11111111-2222-4333-8444-555555555555"
+        self.assertEqual(self.build("vless-enc", uuid=uid)["client"]["uuid"], uid)
+        r = P.rotate_inbound_credentials(n)
+        self.assertNotEqual(r["listener"]["decryption"], lst["decryption"])
+        self.assertNotEqual(r["client"]["uuid"], cli["uuid"])
+        self.assertEqual(r["listener"]["users"][0]["uuid"], r["client"]["uuid"])
+        self.assertEqual(r["listener"]["users"][0]["flow"], "xtls-rprx-vision")
+        self.assertTrue(P.can_reset_inbound_password(n))
+
+    def test_vless_xhttp(self):
+        """1.45, custom server only: VLESS XHTTP with the certificate and VLESS Encryption; plain options,
+        blank host = this server's domain."""
+        with self.assertRaises(ValueError):
+            self.build("vless-xhttp", advanced=False)
+        for bad in ({"host": "not a host"}, {"path": "no-slash"}, {"mode": "fast"}, {"uuid": "nope"}):
+            with self.assertRaises(ValueError, msg=bad):
+                self.build("vless-xhttp", **bad)
+        n = self.build("vless-xhttp")
+        lst, cli = n["listener"], n["client"]
+        dom = self.env["DOMAIN"].removeprefix("*.")
+        self.assertEqual(lst["xhttp-config"]["host"], dom)
+        self.assertEqual(lst["xhttp-config"]["mode"], "auto")
+        self.assertTrue(lst["xhttp-config"]["path"].startswith("/"))
+        self.assertEqual((lst["certificate"], lst["private-key"]), (P.CERT, P.KEY))
+        self.assertNotIn("flow", lst["users"][0])   # Vision does not run over XHTTP
+        self.assertTrue(lst["decryption"].startswith("mlkem768x25519plus."))
+        self.assertEqual((cli["server"], cli["servername"], cli["network"], cli["tls"]), (dom, dom, "xhttp", True))
+        self.assertEqual(cli["xhttp-opts"], lst["xhttp-config"])
+        self.assertTrue(cli["encryption"].startswith("mlkem768x25519plus.native.0rtt."))
+        t = self.build("vless-xhttp", host="Edge.Example.com", path="/x", mode="packet-up", vless_enc="off")
+        self.assertEqual(t["listener"]["xhttp-config"], {"path": "/x", "host": "edge.example.com", "mode": "packet-up"})
+        self.assertEqual(t["client"]["server"], "edge.example.com")
+        self.assertNotIn("decryption", t["listener"])
+        self.assertNotIn("encryption", t["client"])
+        # unchanged in a re-read custom config: the stored client (client key) is kept
+        again = P.listener_to_inbound(json.loads(json.dumps(lst)), self.env, {n["name"]: n})
+        self.assertEqual((again["kind"], again["client"]), ("vless-xhttp", cli))
+        ib = read(os.path.join(REPO, "panel/web/src/composables/useInbounds.js"))
+        self.assertIn("customOnly: true", ib[ib.index("value: 'vless-xhttp'"):][:400])
+        page = read(os.path.join(REPO, "panel/web/src/pages/InboundsPage.vue"))
+        self.assertIn('<option v-if="!p.customOnly || state.custom_server_enabled"', page)
+
+    def test_no_zero_rtt_and_tls_by_default(self):
+        """1.45: new TUIC / ShadowQUIC nodes have no 0-RTT; HTTP / SOCKS5 use TLS when there is a certificate."""
+        tu = self.build("tuic", advanced=False)
+        self.assertNotIn("reduce-rtt", tu["client"])
+        sq = self.build("shadowquic", advanced=False)
+        self.assertIs(sq["listener"]["zero-rtt"], False)
+        self.assertNotIn("zero-rtt", sq["client"])
+        for k in ("quic-version-probe", "max-idle-time", "disable-mtu-discovery"):
+            self.assertNotIn(k, sq["listener"])
+        self.assertTrue(P.certs_present())
+        for kind in ("http", "socks"):
+            on = self.build(kind, advanced=False)
+            self.assertTrue(on["client"]["tls"], kind)
+            self.assertIn("certificate", on["listener"])
+            off = P.build_inbound(kind, {"port": "", "name": "", f"{kind}_tls": "0"}, self.env)
+            self.assertFalse(off["client"]["tls"], kind)
 
     def test_form_shows_the_locked_options_in_custom_mode(self):
         src = os.path.join(REPO, "panel/web/src")
@@ -1043,7 +1125,7 @@ class ClusterTest(unittest.TestCase):
 
     def test_cluster_page_checks_by_itself(self):
         """1.43: 检查 is there with no members too (another panel may have added this one), and opening
-        the cluster page runs it once, quietly and at most every 30 s."""
+        the cluster page runs it once, quietly and at most every 30 minutes (1.45; kept across reloads)."""
         src = os.path.join(REPO, "panel/web/src")
         page = read(os.path.join(src, "pages/ClusterPage.vue"))
         btn = page[:page.index("t('检查中…')")]
@@ -1053,7 +1135,9 @@ class ClusterTest(unittest.TestCase):
         auto = cl[cl.index("function autoCheckCluster"):]
         auto = auto[:auto.index("\n  }\n")]
         self.assertIn("{ quiet: true }", auto)
-        self.assertIn("30000", auto)
+        self.assertIn("< AUTO_CHECK_MS", auto)
+        self.assertIn("const AUTO_CHECK_MS = 30 * 60 * 1000", cl)
+        self.assertIn("localStorage.setItem(AUTO_CHECK_KEY", auto)
         self.assertIn("busyKey.value || clusterBusy.value", auto)
         panel = read(os.path.join(src, "composables/usePanel.js"))
         self.assertRegex(panel, r"watch\(activeTab, \(tab\) => \{ if \(tab === 'cluster'[^}]*autoCheckCluster\(\)")

@@ -76,16 +76,18 @@ def check_reality_dest(host: str, timeout: float = 6.0):
 
 
 TYPES = (
-    "vless-reality", "shadowsocks", "hysteria2", "snell",
+    "vless-reality", "vless-enc", "vless-xhttp", "shadowsocks", "hysteria2", "snell",
     "anytls", "tuic", "trusttunnel", "shadowquic", "mieru", "sudoku", "http", "socks",
 )
 DEFAULT_NODE_NAMES = {
     "vless-reality": "VlessReality",
+    "vless-enc": "VlessEnc",
+    "vless-xhttp": "VlessXhttp",
     "shadowsocks": "Shadowsocks",
     "hysteria2": "Hysteria2",
     "snell": "SnellV6",
     "anytls": "AnyTLS",
-    "tuic": "TUICv5",
+    "tuic": "TUIC",
     "trusttunnel": "TrustTunnel",
     "shadowquic": "ShadowQUIC",
     "mieru": "Mieru",
@@ -95,11 +97,13 @@ DEFAULT_NODE_NAMES = {
 }
 PROTOCOL_DESCRIPTIONS = {
     "vless-reality": "免证书的新一代协议",
+    "vless-enc": "用来替代 SS 的新一代裸奔协议",
+    "vless-xhttp": "XHTTP 传输的 VLESS，内置 VLESS Encryption，支持 CDN",
     "shadowsocks": "经典轻量级加密协议，默认锁定 aes-256-gcm",
     "hysteria2": "新一代 UDP 协议",
     "snell": "轻量高效的私有协议，内置基于 PSK 的流量整形",
     "anytls": "内置随机填充与随机指纹的新一代 TLS 协议",
-    "tuic": "基于 QUIC 的低延迟零握手机制 UDP 协议",
+    "tuic": "基于 QUIC 的低延迟 UDP 协议",
     "trusttunnel": "基于标准 HTTP/2 与 HTTP/3 的高隐蔽 TLS 隧道协议",
     "shadowquic": "免证书的新一代 QUIC 协议，内置随机 JLS 伪装",
     "mieru": "抗深度包检测（DPI）的混淆传输代理协议",
@@ -108,7 +112,10 @@ PROTOCOL_DESCRIPTIONS = {
     "socks": "通用 SOCKS5 代理协议，支持 UDP 转发",
 }
 ANYTLS_FP_POOL = ("chrome", "safari", "firefox", "ios")
-CERT_TYPES = ("hysteria2", "trusttunnel", "anytls", "tuic")
+CERT_TYPES = ("hysteria2", "trusttunnel", "anytls", "tuic", "vless-xhttp")
+# 1.45: VLESS XHTTP is an advanced node; only the custom server mode offers it.
+CUSTOM_ONLY_TYPES = ("vless-xhttp",)
+XHTTP_MODES = ("auto", "stream-one", "stream-up", "packet-up")
 
 
 def random_anytls_padding() -> str:
@@ -513,6 +520,27 @@ def vless_x25519_keypair():
     return dec.group(1), enc.group(1)
 
 
+def vless_mlkem768_keypair():
+    """1.45: (server decryption, client encryption) with an ML-KEM-768 key (`mihomo generate
+    vless-mlkem768`): mlkem768x25519plus.native.600s.<seed> / mlkem768x25519plus.native.0rtt.<client key>."""
+    rc, out = run([resolve_mihomo_bin(), "generate", "vless-mlkem768"])
+    dec = re.search(r'\[Server\]\s*decryption:\s*"([^"]+)"', out)
+    enc = re.search(r'\[Client\]\s*encryption:\s*"([^"]+)"', out)
+    if rc != 0 or not dec or not enc or not dec.group(1).startswith("mlkem768x25519plus."):
+        raise RuntimeError("当前内核不支持 VLESS 后量子加密（vless-mlkem768），请先到「设置」页点「更新内核」")
+    return dec.group(1), enc.group(1)
+
+
+def mlkem768_client_from_seed(seed: str) -> str:
+    """The client key of an ML-KEM-768 seed (`mihomo generate vless-mlkem768 <seed>`, line `Client:`)."""
+    rc, out = run([resolve_mihomo_bin(), "generate", "vless-mlkem768", seed])
+    m = re.search(r"^Client:\s*(\S+)", out or "", re.M)
+    if rc != 0 or not m:
+        raise RuntimeError("ML-KEM-768 seed invalid")
+    return m.group(1)
+
+
+
 def certs_present() -> bool:
     for c, k in ((CERT, KEY), (ROOT + CERT, ROOT + KEY)):
         if os.path.isfile(c) and os.path.isfile(k):
@@ -612,6 +640,12 @@ def derive_vless_encryption(dec_str: str) -> str:
             out.append("0rtt")
         elif len(seg) in (43, 44) and re.fullmatch(r"[A-Za-z0-9_+=-]+", seg):
             out.append(x25519_pub_from_priv(seg))
+        elif len(seg) == 86 and re.fullmatch(r"[A-Za-z0-9_-]+", seg):
+            # 1.45: an ML-KEM-768 seed (64 bytes); the client needs its public key, not the seed
+            try:
+                out.append(mlkem768_client_from_seed(seg))
+            except RuntimeError:
+                out.append(seg)
         else:
             out.append(seg)
     return ".".join(out)
@@ -713,6 +747,15 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
     srv = domain if has_cert else ip
     user, pw, uid, flow, alter_id = _first_user_creds(lst.get("users"))
 
+    if (prev and prev.get("kind") in ("vless-enc", "vless-xhttp") and prev.get("listener") == lst
+            and isinstance(prev.get("client"), dict)):
+        # 1.45: a node the panel made, unchanged. Its client holds what the listener cannot give back
+        # (the ML-KEM client key, the CDN host), so keep it; only the server IP may have changed.
+        kept = json.loads(json.dumps(prev))
+        if kept["kind"] == "vless-enc":
+            kept["client"]["server"] = ip
+        return kept
+
     if ltype == "vless" and isinstance(lst.get("reality-config"), dict):
         kind = "vless-reality"
         rcfg = lst["reality-config"]
@@ -759,6 +802,12 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
             xopts = {"path": str(xcfg.get("path", "/")), "mode": str(xcfg.get("mode", "auto"))}
             if xcfg.get("x-padding-bytes"):
                 xopts["x-padding-bytes"] = str(xcfg["x-padding-bytes"])
+            xhost = str(xcfg.get("host") or "").strip()
+            if xhost:   # behind a CDN: the client dials the CDN host
+                xopts["host"] = xhost
+                client["server"] = xhost
+                if has_cert:
+                    client["servername"] = xhost
             client["network"] = "xhttp"
             client["xhttp-opts"] = xopts
         elif lst.get("ws-path"):
@@ -851,8 +900,7 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
         client = {
             "name": label, "type": "tuic", "server": domain, "port": port,
             "uuid": uid, "password": pw, "sni": domain, "alpn": alpn,
-            "congestion-controller": cc, "udp-relay-mode": "native",
-            "reduce-rtt": True, "udp": True,
+            "congestion-controller": cc, "udp-relay-mode": "native", "udp": True,
         }
     elif ltype in ("shadowquic", "shadowqiuc"):
         kind = "shadowquic"
@@ -860,12 +908,13 @@ def listener_to_inbound(lst: dict, env: dict, existing_by_name: dict = None) -> 
         jls_addr = str(jls_up.get("addr") or f"{pick_reality_sni()}:443")
         jls_host = jls_addr.rsplit(":", 1)[0]
         cc = str(lst.get("congestion-controller") or "bbr")
-        zrtt = bool(lst.get("zero-rtt", True))
         client = {
             "name": label, "type": "shadowquic", "server": ip, "port": port,
             "username": user, "password": pw, "sni": jls_host, "alpn": ["h3"],
-            "congestion-controller": cc, "zero-rtt": zrtt, "udp": True,
+            "congestion-controller": cc, "udp": True,
         }
+        if lst.get("zero-rtt") is True:
+            client["zero-rtt"] = True
     elif ltype == "mieru":
         kind = "mieru"
         tr = str(lst.get("transport") or "TCP").upper()
@@ -998,8 +1047,12 @@ def build_inbound(kind: str, form: dict, env: dict, advanced: bool = False) -> d
         kind = "sudoku"
     if kind not in TYPES:
         raise ValueError("未知的入站类型")
+    if kind in CUSTOM_ONLY_TYPES and not advanced:
+        raise ValueError("VLESS XHTTP 只在自定义服务端模式下可用（「设置」→「自定义服务端」）")
     need_cert = kind in CERT_TYPES
-    if kind in ("http", "socks") and form.get(f"{kind}_tls") == "1":
+    # 1.45: HTTP / SOCKS5 use TLS by default when there is a certificate (else the password is sent in clear)
+    tls_on = (form.get(f"{kind}_tls") or ("1" if certs_present() else "0")) == "1"
+    if kind in ("http", "socks") and tls_on:
         need_cert = True
     if need_cert and not certs_present():
         raise ValueError(f"{kind} 启用 TLS 需要域名证书，未找到 {CERT}（请先在「HTTPS 证书」页申请证书）")
@@ -1068,6 +1121,37 @@ def build_inbound(kind: str, form: dict, env: dict, advanced: bool = False) -> d
                   "reality-opts": {"public-key": pub, "short-id": sid},
                   "network": "tcp", "udp": True, "servername": sni}
 
+    elif kind == "vless-enc":
+        # 1.45: VLESS Encryption on plain TCP, the minimal config: one user with XTLS Vision and the
+        # post-quantum decryption key. UDP rides inside the TCP stream (XUDP, the client default).
+        uid = adv("uuid", _ok_uuid, "UUID 格式无效") or str(uuidlib.uuid4())
+        dec, enc = vless_mlkem768_keypair()
+        listener = {**base, "type": "vless",
+                    "users": [{"username": "user", "uuid": uid, "flow": "xtls-rprx-vision"}],
+                    "decryption": dec}
+        client = {"name": label, "type": "vless", "server": ip, "port": port, "uuid": uid,
+                  "flow": "xtls-rprx-vision", "encryption": enc, "udp": True}
+
+    elif kind == "vless-xhttp":
+        # 1.45 (custom server only): VLESS over XHTTP with the certificate, VLESS Encryption on top. The
+        # options are plain fields; blank host = this server's domain. Fronting it with a CDN is up to the user.
+        host = adv("host", lambda v: bool(_SNI_HOST.fullmatch(v.lower().rstrip("."))),
+                   "Host 无效，请填写域名").lower().rstrip(".") or domain
+        path = adv("path", lambda v: bool(re.fullmatch(r"/[A-Za-z0-9._~/-]{0,63}", v)),
+                   "路径无效：以 / 开头，只能有字母、数字及 . _ ~ / -") or "/" + secrets.token_hex(8)
+        mode = adv("mode", lambda v: v in XHTTP_MODES, "不支持的 XHTTP 模式") or "auto"
+        uid = adv("uuid", _ok_uuid, "UUID 格式无效") or str(uuidlib.uuid4())
+        use_enc = adv("vless_enc") != "off"
+        dec, enc = vless_mlkem768_keypair() if use_enc else ("", "")
+        listener = {**base, "type": "vless", "users": [{"username": "user", "uuid": uid}],
+                    **({"decryption": dec} if use_enc else {}),
+                    "xhttp-config": {"path": path, "host": host, "mode": mode},
+                    "certificate": CERT, "private-key": KEY}
+        client = {"name": label, "type": "vless", "server": host, "port": port, "uuid": uid,
+                  "udp": True, "tls": True, "network": "xhttp", "servername": host,
+                  "client-fingerprint": "chrome", **({"encryption": enc} if use_enc else {}),
+                  "xhttp-opts": {"path": path, "host": host, "mode": mode}}
+
     elif kind == "shadowsocks":
         cipher = adv("cipher", lambda v: v in SS_CIPHERS, "不支持的加密方式") or "aes-256-gcm"
         if cipher.startswith("2022-"):
@@ -1088,7 +1172,9 @@ def build_inbound(kind: str, form: dict, env: dict, advanced: bool = False) -> d
 
     elif kind == "hysteria2":
         pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(18)
-        use_obfs = adv("obfs") != "off"
+        # 1.45: no obfuscation by default. Without it Hysteria2 is standard HTTP/3 with the real certificate
+        # (Hysteria's and Mihomo's default); Salamander turns it into random UDP and drops that cover.
+        use_obfs = adv("obfs", lambda v: v in ("salamander", "off"), "不支持的混淆方式") == "salamander"
         obfs_pw = (adv("obfs_password", _ok_secret, "混淆密码无效（1-128 位，不能有空格）")
                    or secrets.token_urlsafe(16)) if use_obfs else ""
         obfs = {"obfs": "salamander", "obfs-password": obfs_pw} if use_obfs else {}
@@ -1127,7 +1213,7 @@ def build_inbound(kind: str, form: dict, env: dict, advanced: bool = False) -> d
     elif kind == "http":
         user = adv("username", _ok_user, "用户名无效（1-32 位字母、数字及 . _ -）") or (form.get("http_user") or "user").strip()
         pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(14)
-        use_tls = form.get("http_tls") == "1"
+        use_tls = tls_on
         listener = {**base, "type": "http", "users": [{"username": user, "password": pw}]}
         if use_tls:
             listener["certificate"] = CERT
@@ -1141,7 +1227,7 @@ def build_inbound(kind: str, form: dict, env: dict, advanced: bool = False) -> d
     elif kind == "socks":
         user = adv("username", _ok_user, "用户名无效（1-32 位字母、数字及 . _ -）") or (form.get("socks_user") or "user").strip()
         pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(14)
-        use_tls = form.get("socks_tls") == "1"
+        use_tls = tls_on
         listener = {**base, "type": "socks", "udp": True, "users": [{"username": user, "password": pw}]}
         if use_tls:
             listener["certificate"] = CERT
@@ -1195,25 +1281,22 @@ def build_inbound(kind: str, form: dict, env: dict, advanced: bool = False) -> d
                     "congestion-controller": cc, "alpn": ["h3"]}
         client = {"name": label, "type": "tuic", "server": domain, "port": port,
                   "uuid": uid, "password": pw, "sni": domain, "alpn": ["h3"],
-                  "congestion-controller": cc, "udp-relay-mode": udp_mode,
-                  "reduce-rtt": True, "udp": True}
+                  "congestion-controller": cc, "udp-relay-mode": udp_mode, "udp": True}
 
     else:  # shadowquic
         user = adv("username", _ok_user, "用户名无效（1-32 位字母、数字及 . _ -）") or (form.get("sq_user") or "user").strip() or "user"
         jls_host = resolve_sni(form)
         jls_addr = f"{jls_host}:443"
         cc = "bbr"
-        zero_rtt = True
         pw = adv("password", _ok_secret, "密码无效（1-128 位，不能有空格）") or secrets.token_urlsafe(18)
+        # 1.45: no 0-RTT (replayable early data); the other options are Mihomo's defaults
         listener = {**base, "type": "shadowquic",
                     "users": [{"username": user, "password": pw}],
                     "jls-upstream": {"addr": jls_addr},
-                    "congestion-controller": cc, "zero-rtt": zero_rtt,
-                    "quic-version-probe": True, "max-idle-time": 30000,
-                    "disable-mtu-discovery": False}
+                    "congestion-controller": cc, "zero-rtt": False}
         client = {"name": label, "type": "shadowquic", "server": ip, "port": port,
                   "username": user, "password": pw, "sni": jls_host, "alpn": ["h3"],
-                  "congestion-controller": cc, "zero-rtt": zero_rtt, "udp": True}
+                  "congestion-controller": cc, "udp": True}
 
     return {"id": secrets.token_hex(6), "kind": kind, "port": port, "name": name,
             "created": int(time.time()), "listener": listener, "client": client}
@@ -1224,7 +1307,7 @@ def can_reset_inbound_password(inb: dict) -> bool:
     kind = str(inb.get("kind", "")).lower()
     lst = inb.get("listener") if isinstance(inb.get("listener"), dict) else {}
     cli = inb.get("client") if isinstance(inb.get("client"), dict) else {}
-    if kind in ("vless-reality", "vless"):
+    if kind in ("vless-reality", "vless", "vless-enc", "vless-xhttp"):
         return True
     has_tls = bool(lst.get("certificate") or cli.get("tls"))
     has_pw = bool(
@@ -1262,6 +1345,17 @@ def rotate_inbound_credentials(inb: dict) -> dict:
         ropts = cli.setdefault("reality-opts", {})
         ropts["public-key"] = pub
         ropts["short-id"] = sid
+    elif kind in ("vless-enc", "vless-xhttp"):
+        uid = str(uuidlib.uuid4())
+        dec, enc = vless_mlkem768_keypair()
+        if isinstance(lst.get("users"), list) and lst["users"] and isinstance(lst["users"][0], dict):
+            lst["users"][0]["uuid"] = uid
+        else:
+            lst["users"] = [{"username": "user", "uuid": uid,
+                             **({"flow": "xtls-rprx-vision"} if kind == "vless-enc" else {})}]
+        lst["decryption"] = dec
+        cli["uuid"] = uid
+        cli["encryption"] = enc
     elif kind == "vless":
         uid = str(uuidlib.uuid4())
         dec, enc = vless_x25519_keypair()
@@ -1278,17 +1372,17 @@ def rotate_inbound_credentials(inb: dict) -> dict:
         cli["password"] = pw
     elif kind == "hysteria2":
         pw = secrets.token_urlsafe(18)
-        obfs_pw = secrets.token_urlsafe(16)
         if isinstance(lst.get("users"), dict) and lst["users"]:
             u_key = next(iter(lst["users"].keys()))
             lst["users"] = {u_key: pw}
         else:
             lst["users"] = {"user": pw}
-        lst["obfs"] = "salamander"
-        lst["obfs-password"] = obfs_pw
         cli["password"] = pw
-        cli["obfs"] = "salamander"
-        cli["obfs-password"] = obfs_pw
+        if lst.get("obfs"):   # 1.45: keep the node's choice; only a node with obfuscation gets a new obfs password
+            obfs_pw = secrets.token_urlsafe(16)
+            lst["obfs-password"] = obfs_pw
+            cli["obfs"] = lst["obfs"]
+            cli["obfs-password"] = obfs_pw
     elif kind == "hysteria2-realm":
         tok = secrets.token_hex(16)
         lst["token"] = tok
@@ -1986,7 +2080,7 @@ def validate_config(path=CONF, bin_path: str = ""):
 
 def ufw_specs_for_node(kind: str, port: int) -> set:
     p = int(port)
-    if kind in ("vless-reality", "http"):
+    if kind in ("vless-reality", "vless-enc", "vless-xhttp", "http"):
         return {f"{p}/tcp"}
     if kind in ("hysteria2", "tuic", "shadowquic"):
         return {f"{p}/udp"}
