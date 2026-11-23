@@ -98,7 +98,7 @@ DEFAULT_NODE_NAMES = {
 PROTOCOL_DESCRIPTIONS = {
     "vless-reality": "免证书的新一代协议",
     "vless-enc": "用来替代 SS 的新一代裸奔协议",
-    "vless-xhttp": "XHTTP 传输的 VLESS，内置 VLESS Encryption，支持 CDN",
+    "vless-xhttp": "XHTTP 传输的 VLESS，内置量子加密，支持 CDN",
     "shadowsocks": "经典轻量级加密协议，默认锁定 aes-256-gcm",
     "hysteria2": "新一代 UDP 协议",
     "snell": "轻量高效的私有协议，内置基于 PSK 的流量整形",

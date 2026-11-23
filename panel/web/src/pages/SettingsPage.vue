@@ -3,6 +3,7 @@ import { t } from '../i18n.js'
 import { theme, setTheme } from '../theme.js'
 import { usePanel } from '../composables/usePanel.js'
 import CgIcon from '../CgIcon.vue'
+import CgSpinner from '../CgSpinner.vue'
 
 const {
   boot,
@@ -283,7 +284,8 @@ const {
                 class="cg-tool shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold border disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5 bg-white hover:bg-slate-50 border-slate-200 text-slate-800"
                 :class="{ 'is-update': coreHasUpdate }"
               >
-                <CgIcon name="refresh" :size="14" />
+                <CgSpinner v-if="busyKey === '/action/update-core'" :size="14" />
+                <CgIcon v-else name="refresh" :size="14" />
                 <span>{{ busyKey === '/action/update-core' ? t('更新内核中…') : t('更新内核') }}</span>
               </button>
             </div>
@@ -312,6 +314,14 @@ const {
                   :class="theme === 'dark' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
                   @click="setTheme('dark')"
                 >{{ t('深色') }}</button>
+                <button
+                  type="button"
+                  role="radio"
+                  :aria-checked="theme === 'glass' ? 'true' : 'false'"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer"
+                  :class="theme === 'glass' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'"
+                  @click="setTheme('glass')"
+                >{{ t('玻璃') }}</button>
                 <button
                   type="button"
                   role="radio"

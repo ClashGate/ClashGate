@@ -875,6 +875,21 @@ html[lang="fa"] textarea.font-mono {
   background: #1d6fe0;
   border-color: #1d6fe0;
 }
+/* 1.46: the GitHub link among the pills. */
+.cg-about-pill.is-link {
+  gap: 6px;
+  color: #1a2330;
+  text-decoration: none;
+  transition: border-color 150ms ease, color 150ms ease, background-color 150ms ease;
+}
+.cg-about-pill.is-link:hover {
+  color: #1d6fe0;
+  border-color: #bcd2f5;
+  background: #fff;
+}
+.cg-about-pill.is-link:hover .cg-credit-go {
+  color: #1d6fe0;
+}
 .cg-about-back {
   position: absolute;
   top: 16px;
@@ -964,20 +979,14 @@ html[lang="fa"] textarea.font-mono {
   transform: translateY(-1px);
 }
 .cg-credit-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   width: 40px;
   height: 40px;
   flex-shrink: 0;
   border-radius: 12px;
-  font-size: 18px;
-  font-weight: 800;
-  color: #fff;
-  background: linear-gradient(135deg, #1d6fe0, #5b9cf5);
-}
-.cg-credit + .cg-credit .cg-credit-mark {
-  background: linear-gradient(135deg, #0f172a, #475569);
+  object-fit: cover;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
 }
 .cg-credit-go {
   color: #94a3b8;
@@ -1038,6 +1047,12 @@ html[lang="fa"] textarea.font-mono {
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
+/* 1.46: a smaller one for actions inside a dense list row (e.g. a rule provider's 删除). */
+.cg-btn-sm.cg-btn-xs {
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 8px;
+}
 .cg-btn-sm:disabled {
   cursor: default;
   opacity: 0.5;

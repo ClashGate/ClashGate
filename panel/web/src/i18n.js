@@ -252,7 +252,6 @@ export const EN = {
  "复制配置": "Copy config",
  "重置密码": "Reset password",
  "免证书的新一代协议": "Next-generation certificate-free protocol",
- "已锁定安全默认：默认启用 VLESS Encryption (vless-x25519)。SNI 可自填，留空从内置域名池随机抽取": "Secure defaults locked: VLESS Encryption (vless-x25519) is on. SNI is optional; leave it blank to pick a random domain from the built-in pool",
  "已锁定安全默认：PSK 自动随机生成，流量整形使用 v6 默认模式": "Secure defaults locked: PSK generated randomly; traffic shaping uses the v6 default mode",
  "留空从内置域名池随机抽取": "Leave blank to pick a random domain from the built-in pool",
  "新一代 UDP 协议": "Next-generation UDP protocol",
@@ -509,18 +508,22 @@ export const EN = {
  "已启用安全默认：UUID 与密码随机生成，关闭 0-RTT（防重放），native UDP 转发": "Secure defaults enabled: UUID and password generated randomly; 0-RTT off (no replay); native UDP relay",
  "已启用安全默认：鉴权密码自动随机生成，有证书时默认开启 TLS": "Secure defaults enabled: authentication password generated randomly; TLS on by default when there is a certificate",
  "已启用安全默认：鉴权密码自动随机生成，默认开启 UDP，有证书时默认开启 TLS": "Secure defaults enabled: authentication password generated randomly; UDP on by default; TLS on by default when there is a certificate",
- "已锁定安全默认：后量子加密 (mlkem768x25519plus) 与 XTLS Vision，UUID 与密钥自动生成，支持 UDP": "Secure defaults locked: post-quantum encryption (mlkem768x25519plus) and XTLS Vision; UUID and keys generated automatically; UDP supported",
  "用来替代 SS 的新一代裸奔协议": "A new-generation bare protocol to replace SS",
  "路径": "Path",
  "已锁定安全默认：伪装地址 (JLS) 可自填，留空从内置域名池随机抽取，拥塞控制默认 bbr，关闭 0-RTT": "Secure defaults locked: camouflage address (JLS) is optional; leave it blank to pick a random domain from the built-in pool. Congestion control defaults to bbr; 0-RTT off",
- "XHTTP 传输的 VLESS，内置 VLESS Encryption，支持 CDN": "VLESS over XHTTP with VLESS Encryption built in; works with a CDN",
  "XHTTP 模式": "XHTTP mode",
  "auto（默认）": "auto (default)",
  "仅在自定义服务端模式下可用，需要证书": "Custom server mode only; needs a certificate",
  "关闭（默认）": "Off (default)",
  "已启用安全默认：密码随机生成，不开启混淆，保持标准 HTTP/3 外观": "Secure defaults enabled: password generated randomly; no obfuscation, so it looks like standard HTTP/3",
  "新增 VLESS Encryption 节点（替代 SS 的裸奔协议），自定义服务端下可添加 VLESS XHTTP；Hysteria2 默认不混淆，TUIC、ShadowQUIC 关闭 0-RTT，HTTP / SOCKS5 有证书时默认开启 TLS": "New VLESS Encryption node (a bare protocol to replace SS); VLESS XHTTP in custom server mode; Hysteria2 has no obfuscation by default; TUIC and ShadowQUIC turn 0-RTT off; HTTP / SOCKS5 use TLS by default when there is a certificate",
- "留空使用本机域名": "Blank: this server's domain"
+ "留空使用本机域名": "Blank: this server's domain",
+ "XHTTP 传输的 VLESS，内置量子加密，支持 CDN": "VLESS over XHTTP with post-quantum encryption built in; works with a CDN",
+ "已锁定安全默认：量子加密 (mlkem768x25519plus) 与 XTLS Vision，UUID 与密钥自动生成，支持 UDP": "Secure defaults locked: post-quantum encryption (mlkem768x25519plus) and XTLS Vision; UUID and keys generated automatically; UDP supported",
+ "已锁定安全默认：默认启用量子加密。SNI 可自填，留空从内置域名池随机抽取": "Secure defaults locked: post-quantum encryption is on. SNI is optional; leave it blank to pick one from the built-in domain pool",
+ "量子加密": "Post-quantum encryption",
+ "玻璃": "Glass",
+ "新增「玻璃」皮肤；按钮统一样式并显示加载动画，复制后显示对勾；添加节点卡片在自定义服务端下也不再跳动": "New “Glass” skin; buttons share one style and show a spinner while busy, copy shows a check mark; the add-node card no longer jumps in custom server mode"
 }
 
 export const LANGS = ['zh', 'en', 'ru', 'fa']

@@ -2,6 +2,7 @@
 import { t } from '../i18n.js'
 import { usePanel } from '../composables/usePanel.js'
 import CgIcon from '../CgIcon.vue'
+import CgSpinner from '../CgSpinner.vue'
 
 const {
   boot,
@@ -269,17 +270,17 @@ const {
                     <button
                       v-if="!state.custom_config_mode"
                       type="button"
-                      class="px-2 py-1 rounded-lg text-xs bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200"
+                      class="cg-btn-sm cg-btn-secondary"
                       @click.stop="toggleRoutingPanel(g)"
                     >{{ isLocalRoutingGroup(g) ? t('编辑规则') : t('规则集') }}</button>
-                    <button type="button" class="px-2 py-1 rounded-lg text-xs bg-slate-100 hover:bg-slate-200 text-slate-700" @click.stop="renameRouting(g)">{{ t('重命名') }}</button>
+                    <button type="button" class="cg-btn-sm cg-btn-secondary" @click.stop="renameRouting(g)">{{ t('重命名') }}</button>
                     <button
                       v-if="g.deletable"
                       type="button"
-                      class="px-2 py-1 rounded-lg text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200"
+                      class="cg-btn-sm cg-btn-danger"
                       :disabled="busyKey === `routing-del-${g.id}`"
                       @click.stop="confirmDeleteRouting(g)"
-                    >{{ busyKey === `routing-del-${g.id}` ? t('删除中…') : t('删除') }}</button>
+                    ><CgSpinner v-if="busyKey === `routing-del-${g.id}`" :size="13" inherit />{{ busyKey === `routing-del-${g.id}` ? t('删除中…') : t('删除') }}</button>
                   </div>
                 </div>
 
@@ -299,10 +300,10 @@ const {
                   <div class="flex justify-end">
                     <button
                       type="button"
-                      class="cg-btn-primary h-9 px-3 rounded-xl text-xs font-semibold"
+                      class="cg-btn-primary h-9 px-3 rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-1.5"
                       :disabled="busyKey === `routing-rules-${g.id}`"
                       @click="saveLocalRoutingRules(g)"
-                    >{{ busyKey === `routing-rules-${g.id}` ? t('保存中…') : t('保存规则') }}</button>
+                    ><CgSpinner v-if="busyKey === `routing-rules-${g.id}`" :size="13" light />{{ busyKey === `routing-rules-${g.id}` ? t('保存中…') : t('保存规则') }}</button>
                   </div>
                 </div>
 
@@ -316,13 +317,13 @@ const {
                   <div v-for="p in (g.rule_providers || [])" :key="p.name" class="flex items-center gap-2 text-xs">
                     <span class="font-semibold text-slate-800 shrink-0">{{ p.name }}</span>
                     <span dir="ltr" class="text-slate-500 truncate flex-1 min-w-0 text-start">{{ p.url }}</span>
-                    <button type="button" class="px-2 py-0.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 disabled:opacity-50 shrink-0" :disabled="busyKey === `routing-prov-del-${p.name}`" @click="deleteRoutingProvider(g, p)">{{ busyKey === `routing-prov-del-${p.name}` ? t('删除中…') : t('删除') }}</button>
+                    <button type="button" class="cg-btn-sm cg-btn-xs cg-btn-danger shrink-0" :disabled="busyKey === `routing-prov-del-${p.name}`" @click="deleteRoutingProvider(g, p)"><CgSpinner v-if="busyKey === `routing-prov-del-${p.name}`" :size="13" inherit />{{ busyKey === `routing-prov-del-${p.name}` ? t('删除中…') : t('删除') }}</button>
                   </div>
                   <p class="text-xs text-slate-500">{{ t('可再为此分流组追加一个规则集（名称 + URL）。新建整组请用下方「引入外部分流」。') }}</p>
                   <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
                     <input v-model="routingProvForm.provider" :placeholder="t('规则集名称（英文）')" class="cg-input h-9 px-3 rounded-xl border border-slate-200 text-xs" />
                     <input v-model="routingProvForm.url" dir="ltr" placeholder="https://" class="cg-input sm:col-span-2 h-9 px-3 rounded-xl border border-slate-200 text-xs font-mono" />
-                    <button type="button" class="cg-btn-primary h-9 px-3 rounded-xl text-xs font-semibold" :disabled="busyKey === 'routing-prov-add'" @click="addRoutingProvider(g)">{{ busyKey === 'routing-prov-add' ? t('添加中…') : t('添加规则集') }}</button>
+                    <button type="button" class="cg-btn-primary h-9 px-3 rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-1.5" :disabled="busyKey === 'routing-prov-add'" @click="addRoutingProvider(g)"><CgSpinner v-if="busyKey === 'routing-prov-add'" :size="13" light />{{ busyKey === 'routing-prov-add' ? t('添加中…') : t('添加规则集') }}</button>
                   </div>
                 </div>
               </div>
@@ -350,11 +351,11 @@ const {
               <div class="mt-auto pt-1">
                 <button
                   type="button"
-                  class="cg-btn-primary w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-semibold"
+                  class="cg-btn-primary w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-1.5"
                   :disabled="busyKey === 'routing-import'"
                   @click="importRoutingGroup"
                 >
-                  {{ busyKey === 'routing-import' ? t('引入中…') : t('引入外部分流') }}
+                  <CgSpinner v-if="busyKey === 'routing-import'" :size="13" light />{{ busyKey === 'routing-import' ? t('引入中…') : t('引入外部分流') }}
                 </button>
               </div>
             </section>
@@ -381,11 +382,11 @@ const {
               <div class="pt-1">
                 <button
                   type="button"
-                  class="cg-btn-primary w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-semibold"
+                  class="cg-btn-primary w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-1.5"
                   :disabled="busyKey === 'routing-add'"
                   @click="createRoutingGroup"
                 >
-                  {{ busyKey === 'routing-add' ? t('创建中…') : t('新建分流组') }}
+                  <CgSpinner v-if="busyKey === 'routing-add'" :size="13" light />{{ busyKey === 'routing-add' ? t('创建中…') : t('新建分流组') }}
                 </button>
               </div>
             </section>

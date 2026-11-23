@@ -85,7 +85,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44", "1.45"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44", "1.45", "1.46"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -506,6 +506,12 @@ class CustomInboundOptionsTest(unittest.TestCase):
         ib = read(os.path.join(src, "composables/useInbounds.js"))
         self.assertIn("if (state.custom_server_enabled) {", ib)
         self.assertIn("payload['adv_' + f.key] = v", ib)
+        # 1.45: every select starts on its '' (默认) option instead of showing blank
+        self.assertIn("adv: advDefaults('vless-reality'),", ib)
+        self.assertIn("inboundForm.adv = advDefaults(newKind)", ib)
+        adv = ib[ib.index("const ADV_FIELDS"):ib.index("const PROTOCOLS")]
+        self.assertEqual(adv.count("options:"), adv.count("[{ value: '', desc: '"))
+        self.assertNotIn("desc: 'VLESS Encryption'", adv)   # the switch is 量子加密, not the protocol name
         kinds = set(re.findall(r"^    '?([a-z0-9-]+)'?: \[", ib[ib.index("const ADV_FIELDS"):ib.index("const DEFAULT_NAMES")], re.M))
         self.assertEqual(kinds, {p for p in re.findall(r"value: '([a-z0-9-]+)',\n      label", ib)})   # every protocol
         h = read(os.path.join(REPO, "panel/cg_http.py"))
@@ -1172,6 +1178,15 @@ class ClusterTest(unittest.TestCase):
             self.assertIn(f"url: '{url}'", page)
         self.assertIn('target="_blank"', page)
         self.assertIn('rel="noopener noreferrer"', page)
+        # 1.46: link to the project's repository; the credits show the projects' own logos, bundled
+        # (the CSP allows images from the panel only)
+        self.assertIn("const REPO_URL = 'https://github.com/ClashGate/ClashGate'", page)
+        self.assertIn(':href="REPO_URL" target="_blank" rel="noopener noreferrer"', page)
+        for logo in ("mihomo.png", "xray.png"):
+            self.assertIn(f"logo: '/assets/{logo}'", page)
+            with open(os.path.join(REPO, "panel/web/public/assets", logo), "rb") as f:
+                self.assertEqual(f.read(8), b"\x89PNG\r\n\x1a\n", logo)
+        self.assertNotIn("mark: '", page)
         first = page[page.index("const CHANGELOG = ["):].split("\n")[1]
         self.assertTrue(first.strip().startswith(f"{{ v: '{P.VERSION}'"), first)   # newest first: this version
         self.assertLessEqual(page.count("{ v: '"), 8)   # short
@@ -1181,6 +1196,31 @@ class ClusterTest(unittest.TestCase):
         self.assertIn("selectTab('about')", read(os.path.join(src, "pages/SettingsPage.vue")))
         self.assertIn("<AboutPage v-else-if=\"activeTab === 'about'\"", read(os.path.join(src, "App.vue")))
         self.assertIn('if path == "/about":', read(os.path.join(REPO, "panel/cg_http.py")))
+
+    def test_ui_polish_146(self):
+        """1.46: every busy 「…中…」 button shows CgSpinner; copy buttons show a check; row actions use the
+        shared button classes; the add-node card keeps one height in custom server mode."""
+        src = os.path.join(REPO, "panel/web/src")
+        busy = re.compile(r"\{\{\s*busyKey === ([^?]+?) \? t\('[^']*中…'\)")
+        copied = re.compile(r"\{\{\s*copiedKey === ([^?]+?) \? t\(")
+        for dp, _, files in os.walk(src):
+            for fn in files:
+                if not fn.endswith(".vue"):
+                    continue
+                page = read(os.path.join(dp, fn))
+                for m in busy.finditer(page):
+                    btn = page[page.rindex("<button", 0, m.start()):m.start()]
+                    self.assertIn("<CgSpinner", btn, (fn, m.group(1)))
+                for m in copied.finditer(page):
+                    btn = page[page.rindex("<button", 0, m.start()):m.start()]
+                    self.assertIn('name="check"', btn, (fn, m.group(1)))
+                for bad in ("hover:bg-sky-50", "bg-sky-50 hover:bg-sky-100", "bg-rose-50 hover:bg-rose-100 text-rose-700"):
+                    self.assertNotIn(bad, page, (fn, bad))
+        home = read(os.path.join(src, "pages/InboundsPage.vue"))
+        ghost = home[home.index('class="cg-stack-ghost space-y-4"') - 300:home.index("</div>\n                  <div class=\"space-y-4\">")]
+        self.assertIn("PROTOCOLS.filter((x) => !x.customOnly || state.custom_server_enabled)", ghost)
+        self.assertIn('v-if="state.custom_server_enabled && (ADV_FIELDS[p.value] || []).length"', ghost)
+        self.assertIn('v-for="f in ADV_FIELDS[p.value]"', ghost)
 
     def test_home_layout_zashboard_right(self):
         css = read(os.path.join(REPO, "panel/web/src/style.css"))
@@ -2449,6 +2489,26 @@ class V121Test(unittest.TestCase):
         self.assertNotIn("settings-panel-card", settings)   # the panel version lives on the home page
         self.assertIn("'dark'", read(os.path.join(src, "theme.js")))
         self.assertIn("t==='dark'", P.render_spa_html("x", {}))
+
+    def test_glass_skin(self):
+        """1.46: the opt-in 玻璃 (glass) skin: listed, applied before first paint, every rule scoped to it,
+        with fallbacks when backdrop-filter is missing or the user asks for less transparency."""
+        src = os.path.join(REPO, "panel/web/src")
+        self.assertIn("'glass'", read(os.path.join(src, "theme.js")))
+        self.assertIn("import './theme-glass.css'", read(os.path.join(src, "main.js")))
+        self.assertIn("setTheme('glass')", read(os.path.join(src, "pages/SettingsPage.vue")))
+        self.assertIn("t==='glass'", P.render_spa_html("x", {}))
+        css = read(os.path.join(src, "theme-glass.css"))
+        self.assertNotIn("prefers-color-scheme", css)   # picked by the user, never automatic
+        self.assertIn("@supports not ((backdrop-filter: blur(1px))", css)
+        self.assertIn("prefers-reduced-transparency: reduce", css)
+        body = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        for head in re.findall(r"([^{}]+)\{", body):
+            head = head.strip()
+            if head.startswith("@"):
+                continue
+            for sel in head.split(","):
+                self.assertTrue(sel.strip().startswith('html[data-theme="glass"]'), sel)
 
     def test_dark_theme_css_is_generated(self):
         r = subprocess.run([sys.executable, os.path.join(REPO, "panel/web/dark-theme.py"), "--check"],

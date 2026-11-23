@@ -1,6 +1,7 @@
 <script setup>
 import { t } from '../i18n.js'
 import CgIcon from '../CgIcon.vue'
+import CgSpinner from '../CgSpinner.vue'
 import { usePanel } from '../composables/usePanel.js'
 
 const {
@@ -237,17 +238,17 @@ const {
                   <button
                     type="button"
                     @click="copyRaw(p.single_config, `p-single-${p.name}`)"
-                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
+                    class="cg-btn-sm cg-btn-secondary"
                   >
-                    {{ copiedKey === `p-single-${p.name}` ? t('已复制') : t('复制配置') }}
+                    <CgIcon v-if="copiedKey === `p-single-${p.name}`" name="check" :size="13" />{{ copiedKey === `p-single-${p.name}` ? t('已复制') : t('复制配置') }}
                   </button>
                   <button
                     type="button"
                     :disabled="busyKey === `del-proxy-${p.name}`"
                     @click="deleteProxy(p.name)"
-                    class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                    class="cg-btn-sm cg-btn-danger"
                   >
-                    {{ busyKey === `del-proxy-${p.name}` ? t('删除中…') : t('删除') }}
+                    <CgSpinner v-if="busyKey === `del-proxy-${p.name}`" :size="13" inherit />{{ busyKey === `del-proxy-${p.name}` ? t('删除中…') : t('删除') }}
                   </button>
                 </div>
               </div>
@@ -267,7 +268,7 @@ const {
                   :disabled="busyKey === 'add-proxies'"
                   class="cg-btn-primary cg-btn-sm"
                 >
-                  {{ busyKey === 'add-proxies' ? t('添加中…') : t('添加服务端出站') }}
+                  <CgSpinner v-if="busyKey === 'add-proxies'" :size="13" light />{{ busyKey === 'add-proxies' ? t('添加中…') : t('添加服务端出站') }}
                 </button>
                 <label
                   class="cg-btn-sm cg-btn-secondary"
@@ -320,9 +321,9 @@ const {
                 type="button"
                 :disabled="busyKey === 'add-masque'"
                 @click="addMasqueOutbound"
-                class="cg-btn-primary px-3.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 cursor-pointer shrink-0"
+                class="cg-btn-primary px-3.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 cursor-pointer shrink-0 inline-flex items-center justify-center gap-1.5"
               >
-                {{ busyKey === 'add-masque' ? t('添加中…') : t('加入服务端出站') }}
+                <CgSpinner v-if="busyKey === 'add-masque'" :size="13" light />{{ busyKey === 'add-masque' ? t('添加中…') : t('加入服务端出站') }}
               </button>
               <button
                 v-else
@@ -383,17 +384,17 @@ const {
                   <button
                     type="button"
                     @click="copyRaw(prov.yaml, `prov-${prov.name}`)"
-                    class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white hover:bg-emerald-50 text-slate-700 border border-slate-200/90 transition cursor-pointer"
+                    class="cg-btn-sm cg-btn-secondary"
                   >
-                    {{ copiedKey === `prov-${prov.name}` ? t('已复制') : t('复制配置') }}
+                    <CgIcon v-if="copiedKey === `prov-${prov.name}`" name="check" :size="13" />{{ copiedKey === `prov-${prov.name}` ? t('已复制') : t('复制配置') }}
                   </button>
                   <button
                     type="button"
                     :disabled="busyKey === `del-prov-${prov.name}`"
                     @click="deleteProvider(prov.name)"
-                    class="px-3 py-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                    class="cg-btn-sm cg-btn-danger"
                   >
-                    {{ busyKey === `del-prov-${prov.name}` ? t('删除中…') : t('删除') }}
+                    <CgSpinner v-if="busyKey === `del-prov-${prov.name}`" :size="13" inherit />{{ busyKey === `del-prov-${prov.name}` ? t('删除中…') : t('删除') }}
                   </button>
                 </div>
               </div>
@@ -423,9 +424,9 @@ const {
                 <button
                   type="submit"
                   :disabled="busyKey === 'add-provider'"
-                  class="cg-btn-primary w-full h-10 px-4 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer whitespace-nowrap"
+                  class="cg-btn-primary w-full h-10 px-4 rounded-xl disabled:opacity-50 text-xs font-semibold cursor-pointer whitespace-nowrap inline-flex items-center justify-center gap-1.5"
                 >
-                  {{ busyKey === 'add-provider' ? t('导入中…') : t('导入订阅') }}
+                  <CgSpinner v-if="busyKey === 'add-provider'" :size="13" light />{{ busyKey === 'add-provider' ? t('导入中…') : t('导入订阅') }}
                 </button>
               </div>
             </form>
