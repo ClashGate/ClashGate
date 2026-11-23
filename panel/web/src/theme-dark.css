@@ -331,6 +331,17 @@ html[data-theme="dark"] .cg-about-pill.is-main {
   background: #1d6fe0;
   border-color: #1d6fe0;
 }
+html[data-theme="dark"] .cg-about-pill.is-link {
+  color: #cad7e8;
+}
+html[data-theme="dark"] .cg-about-pill.is-link:hover {
+  color: #2c7cee;
+  border-color: #263753;
+  background: #15191e;
+}
+html[data-theme="dark"] .cg-about-pill.is-link:hover .cg-credit-go {
+  color: #2c7cee;
+}
 html[data-theme="dark"] .cg-about-back {
   color: #91a1b7;
   background: rgba(21, 25, 30, 0.8);
@@ -369,10 +380,8 @@ html[data-theme="dark"] .cg-credit:hover {
   border-color: #263753;
 }
 html[data-theme="dark"] .cg-credit-mark {
-  background: linear-gradient(135deg, #1d6fe0, #5b9cf5);
-}
-html[data-theme="dark"] .cg-credit + .cg-credit .cg-credit-mark {
-  background: linear-gradient(135deg, #d6e3fe, #91a1b7);
+  background: #15191e;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.176);
 }
 html[data-theme="dark"] .cg-credit-go {
   color: #4e5b6e;

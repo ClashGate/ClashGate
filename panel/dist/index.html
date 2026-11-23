@@ -6,7 +6,7 @@
     <title>ClashGate</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="shortcut icon" href="/favicon.ico" />
-    <script>try{if(localStorage.getItem('clashgate_theme')==='christmas')document.documentElement.dataset.theme='christmas'}catch(e){}</script>
+    <script>try{var t=localStorage.getItem('clashgate_theme');if(t==='christmas'||t==='dark'||t==='glass')document.documentElement.dataset.theme=t}catch(e){}</script>
     <script type="module" crossorigin src="/assets/app.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/style.css">
   </head>

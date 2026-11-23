@@ -1,0 +1,194 @@
+/* ClashGate "Glass" skin (1.46). Active only on <html data-theme="glass">; the default skin is untouched.
+   Frosted, translucent cards over a soft colour field: backdrop-filter blur + saturate, a bright rim and a
+   top highlight for thickness. Only large surfaces blur (cards, status rail, top bar, sidebar, dialogs,
+   menus); buttons and rows are just translucent, so long pages stay smooth on slow devices.
+   Cards stay ~65% opaque so text keeps its contrast. No refraction (Chromium-only SVG filters): the
+   skin looks the same in every browser. Without backdrop-filter, or with "reduce transparency",
+   surfaces fall back to near-opaque white. Hand-written; not generated like theme-dark.css. */
+html[data-theme="glass"] {
+  --cgg-card: rgba(255, 255, 255, 0.62);
+  --cgg-card-strong: rgba(255, 255, 255, 0.8);
+  --cgg-soft: rgba(255, 255, 255, 0.55);
+  --cgg-rim: rgba(255, 255, 255, 0.78);
+  --cgg-edge: rgba(120, 140, 175, 0.22);
+  --cgg-blur: saturate(1.7) blur(22px);
+  --cgg-shine: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 38%);
+  --cgg-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.28),
+    0 1px 2px rgba(20, 40, 80, 0.05),
+    0 18px 40px -22px rgba(24, 52, 110, 0.32);
+  background: #eef2fa;
+}
+
+/* The colour field the glass shows through: fixed, so it does not scroll with the page. */
+html[data-theme="glass"] body {
+  background-color: #eef2fa;
+  background-image:
+    radial-gradient(42vmax 42vmax at 8% 6%, rgba(29, 111, 224, 0.26), transparent 70%),
+    radial-gradient(38vmax 38vmax at 92% 10%, rgba(124, 92, 255, 0.2), transparent 70%),
+    radial-gradient(40vmax 40vmax at 78% 92%, rgba(0, 172, 199, 0.17), transparent 70%),
+    radial-gradient(34vmax 34vmax at 14% 88%, rgba(255, 128, 180, 0.13), transparent 70%),
+    linear-gradient(160deg, #f5f8fe 0%, #e8eef8 100%);
+  background-attachment: fixed;
+}
+html[data-theme="glass"] ::selection {
+  background-color: rgba(29, 111, 224, 0.2);
+}
+
+/* ---- frosted surfaces ---- */
+html[data-theme="glass"] .cg-surface,
+html[data-theme="glass"] .cg-surface-emerald,
+html[data-theme="glass"] .cg-login-card {
+  background-color: var(--cgg-card);
+  background-image: var(--cgg-shine);
+  border-color: var(--cgg-rim);
+  box-shadow: var(--cgg-shadow);
+  -webkit-backdrop-filter: var(--cgg-blur);
+  backdrop-filter: var(--cgg-blur);
+}
+html[data-theme="glass"] .cg-surface-emerald {
+  background-image: var(--cgg-shine), linear-gradient(180deg, rgba(29, 111, 224, 0.08), transparent 50%);
+}
+html[data-theme="glass"] .cg-feature {
+  background-image: var(--cgg-shine), linear-gradient(135deg, rgba(29, 111, 224, 0.1), transparent 46%);
+}
+html[data-theme="glass"] .cg-about-hero {
+  background-image:
+    var(--cgg-shine),
+    radial-gradient(120% 140% at 0% 0%, rgba(29, 111, 224, 0.14), transparent 55%),
+    radial-gradient(90% 120% at 100% 100%, rgba(19, 138, 78, 0.08), transparent 60%);
+}
+html[data-theme="glass"] .cg-login-card::before {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95), transparent);
+}
+
+/* Status rail: the frosted container draws the separators, the cells are lighter glass. */
+html[data-theme="glass"] .cg-rail {
+  background: rgba(255, 255, 255, 0.4);
+  border-color: var(--cgg-rim);
+  box-shadow: var(--cgg-shadow);
+  -webkit-backdrop-filter: var(--cgg-blur);
+  backdrop-filter: var(--cgg-blur);
+}
+html[data-theme="glass"] .cg-rail-cell { background: rgba(255, 255, 255, 0.5); }
+html[data-theme="glass"] .cg-rail-cell.tone-bad { background: rgba(255, 238, 238, 0.66); }
+html[data-theme="glass"] .cg-rail-cell.is-pending { background: rgba(255, 246, 228, 0.7); }
+html[data-theme="glass"] .cg-rail-cell.is-action:hover { background: rgba(255, 243, 220, 0.78); }
+
+/* Top bar and sidebar. */
+html[data-theme="glass"] .cg-top {
+  background: rgba(255, 255, 255, 0.46);
+  border-bottom-color: var(--cgg-edge);
+  -webkit-backdrop-filter: var(--cgg-blur);
+  backdrop-filter: var(--cgg-blur);
+}
+html[data-theme="glass"] .cg-side {
+  background: rgba(255, 255, 255, 0.38);
+  border-inline-end-color: var(--cgg-edge);
+  -webkit-backdrop-filter: var(--cgg-blur);
+  backdrop-filter: var(--cgg-blur);
+}
+html[data-theme="glass"] .cg-nav:hover { background: rgba(255, 255, 255, 0.55); }
+html[data-theme="glass"] .cg-nav.is-active,
+html[data-theme="glass"] .cg-mobile-nav .cg-nav.is-active {
+  background: linear-gradient(180deg, #3a86f0, #1d6fe0);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 8px 18px -10px rgba(29, 111, 224, 0.8);
+}
+html[data-theme="glass"] .cg-nav.is-locked:hover { background: transparent; }
+html[data-theme="glass"] .cg-mobile-nav .cg-nav {
+  background: var(--cgg-soft);
+  border-color: var(--cgg-rim);
+}
+
+/* Dialogs and menus: a stronger frost, they sit over busy content. */
+html[data-theme="glass"] .cg-modal-panel,
+html[data-theme="glass"] .cg-lang-menu {
+  background-color: var(--cgg-card-strong);
+  background-image: var(--cgg-shine);
+  border-color: var(--cgg-rim);
+  box-shadow: var(--cgg-shadow), 0 30px 60px -30px rgba(15, 30, 70, 0.45);
+  -webkit-backdrop-filter: saturate(1.8) blur(28px);
+  backdrop-filter: saturate(1.8) blur(28px);
+}
+
+/* ---- controls: translucent, no blur of their own ---- */
+html[data-theme="glass"] .cg-btn-secondary,
+html[data-theme="glass"] .cg-btn-danger,
+html[data-theme="glass"] .cg-tool,
+html[data-theme="glass"] .cg-lang-btn,
+html[data-theme="glass"] .cg-move-btn,
+html[data-theme="glass"] .cg-credit,
+html[data-theme="glass"] .cg-about-back,
+html[data-theme="glass"] .cg-about-pill {
+  background-color: var(--cgg-soft);
+  border-color: var(--cgg-rim);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(20, 40, 80, 0.06);
+}
+html[data-theme="glass"] .cg-btn-secondary:hover:not(:disabled),
+html[data-theme="glass"] .cg-tool:hover:not(:disabled),
+html[data-theme="glass"] .cg-lang-btn:hover,
+html[data-theme="glass"] .cg-move-btn:hover:not(:disabled),
+html[data-theme="glass"] .cg-about-back:hover {
+  background-color: rgba(255, 255, 255, 0.85);
+}
+html[data-theme="glass"] .cg-btn-danger:hover:not(:disabled) { background-color: rgba(255, 241, 242, 0.85); }
+html[data-theme="glass"] .cg-credit:hover { background-color: rgba(255, 255, 255, 0.8); }
+html[data-theme="glass"] .cg-about-pill.is-link:hover { background-color: rgba(255, 255, 255, 0.85); }
+html[data-theme="glass"] .cg-about-pill.is-main { background: #1d6fe0; border-color: #1d6fe0; color: #fff; }
+
+/* The brand blue stays; a top sheen makes it look like a lit glass pill. */
+html[data-theme="glass"] .cg-btn-primary,
+html[data-theme="glass"] .cg-tool.is-update {
+  background: linear-gradient(180deg, #3a86f0 0%, #1d6fe0 60%, #1a64cc 100%);
+  border-color: #1d6fe0;
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.08),
+    0 8px 20px -10px rgba(29, 111, 224, 0.75);
+}
+html[data-theme="glass"] .cg-btn-primary:hover:not(:disabled),
+html[data-theme="glass"] .cg-tool.is-update:hover:not(:disabled) {
+  background: linear-gradient(180deg, #2f7ce8 0%, #1863cc 60%, #1558b8 100%);
+}
+html[data-theme="glass"] .cg-btn-primary:disabled { box-shadow: none; }
+
+html[data-theme="glass"] .cg-input {
+  background-color: rgba(255, 255, 255, 0.7);
+  border-color: rgba(140, 158, 190, 0.32);
+}
+html[data-theme="glass"] .cg-input:focus {
+  background-color: rgba(255, 255, 255, 0.92);
+  border-color: #1d6fe0;
+}
+html[data-theme="glass"] .cg-switch { background: rgba(140, 155, 180, 0.45); }
+html[data-theme="glass"] .cg-switch.is-on { background: #1d6fe0; }
+html[data-theme="glass"] .cg-empty { background-color: rgba(255, 255, 255, 0.3); }
+/* White panels inside a card (segmented controls, small boxes) turn to light glass too. */
+html[data-theme="glass"] .cg-surface .bg-white:not(.cg-input),
+html[data-theme="glass"] .cg-surface-emerald .bg-white:not(.cg-input) {
+  background-color: rgba(255, 255, 255, 0.55);
+}
+
+/* ---- fallbacks ---- */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html[data-theme="glass"] .cg-surface,
+  html[data-theme="glass"] .cg-surface-emerald,
+  html[data-theme="glass"] .cg-login-card,
+  html[data-theme="glass"] .cg-rail,
+  html[data-theme="glass"] .cg-modal-panel,
+  html[data-theme="glass"] .cg-lang-menu { background-color: rgba(255, 255, 255, 0.93); }
+  html[data-theme="glass"] .cg-top,
+  html[data-theme="glass"] .cg-side { background: rgba(250, 252, 255, 0.95); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  html[data-theme="glass"] .cg-surface,
+  html[data-theme="glass"] .cg-surface-emerald,
+  html[data-theme="glass"] .cg-login-card,
+  html[data-theme="glass"] .cg-rail,
+  html[data-theme="glass"] .cg-modal-panel,
+  html[data-theme="glass"] .cg-lang-menu { background-color: rgba(255, 255, 255, 0.95); }
+  html[data-theme="glass"] .cg-top,
+  html[data-theme="glass"] .cg-side { background: rgba(250, 252, 255, 0.97); }
+}

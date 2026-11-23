@@ -226,8 +226,8 @@ const {
                       <button
                         type="submit"
                         :disabled="!!busyKey || nodeNameOverLimit || (state.cluster.node_name_set && nodeNameInput.trim() === state.cluster.node_name)"
-                        class="cg-btn-primary h-10 min-w-[5.5rem] px-5 rounded-xl disabled:opacity-50 text-sm font-semibold cursor-pointer shrink-0"
-                      >{{ busyKey === 'save-node-name' ? t('保存中…') : t('保存') }}</button>
+                        class="cg-btn-primary h-10 min-w-[5.5rem] px-5 rounded-xl disabled:opacity-50 text-sm font-semibold cursor-pointer shrink-0 inline-flex items-center justify-center gap-1.5"
+                      ><CgSpinner v-if="busyKey === 'save-node-name'" :size="13" light />{{ busyKey === 'save-node-name' ? t('保存中…') : t('保存') }}</button>
                     </div>
                     <!-- Hint is omitted until the input is over the 15-character limit, so the card stays tight. -->
                     <div
@@ -311,7 +311,7 @@ const {
                       :disabled="!!busyKey || !!clusterBusy"
                       :aria-busy="clusterBusy === 'cluster-sync' ? 'true' : undefined"
                       @click="syncCluster()"
-                      class="-my-1 h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-semibold bg-white hover:bg-sky-50 text-slate-700 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer shrink-0"
+                      class="-my-1 cg-btn-sm cg-btn-secondary shrink-0"
                     ><CgSpinner v-if="clusterBusy === 'cluster-sync'" :size="13" />{{ clusterBusy === 'cluster-sync' ? t('检查中…') : t('检查') }}</button>
                   </div>
                   <div
@@ -345,13 +345,13 @@ const {
                           type="button"
                           :disabled="!!busyKey || !!clusterBusy"
                           @click="retryClusterMember(m)"
-                          class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-slate-700 bg-white hover:bg-sky-50 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer"
+                          class="cg-btn-sm cg-btn-secondary"
                         ><CgSpinner v-if="clusterBusy === `cl-rt-${m.id}`" :size="13" />{{ clusterBusy === `cl-rt-${m.id}` ? t('重试中…') : t('重试') }}</button>
                         <button
                           type="button"
                           :disabled="!!busyKey || !!clusterBusy"
                           @click="removeClusterMember(m)"
-                          class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                          class="cg-btn-sm cg-btn-danger"
                         ><CgSpinner v-if="clusterBusy === `cl-rm-${m.id}`" :size="13" inherit />{{ clusterBusy === `cl-rm-${m.id}` ? t('移除中…') : t('移除') }}</button>
                       </div>
                     </div>
@@ -369,14 +369,14 @@ const {
                         type="button"
                         :disabled="!!busyKey || !!clusterBusy"
                         @click="syncCluster()"
-                        class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-slate-700 bg-white hover:bg-sky-50 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer"
+                        class="cg-btn-sm cg-btn-secondary"
                       ><CgSpinner v-if="clusterBusy === 'cluster-sync'" :size="13" />{{ clusterBusy === 'cluster-sync' ? t('重试中…') : t('重试') }}</button>
                       <button
                         type="button"
                         :disabled="!!busyKey || !!clusterBusy"
                         @click="dismissPending(p)"
                         :title="t('只是不再显示这一条；下次点「检查」时还会再试')"
-                        class="h-8 px-3 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 border border-slate-200/90 disabled:opacity-50 transition cursor-pointer"
+                        class="cg-btn-sm cg-btn-secondary"
                       >{{ t('忽略') }}</button>
                       </div>
                     </div>
@@ -386,7 +386,7 @@ const {
                       type="button"
                       :disabled="!!busyKey || leaveBlocked"
                       @click="leaveCluster"
-                      class="h-8 px-3 inline-flex items-center gap-1.5 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200/80 disabled:opacity-50 transition cursor-pointer"
+                      class="cg-btn-sm cg-btn-danger"
                     ><CgSpinner v-if="clusterBusy === 'cluster-leave'" :size="13" inherit />{{ clusterBusy === 'cluster-leave' ? t('正在退出…') : t('退出集群') }}</button>
                   </div>
                 </section>

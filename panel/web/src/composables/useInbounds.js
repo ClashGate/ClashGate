@@ -15,7 +15,7 @@ export function useInbounds(p) {
     'vless-reality': [
       { key: 'uuid', desc: 'UUID', wide: true },
       { key: 'short_id', desc: 'Short ID' },
-      { key: 'vless_enc', desc: 'VLESS Encryption', options: [{ value: '', desc: '开启（默认）' }, { value: 'off', desc: '关闭' }] },
+      { key: 'vless_enc', desc: '量子加密', options: [{ value: '', desc: '开启（默认）' }, { value: 'off', desc: '关闭' }] },
       { key: 'reality_key', desc: 'Reality 私钥', wide: true },
     ],
     'vless-enc': [{ key: 'uuid', desc: 'UUID', wide: true }],
@@ -30,7 +30,7 @@ export function useInbounds(p) {
           ['stream-one', 'stream-up', 'packet-up'].map((v) => ({ value: v, desc: v }))
         ),
       },
-      { key: 'vless_enc', desc: 'VLESS Encryption', options: [{ value: '', desc: '开启（默认）' }, { value: 'off', desc: '关闭' }] },
+      { key: 'vless_enc', desc: '量子加密', options: [{ value: '', desc: '开启（默认）' }, { value: 'off', desc: '关闭' }] },
       { key: 'uuid', desc: 'UUID', wide: true },
     ],
     hysteria2: [
@@ -70,21 +70,21 @@ export function useInbounds(p) {
       label: 'VLESS Reality',
       defaultName: 'VlessReality',
       desc: '免证书的新一代协议',
-      lockedNote: '已锁定安全默认：默认启用 VLESS Encryption (vless-x25519)。SNI 可自填，留空从内置域名池随机抽取',
+      lockedNote: '已锁定安全默认：默认启用量子加密。SNI 可自填，留空从内置域名池随机抽取',
     },
     {
       value: 'vless-enc',
       label: 'VLESS Encryption',
       defaultName: 'VlessEnc',
       desc: '用来替代 SS 的新一代裸奔协议',
-      lockedNote: '已锁定安全默认：后量子加密 (mlkem768x25519plus) 与 XTLS Vision，UUID 与密钥自动生成，支持 UDP',
+      lockedNote: '已锁定安全默认：量子加密 (mlkem768x25519plus) 与 XTLS Vision，UUID 与密钥自动生成，支持 UDP',
     },
     {
       // 1.45: listed only with the custom server mode on (customOnly)
       value: 'vless-xhttp',
       label: 'VLESS XHTTP',
       defaultName: 'VlessXhttp',
-      desc: 'XHTTP 传输的 VLESS，内置 VLESS Encryption，支持 CDN',
+      desc: 'XHTTP 传输的 VLESS，内置量子加密，支持 CDN',
       lockedNote: '仅在自定义服务端模式下可用，需要证书',
       customOnly: true,
     },
@@ -167,6 +167,12 @@ export function useInbounds(p) {
     },
   ]
 
+  // A select shows blank until its model matches an option: start every select on its '' (默认) option.
+  // '' is never sent (see submitAddInbound), so the server still applies its default.
+  function advDefaults(kind) {
+    return Object.fromEntries((ADV_FIELDS[kind] || []).filter((f) => f.options).map((f) => [f.key, '']))
+  }
+
   const DEFAULT_NAMES = Object.fromEntries(PROTOCOLS.map((p) => [p.value, p.defaultName]))
   const PROTOCOL_MAP = Object.fromEntries(PROTOCOLS.map((p) => [p.value, p]))
 
@@ -181,7 +187,7 @@ export function useInbounds(p) {
     http_tls: state.certs_present ? '1' : '0',
     socks_tls: state.certs_present ? '1' : '0',
     sni: '',
-    adv: {},
+    adv: advDefaults('vless-reality'),
   })
 
   const currentProtocol = computed(() => PROTOCOL_MAP[inboundForm.kind] || PROTOCOLS[0])
@@ -200,7 +206,7 @@ export function useInbounds(p) {
       if (!inboundForm.name.trim() || inboundForm.name.trim() === oldDefault) {
         inboundForm.name = newDefault
       }
-      inboundForm.adv = {}   // the optional fields belong to one protocol
+      inboundForm.adv = advDefaults(newKind)   // the optional fields belong to one protocol
     }
   )
 
@@ -251,7 +257,7 @@ export function useInbounds(p) {
     if (res && res.ok) {
       inboundForm.port = ''
       inboundForm.sni = ''
-      inboundForm.adv = {}
+      inboundForm.adv = advDefaults(inboundForm.kind)
       inboundForm.name = currentDefaultName.value
     }
   }

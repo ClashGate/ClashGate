@@ -555,9 +555,9 @@ const {
               <button
                 type="submit"
                 :disabled="busyKey === '/action/change-password'"
-                class="cg-btn-primary px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-50 cursor-pointer"
+                class="cg-btn-primary px-4 py-2 rounded-xl text-xs font-semibold disabled:opacity-50 cursor-pointer inline-flex items-center justify-center gap-1.5"
               >
-                {{ busyKey === '/action/change-password' ? t('保存中…') : t('确认修改') }}
+                <CgSpinner v-if="busyKey === '/action/change-password'" :size="13" light />{{ busyKey === '/action/change-password' ? t('保存中…') : t('确认修改') }}
               </button>
             </div>
           </form>
@@ -683,7 +683,7 @@ const {
                 : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
             "
           >
-            <span>{{ busyKey === '/action/reload' ? t('应用中…') : t('应用配置') }}</span>
+            <CgSpinner v-if="busyKey === '/action/reload'" :size="13" inherit /><span>{{ busyKey === '/action/reload' ? t('应用中…') : t('应用配置') }}</span>
             <span
               v-if="state.pending_reload_count > 0"
               class="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500 text-white tabular-nums"
@@ -699,6 +699,7 @@ const {
             :class="{ 'is-update': panelHasUpdate }"
             :title="panelHasUpdate ? updateHint(panelUpdate.latest) : undefined"
           >
+            <CgSpinner v-if="busyKey === '/action/upgrade-self' || upgradeInProgress || busyKey === '/action/check-update'" :size="13" />
             <span>{{
               busyKey === '/action/upgrade-self' || upgradeInProgress
                 ? t('升级中…')
@@ -887,9 +888,9 @@ const {
                 type="button"
                 :disabled="busyKey === '/action/discard-pending' || busyKey === '/action/reload'"
                 @click="confirmDiscardPending"
-                class="px-3 py-1 rounded-lg text-xs font-semibold bg-white hover:bg-rose-50 text-rose-600 border border-rose-200/90 disabled:opacity-50 transition cursor-pointer"
+                class="px-3 py-1 rounded-lg text-xs font-semibold bg-white hover:bg-rose-50 text-rose-600 border border-rose-200/90 disabled:opacity-50 transition cursor-pointer inline-flex items-center justify-center gap-1.5"
               >
-                {{ busyKey === '/action/discard-pending' ? t('丢弃中…') : t('丢弃草稿') }}
+                <CgSpinner v-if="busyKey === '/action/discard-pending'" :size="13" inherit />{{ busyKey === '/action/discard-pending' ? t('丢弃中…') : t('丢弃草稿') }}
               </button>
             </div>
             <div v-if="state.pending_reload_items && state.pending_reload_items.length > 0" class="space-y-1">

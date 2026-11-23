@@ -1,5 +1,6 @@
 <script setup>
 import { t } from '../i18n.js'
+import CgIcon from '../CgIcon.vue'
 import CgSpinner from '../CgSpinner.vue'
 import { usePanel } from '../composables/usePanel.js'
 
@@ -217,7 +218,7 @@ const {
                     @click="copyRaw(state.sub_url, 'sub-url')"
                     class="cg-btn-primary cg-btn-sm"
                   >
-                    {{ copiedKey === 'sub-url' ? t('已复制') : t('复制订阅链接') }}
+                    <CgIcon v-if="copiedKey === 'sub-url'" name="check" :size="13" />{{ copiedKey === 'sub-url' ? t('已复制') : t('复制订阅链接') }}
                   </button>
                   <button
                     v-if="state.sub_url && state.sub_qr_data_url"
@@ -234,7 +235,7 @@ const {
                     @click="resetSubUrl"
                     class="cg-btn-sm cg-btn-secondary"
                   >
-                    {{ busyKey === 'reset-sub' ? t('更换中…') : t('更换订阅链接') }}
+                    <CgSpinner v-if="busyKey === 'reset-sub'" :size="13" />{{ busyKey === 'reset-sub' ? t('更换中…') : t('更换订阅链接') }}
                   </button>
                   <a
                     :href="state.sub_url"
@@ -261,10 +262,11 @@ const {
                   @keydown.enter.prevent="subUrlRevealed = !subUrlRevealed"
                   @keydown.space.prevent="subUrlRevealed = !subUrlRevealed"
                   @blur="subUrlRevealed = false"
-                  class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f5f8fd] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer"
+                  class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f5f8fd] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer flex items-center justify-between gap-3"
                   :class="subUrlRevealed ? 'text-slate-700 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
                 >
-                  {{ !state.sub_url ? '/etc/clashgate/client/mihomo-client.yaml' : subUrlRevealed ? state.sub_url : '••••••••••••••••••••••••••••••••' }}
+                  <span class="min-w-0">{{ !state.sub_url ? '/etc/clashgate/client/mihomo-client.yaml' : subUrlRevealed ? state.sub_url : '••••••••••••••••••••••••••••••••' }}</span>
+                  <CgIcon v-if="state.sub_url" :name="subUrlRevealed ? 'eyeOff' : 'eye'" :size="14" class="text-slate-400" />
                 </div>
               </div>
 
@@ -309,7 +311,7 @@ const {
                   @click="copyRaw(state.zb_url, 'zb-url')"
                   class="cg-btn-sm cg-btn-secondary"
                 >
-                  {{ copiedKey === 'zb-url' ? t('已复制地址') : t('复制地址') }}
+                  <CgIcon v-if="copiedKey === 'zb-url'" name="check" :size="13" />{{ copiedKey === 'zb-url' ? t('已复制地址') : t('复制地址') }}
                 </button>
                 <a
                   href="/config/server.yaml"
@@ -334,10 +336,11 @@ const {
                 @keydown.enter.prevent="zbUrlRevealed = !zbUrlRevealed"
                 @keydown.space.prevent="zbUrlRevealed = !zbUrlRevealed"
                 @blur="zbUrlRevealed = false"
-                class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f5f8fd] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer"
+                class="cg-input px-3.5 py-2.5 rounded-xl bg-[#f5f8fd] hover:bg-emerald-50/50 border border-emerald-100 font-mono text-xs transition cursor-pointer flex items-center justify-between gap-3"
                 :class="zbUrlRevealed ? 'text-slate-700 break-all select-all' : 'text-slate-500 tracking-widest select-none'"
               >
-                {{ !state.zb_url ? '—' : zbUrlRevealed ? state.zb_url : '••••••••••••••••••••••••••••••••' }}
+                <span class="min-w-0">{{ !state.zb_url ? '—' : zbUrlRevealed ? state.zb_url : '••••••••••••••••••••••••••••••••' }}</span>
+                <CgIcon v-if="state.zb_url" :name="zbUrlRevealed ? 'eyeOff' : 'eye'" :size="14" class="text-slate-400" />
               </div>
             </div>
 
@@ -367,7 +370,7 @@ const {
                   @click="copyRaw(state.mihomo_secret, 'zb-secret')"
                   class="cg-btn-sm cg-btn-secondary"
                 >
-                  {{ copiedKey === 'zb-secret' ? t('已复制') : t('复制密钥') }}
+                  <CgIcon v-if="copiedKey === 'zb-secret'" name="check" :size="13" />{{ copiedKey === 'zb-secret' ? t('已复制') : t('复制密钥') }}
                 </button>
                 <button
                   type="button"
@@ -375,7 +378,7 @@ const {
                   @click="resetZbSecret"
                   class="cg-btn-sm cg-btn-secondary"
                 >
-                  {{ busyKey === 'reset-secret' ? t('重置中…') : t('重置 API 密钥') }}
+                  <CgSpinner v-if="busyKey === 'reset-secret'" :size="13" />{{ busyKey === 'reset-secret' ? t('重置中…') : t('重置 API 密钥') }}
                 </button>
               </div>
             </div>
@@ -444,14 +447,27 @@ const {
                   </div>
                 </div>
 
-                <!-- Protocol options + locked note, stacked over invisible copies for every protocol (stable height). -->
+                <!-- Protocol options + locked note (custom server: the optional fields), stacked over invisible
+                     copies for every protocol, so the card keeps one height while the protocol changes (1.46:
+                     in custom server mode too). -->
                 <div class="cg-stack">
-                  <div v-for="p in (state.custom_server_enabled ? [] : PROTOCOLS)" :key="'opt-' + p.value" class="cg-stack-ghost space-y-4" aria-hidden="true">
+                  <div
+                    v-for="p in PROTOCOLS.filter((x) => !x.customOnly || state.custom_server_enabled)"
+                    :key="'opt-' + p.value"
+                    class="cg-stack-ghost space-y-4"
+                    aria-hidden="true"
+                  >
                     <div v-if="PROTOCOL_HAS_OPTION.has(p.value)">
                       <div class="block text-xs font-semibold mb-1.5">&nbsp;</div>
                       <div class="h-10 border border-transparent"></div>
                     </div>
-                    <div class="rounded-xl border px-3.5 py-2.5 text-xs leading-relaxed">{{ t(p.lockedNote) }}</div>
+                    <div v-if="state.custom_server_enabled && (ADV_FIELDS[p.value] || []).length" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div v-for="f in ADV_FIELDS[p.value]" :key="'ghost-' + p.value + f.key" :class="{ 'sm:col-span-2': f.wide }">
+                        <div class="block text-xs font-semibold mb-1.5">{{ t(f.desc) }}</div>
+                        <div class="h-10 border border-transparent"></div>
+                      </div>
+                    </div>
+                    <div v-if="!state.custom_server_enabled" class="rounded-xl border px-3.5 py-2.5 text-xs leading-relaxed">{{ t(p.lockedNote) }}</div>
                   </div>
                   <div class="space-y-4">
                     <div v-if="sniEditable">
@@ -600,7 +616,7 @@ const {
                     @click="copyRaw(state.all_proxies_yaml, 'all-proxies')"
                     class="cg-btn-sm cg-btn-secondary"
                   >
-                    {{ copiedKey === 'all-proxies' ? t('已复制全部') : t('复制全部配置') }}
+                    <CgIcon v-if="copiedKey === 'all-proxies'" name="check" :size="13" />{{ copiedKey === 'all-proxies' ? t('已复制全部') : t('复制全部配置') }}
                   </button>
                 </div>
               </div>
@@ -625,8 +641,9 @@ const {
                         class="font-bold text-sm cg-wrap"
                         :class="item.pending_delete ? 'text-slate-400 line-through' : 'text-slate-900'"
                       >{{ item.name }}</span>
+                      <!-- 1.46: the protocol tag is neutral, so the status pill next to it is the only colour -->
                       <span
-                        class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/60"
+                        class="px-2 py-0.5 text-[11px] font-semibold rounded-md bg-slate-100 text-slate-600 border border-slate-200/80"
                       >
                         {{ item.kind_label }}
                       </span>
@@ -662,7 +679,7 @@ const {
                       @click="copyRaw(item.single_config, `single-${item.key}`)"
                       class="cg-btn-sm cg-btn-secondary"
                     >
-                      {{ copiedKey === `single-${item.key}` ? t('已复制') : t('复制配置') }}
+                      <CgIcon v-if="copiedKey === `single-${item.key}`" name="check" :size="13" />{{ copiedKey === `single-${item.key}` ? t('已复制') : t('复制配置') }}
                     </button>
                     <button
                       v-if="item.can_reset_password"
@@ -671,7 +688,7 @@ const {
                       @click="resetInboundPassword(item)"
                       class="cg-btn-sm cg-btn-secondary"
                     >
-                      {{ busyKey === `rst-${item.key}` ? t('重置中…') : t('重置密码') }}
+                      <CgSpinner v-if="busyKey === `rst-${item.key}`" :size="13" />{{ busyKey === `rst-${item.key}` ? t('重置中…') : t('重置密码') }}
                     </button>
                     <button
                       type="button"
@@ -679,7 +696,7 @@ const {
                       @click="deleteInbound(item)"
                       class="cg-btn-sm cg-btn-danger"
                     >
-                      {{ busyKey === `del-${item.key}` ? t('删除中…') : t('删除') }}
+                      <CgSpinner v-if="busyKey === `del-${item.key}`" :size="13" inherit />{{ busyKey === `del-${item.key}` ? t('删除中…') : t('删除') }}
                     </button>
                   </div>
                 </div>

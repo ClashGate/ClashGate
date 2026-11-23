@@ -1,5 +1,6 @@
 <script setup>
 import { t } from '../i18n.js'
+import CgIcon from '../CgIcon.vue'
 import { usePanel } from '../composables/usePanel.js'
 
 const {
@@ -278,7 +279,7 @@ const {
                     @click="copyRaw(converterOutput, 'conv-out')"
                     class="cg-btn-sm cg-btn-secondary"
                   >
-                    {{ copiedKey === 'conv-out' ? t('已复制结果') : t('复制转换结果') }}
+                    <CgIcon v-if="copiedKey === 'conv-out'" name="check" :size="13" />{{ copiedKey === 'conv-out' ? t('已复制结果') : t('复制转换结果') }}
                   </button>
                 </div>
                 <textarea

@@ -124,7 +124,7 @@ def asset_url(rel: str) -> str:
 
 # Panel skin (Settings): applied before first paint so the page never flashes the default look.
 # The only inline script on the page; the CSP below allows exactly this text by its hash.
-_THEME_JS = ("try{var t=localStorage.getItem('clashgate_theme');if(t==='christmas'||t==='dark')"
+_THEME_JS = ("try{var t=localStorage.getItem('clashgate_theme');if(t==='christmas'||t==='dark'||t==='glass')"
              "document.documentElement.dataset.theme=t}catch(e){}")
 _THEME_JS_SHA = base64.b64encode(hashlib.sha256(_THEME_JS.encode()).digest()).decode()
 # Scripts only from this panel (the bundles) plus the skin snippet; no eval, no other origins.
@@ -148,7 +148,7 @@ def render_spa_html(title: str, boot_data: dict, fallback_html: str = "") -> str
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{html.escape(title)}</title>"
         "<link rel=icon type=image/png href=/favicon.png><link rel='shortcut icon' href=/favicon.ico>"
-        "<style>html{background:#f3f6fb}html[data-theme=dark]{background:#0f1318;color-scheme:dark}"
+        "<style>html{background:#f3f6fb}html[data-theme=dark]{background:#0f1318;color-scheme:dark}html[data-theme=glass]{background:#eef2fa}"
         "html:not(.cg-ready) #app{visibility:hidden}</style>"
         f"<script>{_THEME_JS}</script>"
         f"<link rel=stylesheet href=\"{css_url}\">"
