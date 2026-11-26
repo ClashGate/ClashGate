@@ -47,8 +47,6 @@ export const EN = {
  "重试中…": "Retrying…",
  "面板已升级到 {v}，但 Mihomo 内核这次没有更新成功，可以稍后在首页单独更新内核": "The panel was updated to {v}, but the Mihomo core could not be updated this time; you can update the core from the home page later",
  "关闭后「自定义服务端」页面会隐藏，服务端继续使用默认服务端模板，节点不变。": "After turning it off the “Custom server” page is hidden; the server keeps using the default server template and the nodes stay as they are.",
- "关闭后会同步恢复默认服务端模板并立即生效：节点恢复成开启自定义服务端之前的样子（恢复不了时换成一个新的 VlessReality 节点，需要在客户端更新订阅）。你的自定义配置会保留，重新开启后可以载入。": "Turning it off restores the default server template and applies it at once: the nodes go back to how they were before custom server was turned on (if that is not possible, one new VlessReality node replaces them and clients need to update the subscription). Your custom config is kept and can be loaded when you turn it on again.",
- "关闭并恢复默认模板": "Turn off and restore the default template",
  "正在连接…": "Connecting…",
  "关于": "About",
  "面向新手的一键 Mihomo 代理服务端": "A one-click Mihomo proxy server for beginners",
@@ -66,7 +64,6 @@ export const EN = {
  "集群每台服务器只开一个入站，成员再多也只占一个端口": "One cluster inbound per server: one port however many members",
  "服务端配置统一为多行 YAML，更易读；退出集群立即完成": "Server config is multi-line YAML throughout, easier to read; leaving the cluster is instant",
  "集群先交换节点再统一生效；连接失败的成员可以重试，等待互联的记录可以忽略": "Cluster changes are exchanged first and applied together; failed members can be retried, waiting entries dismissed",
- "安装时自动选择适合 CPU 的内核版本；集群操作显示进度": "The installer picks a core build that fits the CPU; cluster actions show their progress",
  "AEAD 加密": "AEAD cipher",
  "Reality 私钥": "Reality private key",
  "aes-256-gcm（默认）": "aes-256-gcm (default)",
@@ -327,7 +324,6 @@ export const EN = {
  "正在重新生成证书…": "Regenerating certificate…",
  "自动证书（Cloudflare DNS / 端口模式）切换后会立刻重新申请，Token 错误或 80 端口被占用会返回具体原因。手动证书会先校验你放好的文件，通过后才切换。": "Automatic certificates (Cloudflare DNS / Port mode) are requested again right after switching; a wrong Token or a busy port 80 returns the exact reason. A manual certificate is checked first and only switched to if your files pass.",
  "当前为手动证书模式，证书不会自动续期。换新证书时，把新文件放进 /etc/clashgate/certs/，再在下方点「重新校验证书」。": "Manual certificate mode: the certificate is not renewed automatically. To use a new one, put the new files in /etc/clashgate/certs/ and click “Re-check certificate” below.",
- "创建后复制生成的 Token，粘贴到左侧输入框。模式与当前不同时，按钮才会亮起，点击后切换并重新生成证书（Token 只显示一次）。": "Copy the Token into the field on the left. The button lights up only when the mode differs from the current one, then switches and regenerates the certificate. The Token is shown once.",
  "），校验通过后立即生效。普通用户无需修改此页。": "). It takes effect right after validation. Most users do not need this page.",
  "注册 MASQUE": "Register MASQUE",
  "注册失败": "Registration failed",
@@ -523,7 +519,17 @@ export const EN = {
  "已锁定安全默认：默认启用量子加密。SNI 可自填，留空从内置域名池随机抽取": "Secure defaults locked: post-quantum encryption is on. SNI is optional; leave it blank to pick one from the built-in domain pool",
  "量子加密": "Post-quantum encryption",
  "玻璃": "Glass",
- "新增「玻璃」皮肤；按钮统一样式并显示加载动画，复制后显示对勾；添加节点卡片在自定义服务端下也不再跳动": "New “Glass” skin; buttons share one style and show a spinner while busy, copy shows a check mark; the add-node card no longer jumps in custom server mode"
+ "新增「玻璃」皮肤；按钮统一样式并显示加载动画，复制后显示对勾；添加节点卡片在自定义服务端下也不再跳动": "New “Glass” skin; buttons share one style and show a spinner while busy, copy shows a check mark; the add-node card no longer jumps in custom server mode",
+ "创建后复制生成的 Token，粘贴到左侧输入框（Token 只显示一次）。从其他模式切过来时点「切换并重新生成证书」；已经是 DNS 模式、只换 Token 时，按钮会变成「更新 Cloudflare API Token」，不会重新申请证书。": "Copy the new token and paste it into the box on the left (it is shown only once). Coming from another mode, click “Switch and regenerate certificate”; already in DNS mode and only changing the token, the button becomes “Update Cloudflare API Token” and no new certificate is requested.",
+ "更新 Cloudflare API Token": "Update Cloudflare API Token",
+ "最近一次申请证书失败": "The last certificate request failed",
+ "最近一次申请证书失败（{time}）": "The last certificate request failed ({time})",
+ "有节点还没有生效，请先点顶部「应用配置」再复制": "Some nodes are not applied yet. Click “Apply config” at the top first, then copy",
+ "正在更新 Token…": "Updating token…",
+ "节点还没有生效，请先点顶部「应用配置」再复制": "This node is not applied yet. Click “Apply config” at the top first, then copy",
+ "关闭后会切换回默认模式并立即生效，默认模式恢复成开启自定义服务端之前的样子，自定义模式里的改动不会带过去；自定义配置单独保存，重新开启后可以重新载入。": "Turning it off switches back to the default mode right away, as it was before custom server was turned on; changes made in custom mode are not carried over. The custom config is kept separately and can be loaded again when you turn this back on.",
+ "关闭并切回默认模式": "Turn off and switch to default mode",
+ "复制还没生效的节点时会提示先应用配置；默认模式和自定义模式的配置分开保存、互不影响；可以只更新 Cloudflare API Token，证书申请失败时显示原因；证书改为每天检查": "Copying a node that is not applied yet asks you to apply first; the default and custom modes keep separate configs that do not affect each other; the Cloudflare API Token can be updated alone, a failed certificate request shows why, and certificates are checked daily"
 }
 
 export const LANGS = ['zh', 'en', 'ru', 'fa']

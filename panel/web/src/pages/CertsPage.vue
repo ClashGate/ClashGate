@@ -2,6 +2,7 @@
 import { t } from '../i18n.js'
 import { usePanel } from '../composables/usePanel.js'
 import CgIcon from '../CgIcon.vue'
+import CgSpinner from '../CgSpinner.vue'
 
 const {
   boot,
@@ -99,6 +100,8 @@ const {
   certBaselineMode,
   certModeDirty,
   certRegenDisabled,
+  certTokenOnly,
+  certFailureTime,
   submitCertMode,
   trafficDisplay,
   trafficDetail,
@@ -266,6 +269,19 @@ const {
               {{ t('当前为手动证书模式，证书不会自动续期。换新证书时，把新文件放进 /etc/clashgate/certs/，再在下方点「重新校验证书」。') }}
             </div>
 
+            <!-- 1.47: why the last automatic request failed (kept by certctl.sh until a request succeeds) -->
+            <div
+              v-if="state.cert_failure && certModeValue !== 'manual'"
+              id="cert-failure-notice"
+              role="alert"
+              class="rounded-xl bg-rose-50 border border-rose-200/80 px-4 py-3 text-xs text-rose-700 leading-relaxed"
+            >
+              <div class="font-semibold">
+                {{ certFailureTime ? t('最近一次申请证书失败（{time}）', { time: certFailureTime }) : t('最近一次申请证书失败') }}
+              </div>
+              <div class="mt-0.5">{{ state.cert_failure.reason }}</div>
+            </div>
+
             <!-- 证书信息字段网格 -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
               <div class="rounded-xl bg-[#f7f9fc] border border-slate-200/80 p-3.5">
@@ -395,18 +411,23 @@ const {
                   id="cert-mode-submit"
                   type="submit"
                   :disabled="certRegenDisabled"
-                  class="cg-btn-primary w-full h-10 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed text-sm font-semibold cursor-pointer"
+                  class="cg-btn-primary w-full h-10 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed text-sm font-semibold cursor-pointer inline-flex items-center justify-center gap-2"
                 >
+                  <CgSpinner v-if="certRegenLock || busyKey === '/action/cert-mode' || busyKey === '/action/cert-token'" :size="14" light />
                   {{
-                    certModeForm.mode === 'manual'
-                      ? certRegenLock || busyKey === '/action/cert-mode'
-                        ? t('正在校验证书…')
-                        : certModeValue === 'manual'
-                          ? t('重新校验证书')
-                          : t('校验并切换')
-                      : certRegenLock || busyKey === '/action/cert-mode'
-                        ? t('正在重新生成证书…') + (certTaskElapsed ? ` ${certTaskElapsed}s` : '')
-                        : t('切换并重新生成证书')
+                    busyKey === '/action/cert-token'
+                      ? t('正在更新 Token…')
+                      : certModeForm.mode === 'manual'
+                        ? certRegenLock || busyKey === '/action/cert-mode'
+                          ? t('正在校验证书…')
+                          : certModeValue === 'manual'
+                            ? t('重新校验证书')
+                            : t('校验并切换')
+                        : certRegenLock || busyKey === '/action/cert-mode'
+                          ? t('正在重新生成证书…') + (certTaskElapsed ? ` ${certTaskElapsed}s` : '')
+                          : certTokenOnly
+                            ? t('更新 Cloudflare API Token')
+                            : t('切换并重新生成证书')
                   }}
                 </button>
               </form>
@@ -505,7 +526,7 @@ const {
                   </ul>
                 </li>
                 <li>
-                  {{ t('创建后复制生成的 Token，粘贴到左侧输入框。模式与当前不同时，按钮才会亮起，点击后切换并重新生成证书（Token 只显示一次）。') }}
+                  {{ t('创建后复制生成的 Token，粘贴到左侧输入框（Token 只显示一次）。从其他模式切过来时点「切换并重新生成证书」；已经是 DNS 模式、只换 Token 时，按钮会变成「更新 Cloudflare API Token」，不会重新申请证书。') }}
                 </li>
               </ol>
 

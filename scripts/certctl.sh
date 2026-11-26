@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # clashgate 证书管理（自动证书模式，acme.sh）
 #   certctl.sh issue    申请证书并部署到 /etc/clashgate/certs（安装时调用）
-#   certctl.sh renew    续期（acme.sh --cron）；首次申请未成功时重新申请（systemd timer / 面板调用）
+#   certctl.sh renew    续期（acme.sh --cron）；首次申请未成功时重新申请（面板调用）
+#   certctl.sh auto     同 renew，由每天一次的 systemd timer 调用；连续失败时逐渐放慢重试（最慢 3 天一次）
 #   certctl.sh deploy   acme.sh 签发 / 续期后的 reloadcmd：复制证书给 Mihomo 与面板，有变化时按需重启 Mihomo
 #   certctl.sh selfsign 写入临时自签证书（正式证书申请失败时兜底，让面板和 Mihomo 先跑起来）
 #
@@ -15,6 +16,8 @@
 #   internal    本机自签证书（开发用，不走 ACME）
 # 部署结果：/etc/clashgate/certs/{fullchain,privkey}.pem（root:mihomo 0640），Mihomo 入站与面板共用。
 # 退出码：0 = 证书已就绪，1 = 失败。
+# 申请 / 续期失败时把原因写进 /etc/clashgate/cert-failed（面板「HTTPS 证书」页显示），成功后删除；
+# 格式：失败时间（epoch）、证书方式、连续失败次数，之后是提示和 acme.sh 输出。
 set -Eeuo pipefail
 
 CS_ROOT=${CLASHGATE_ROOT:-}/etc/clashgate
@@ -25,6 +28,10 @@ SELF=$CS_ROOT/scripts/certctl.sh
 DEST=$CS_ROOT/certs
 MIHOMO_CONF=$CS_ROOT/config.yaml
 LOCK_FILE=/run/clashgate-cert.lock
+# 1.47: why the last request (timer / install / panel) failed, for the panel's HTTPS page: epoch, mode,
+# then the Chinese messages and acme.sh output. Removed after a successful run.
+FAILED_FILE=$CS_ROOT/cert-failed
+RUN_LOG=
 TEMP_CN="clashgate temporary certificate"
 CA_LE=https://acme-v02.api.letsencrypt.org/directory
 CA_LE_TEST=https://acme-staging-v02.api.letsencrypt.org/directory
@@ -34,7 +41,10 @@ CS_LANG_FILE=${CS_LANG_FILE:-$ENV_FILE}
 # shellcheck source=lib/i18n.sh
 . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/i18n.sh"
 say() { _tr_msg "$*"; builtin echo "certctl: $REPLY"; }
-err() { _tr_msg "$*"; builtin echo "certctl: $REPLY" >&2; }
+err() {
+  [[ -n $RUN_LOG ]] && builtin echo "certctl: $*" >>"$RUN_LOG"   # untranslated, so the panel can parse it
+  _tr_msg "$*"; builtin echo "certctl: $REPLY" >&2
+}
 
 [[ -r $ENV_FILE ]] || { err "缺少配置文件 $ENV_FILE"; exit 1; }
 # shellcheck disable=SC1090
@@ -52,6 +62,11 @@ FORCE_ISSUE=0
 if [[ $ACTION == reissue ]]; then
   ACTION=issue
   FORCE_ISSUE=1
+fi
+AUTO=0
+if [[ $ACTION == auto ]]; then   # the daily timer: renew, with back-off after failures (below)
+  ACTION=renew
+  AUTO=1
 fi
 
 trap 'err "第 $LINENO 行执行失败：$BASH_COMMAND"' ERR
@@ -143,6 +158,44 @@ if [[ $TLS == internal ]]; then   # 开发用：本机自签，不走 ACME
   exit 0
 fi
 
+# 1.47: the daily timer slows down after failed requests: after n failures in a row it waits min(n, 3)
+# days from the last one (2 h early is fine: the timer starts at a random time of day). The panel and
+# the installer always run. Exits before the result trap below, so the failure record stays as it is.
+if ((AUTO)) && [[ -f $FAILED_FILE ]]; then
+  last_at='' fails=''
+  { read -r last_at; read -r _; read -r fails; } <"$FAILED_FILE" 2>/dev/null || true
+  if [[ $last_at =~ ^[0-9]+$ && $fails =~ ^[0-9]+$ ]] && ((fails > 0)); then
+    wait_days=$((fails < 3 ? fails : 3))
+    if (($(date +%s) - last_at < wait_days * 86400 - 7200)); then
+      exit 0
+    fi
+  fi
+fi
+
+# 1.47: from here on a failure is a failed certificate request: keep its reason for the panel
+RUN_LOG=$(mktemp)
+record_result() {
+  local rc=$1
+  if ((rc == 0)); then
+    rm -f "$FAILED_FILE"
+  else
+    local fails=''
+    [[ -f $FAILED_FILE ]] && fails=$(sed -n '3p' "$FAILED_FILE" 2>/dev/null)
+    [[ $fails =~ ^[0-9]+$ ]] || fails=0
+    {
+      date +%s
+      builtin echo "$CERT_MODE"
+      builtin echo $((fails + 1))   # failures in a row (the daily timer backs off on it)
+      while IFS= read -r line; do   # the token never goes into the file (quoted pattern: literal match)
+        [[ -n ${CF_TOKEN:-} ]] && line=${line//"$CF_TOKEN"/***}
+        builtin echo "$line"
+      done < <(tail -n 80 "$RUN_LOG")
+    } >"$FAILED_FILE.new" 2>/dev/null && chmod 600 "$FAILED_FILE.new" && mv -f "$FAILED_FILE.new" "$FAILED_FILE"
+  fi
+  rm -f "$RUN_LOG"
+}
+trap 'record_result $?' EXIT
+
 ACME=$ACME_HOME/acme.sh
 # 手动证书模式安装的机器没有 acme.sh：从面板切换到自动证书时按固定版本补装（同 lib/cert.sh install_acme）
 # shellcheck source=lib/acme.sh
@@ -158,8 +211,8 @@ ensure_acme() {
 if [[ $CERT_MODE == dns && -n ${CF_TOKEN:-} ]]; then
   export CF_Token=$CF_TOKEN
 fi
-acme() { # acme.sh 签发成功时会把整张证书 PEM 打到输出里：去掉，日志更易读
-  "$ACME" --home "$ACME_HOME" "$@" 2>&1 | sed -u '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/d'
+acme() { # acme.sh 签发成功时会把整张证书 PEM 打到输出里：去掉，日志更易读（同时留一份给失败原因）
+  "$ACME" --home "$ACME_HOME" "$@" 2>&1 | sed -u '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/d' | tee -a "$RUN_LOG"
   return "${PIPESTATUS[0]}"
 }
 
@@ -195,7 +248,7 @@ if [[ $ACTION == issue && $CERT_MODE == dns && -n ${CF_TOKEN:-} ]]; then
   cf_zone_check || exit 1
 fi
 
-# 换过域名重装后，acme.sh 里可能还留着旧域名：删掉，免得 --cron 每小时为它申请失败
+# 换过域名重装后，acme.sh 里可能还留着旧域名：删掉，免得 --cron 每天为它申请失败
 for d in "$ACME_HOME"/*.*/; do
   [[ -d $d ]] || continue
   n=$(basename "$d"); n=${n%_ecc}

@@ -5,4 +5,4 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/etc/clashgate/scripts/certctl.sh renew
+ExecStart=/etc/clashgate/scripts/certctl.sh auto

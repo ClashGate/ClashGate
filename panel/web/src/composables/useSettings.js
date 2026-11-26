@@ -60,12 +60,13 @@ export function useSettings(p) {
     const next = !state.custom_server_enabled
     if (!next) {
       // 1.44: always ask; with a custom config in use, turning off also restores the default template
+      // (1.47: the two modes are separate: the default mode comes back as it was before custom mode)
       openConfirmDialog({
         title: t('关闭自定义服务端'),
         message: state.custom_config_mode
-          ? t('关闭后会同步恢复默认服务端模板并立即生效：节点恢复成开启自定义服务端之前的样子（恢复不了时换成一个新的 VlessReality 节点，需要在客户端更新订阅）。你的自定义配置会保留，重新开启后可以载入。')
+          ? t('关闭后会切换回默认模式并立即生效，默认模式恢复成开启自定义服务端之前的样子，自定义模式里的改动不会带过去；自定义配置单独保存，重新开启后可以重新载入。')
           : t('关闭后「自定义服务端」页面会隐藏，服务端继续使用默认服务端模板，节点不变。'),
-        confirmText: state.custom_config_mode ? t('关闭并恢复默认模板') : t('关闭'),
+        confirmText: state.custom_config_mode ? t('关闭并切回默认模式') : t('关闭'),
         tone: 'amber',
         onConfirm: () => applyCustomServer(false),
       })

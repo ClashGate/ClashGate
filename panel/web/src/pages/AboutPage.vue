@@ -8,6 +8,7 @@ const { state, selectTab } = usePanel()
 
 // Newest first; one line each. The current version is marked.
 const CHANGELOG = [
+  { v: '1.47', desc: '复制还没生效的节点时会提示先应用配置；默认模式和自定义模式的配置分开保存、互不影响；可以只更新 Cloudflare API Token，证书申请失败时显示原因；证书改为每天检查' },
   { v: '1.46', desc: '新增「玻璃」皮肤；按钮统一样式并显示加载动画，复制后显示对勾；添加节点卡片在自定义服务端下也不再跳动' },
   { v: '1.45', desc: '新增 VLESS Encryption 节点（替代 SS 的裸奔协议），自定义服务端下可添加 VLESS XHTTP；Hysteria2 默认不混淆，TUIC、ShadowQUIC 关闭 0-RTT，HTTP / SOCKS5 有证书时默认开启 TLS' },
   { v: '1.44', desc: '自定义服务端下可以自己填写节点的密码、加密方式等参数；检查集群时也能立即退出；新的加载动画和「关于」页面' },
@@ -15,7 +16,6 @@ const CHANGELOG = [
   { v: '1.42', desc: '集群每台服务器只开一个入站，成员再多也只占一个端口' },
   { v: '1.41', desc: '服务端配置统一为多行 YAML，更易读；退出集群立即完成' },
   { v: '1.40', desc: '集群先交换节点再统一生效；连接失败的成员可以重试，等待互联的记录可以忽略' },
-  { v: '1.39', desc: '安装时自动选择适合 CPU 的内核版本；集群操作显示进度' },
 ]
 
 // Bundled under /assets: the page's CSP only loads images from this panel.

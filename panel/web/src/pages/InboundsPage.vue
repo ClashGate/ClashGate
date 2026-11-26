@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue'
 import { t } from '../i18n.js'
 import CgIcon from '../CgIcon.vue'
 import CgSpinner from '../CgSpinner.vue'
@@ -193,6 +194,24 @@ const {
   addMasqueOutbound,
   retryMasque,
 } = usePanel()
+
+// 1.47: a node that is not applied yet is not served (its draft credentials would not work): ask the
+// user to apply first instead of copying. The server sends no config for such nodes either.
+const hasPendingNode = computed(() => state.inbounds.some((i) => i.pending_reload))
+function copyNodeConfig(item) {
+  if (item.pending_reload || !item.single_config) {
+    showToast(t('节点还没有生效，请先点顶部「应用配置」再复制'), false)
+    return
+  }
+  copyRaw(item.single_config, `single-${item.key}`)
+}
+function copyAllNodeConfigs() {
+  if (hasPendingNode.value) {
+    showToast(t('有节点还没有生效，请先点顶部「应用配置」再复制'), false)
+    return
+  }
+  copyRaw(state.all_proxies_yaml, 'all-proxies')
+}
 </script>
 
 <template>
@@ -613,7 +632,7 @@ const {
                   <button
                     v-if="state.inbounds.length > 0"
                     type="button"
-                    @click="copyRaw(state.all_proxies_yaml, 'all-proxies')"
+                    @click="copyAllNodeConfigs"
                     class="cg-btn-sm cg-btn-secondary"
                   >
                     <CgIcon v-if="copiedKey === 'all-proxies'" name="check" :size="13" />{{ copiedKey === 'all-proxies' ? t('已复制全部') : t('复制全部配置') }}
@@ -676,7 +695,7 @@ const {
                   <div v-else class="flex items-center gap-2 flex-wrap min-w-0 max-w-full">
                     <button
                       type="button"
-                      @click="copyRaw(item.single_config, `single-${item.key}`)"
+                      @click="copyNodeConfig(item)"
                       class="cg-btn-sm cg-btn-secondary"
                     >
                       <CgIcon v-if="copiedKey === `single-${item.key}`" name="check" :size="13" />{{ copiedKey === `single-${item.key}` ? t('已复制') : t('复制配置') }}

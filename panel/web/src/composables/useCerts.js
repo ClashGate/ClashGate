@@ -5,7 +5,7 @@ import { t } from '../i18n.js'
 import { postForm } from './api.js'
 
 export function useCerts(p) {
-  const { applyServerState, busyKey, maskAllSensitive, openConfirmDialog, showToast, state } = p
+  const { applyServerState, busyKey, maskAllSensitive, openConfirmDialog, postAction, showToast, state } = p
 
   // HTTPS Certificate management state
   const certModeForm = reactive({
@@ -57,7 +57,31 @@ export function useCerts(p) {
     if (certModeForm.mode === 'dns' && (certModeForm.cf_token || '') !== (state.cf_token || '')) return true
     return false
   })
-  const certRegenDisabled = computed(() => !certModeDirty.value || certRegenLock.value || busyKey.value === '/action/cert-mode')
+  // 1.47: already DNS mode and only the token changed: 「更新 Cloudflare API Token」 saves the token
+  // without asking Let's Encrypt for a new certificate (the next renewal uses it).
+  const certTokenOnly = computed(
+    () =>
+      certModeValue.value === 'dns' &&
+      certModeForm.mode === 'dns' &&
+      (certModeForm.cf_token || '') !== (state.cf_token || '')
+  )
+  const certRegenDisabled = computed(
+    () =>
+      !certModeDirty.value ||
+      certRegenLock.value ||
+      busyKey.value === '/action/cert-mode' ||
+      busyKey.value === '/action/cert-token'
+  )
+  // 1.47: why the last automatic request failed (certctl.sh keeps it until a request succeeds).
+  const certFailureTime = computed(() => {
+    const at = state.cert_failure && Number(state.cert_failure.at)
+    if (!at) return ''
+    try {
+      return new Date(at * 1000).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    } catch {
+      return ''
+    }
+  })
 
   // Certificate jobs run in the background on the server (up to ~3 minutes): start, then poll.
   const certTaskElapsed = ref(0)
@@ -169,6 +193,11 @@ export function useCerts(p) {
         return
       }
     }
+    if (certTokenOnly.value) {
+      maskAllSensitive()
+      postAction('/action/cert-token', { cf_token: certModeForm.cf_token }, '/action/cert-token').finally(maskAllSensitive)
+      return
+    }
     if (certModeForm.mode === 'manual') {
       openConfirmDialog({
         title: certModeValue.value === 'manual' ? t('重新校验证书') : t('切换到手动证书'),
@@ -219,6 +248,8 @@ export function useCerts(p) {
     certBaselineMode,
     certModeDirty,
     certRegenDisabled,
+    certTokenOnly,
+    certFailureTime,
     certTaskElapsed,
     resumeCertTaskIfRunning,
     confirmCertRenew,

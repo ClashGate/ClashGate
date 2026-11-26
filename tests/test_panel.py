@@ -85,7 +85,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44", "1.45", "1.46"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44", "1.45", "1.46", "1.47"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -215,7 +215,7 @@ class CustomModeTest(unittest.TestCase):
     CUSTOM = None
 
     def setUp(self):
-        for p in (P.CUSTOM_CONF, P.CUSTOM_SAVED):
+        for p in (P.CUSTOM_CONF, P.CUSTOM_SAVED, P.DEFAULT_ENV_BAK):
             if os.path.exists(p):
                 os.remove(p)
         for p in (P.NODES_TSV, P.INBOUNDS, P.PROXIES_JSON, P.PROVIDERS_JSON):
@@ -232,37 +232,71 @@ class CustomModeTest(unittest.TestCase):
         self.assertIn("/root/missing/fullchain.pem", str(cm.exception))
         self.assertFalse(P.is_custom_config_mode())
 
-    def test_disable_restores_backup(self):
-        P.apply_custom_config(self.base_conf)
-        self.assertTrue(P.is_custom_config_mode())
-        self.assertEqual(P.disable_custom_config(), "restored")
+    def _disable(self):
+        with mock.patch.dict(P.disable_custom_config.__globals__, {"wait_mihomo_ports": lambda *a, **k: True}):
+            return P.disable_custom_config()
+
+    def _custom_with_extra_node(self):
+        """The default state from setUp in custom mode, plus a listener only the custom config has."""
+        extra = ("  - name: only-in-custom\n    type: socks\n    port: 31555\n    listen: 0.0.0.0\n"
+                 "    udp: true\n")
+        conf = self.base_conf.replace("listeners:\n", "listeners:\n" + extra, 1)
+        self.assertIn("only-in-custom", conf)
+        P.apply_custom_config(conf)
+        self.assertIn("only-in-custom", [i["name"] for i in P.load_inbounds()])
+        return conf
+
+    def test_modes_are_separate(self):
+        """1.47: default mode and custom mode never mix. Entering custom mode keeps the default mode's
+        state aside; turning it off brings that back exactly, with nothing from the custom config."""
+        nodes_before = read(P.NODES_TSV)
+        inbs_before = sorted(i["name"] for i in P.load_inbounds())
+        secret_before = P.read_env().get("MIHOMO_SECRET", "")
+        routing = read(P.ROUTING_JSON) if os.path.exists(P.ROUTING_JSON) else None
+        conf = self._custom_with_extra_node()
+        self.assertTrue(os.path.exists(P.INBOUNDS + ".tplbak"))
+        self.assertTrue(os.path.exists(P.DEFAULT_ENV_BAK))
+        # a second custom config while in custom mode does not touch the default mode's copy
+        P.apply_custom_config(conf.replace("only-in-custom", "also-only-in-custom"))
+        self.assertNotIn("only-in-custom", read(P.INBOUNDS + ".tplbak"))
+        P.write_env_var("MIHOMO_SECRET", "custom-secret")   # as a custom config's `secret:` would
+        self.assertEqual(self._disable(), "restored")
         self.assertFalse(P.is_custom_config_mode())
         self.assertTrue(os.path.isfile(P.CUSTOM_SAVED))
-        self.assertIn("shadowsocks-t", read(P.CONF))
-        self.assertEqual(P.validate_config()[0], 0)
-
-    def test_disable_without_backup_keeps_tracked_nodes(self):
-        P.apply_custom_config(self.base_conf)
+        self.assertEqual(read(P.NODES_TSV), nodes_before)
+        self.assertEqual(sorted(i["name"] for i in P.load_inbounds()), inbs_before)
+        self.assertNotIn("only-in-custom", read(P.CONF))
+        self.assertEqual(P.read_env().get("MIHOMO_SECRET", ""), secret_before)
+        if routing is not None:
+            self.assertEqual(read(P.ROUTING_JSON), routing)
         for p in (P.NODES_TSV, P.INBOUNDS, P.PROXIES_JSON, P.PROVIDERS_JSON):
-            if os.path.exists(p + ".tplbak"):
-                os.remove(p + ".tplbak")
-        self.assertEqual(P.disable_custom_config(), "kept")
-        conf = read(P.CONF)
-        self.assertIn("shadowsocks-t", conf)
+            self.assertFalse(os.path.exists(p + ".tplbak"), p)
+        self.assertFalse(os.path.exists(P.DEFAULT_ENV_BAK))
         self.assertEqual(P.validate_config()[0], 0)
+        self.assertEqual(P.disable_custom_config(), "")   # not in custom mode: nothing to do
+        page = read(os.path.join(REPO, "panel/web/src/composables/useSettings.js"))
+        self.assertIn("自定义模式里的改动不会带过去", page)
 
-    def test_disable_falls_back_to_reset(self):
-        P.apply_custom_config(self.base_conf)
+    def test_no_saved_default_state_gives_a_new_node(self):
+        self._custom_with_extra_node()
         for p in (P.NODES_TSV, P.INBOUNDS, P.PROXIES_JSON, P.PROVIDERS_JSON):
-            if os.path.exists(p + ".tplbak"):
-                os.remove(p + ".tplbak")
-        inbs = P.load_inbounds()
-        inbs[0]["listener"]["type"] = "no-such-type"   # template cannot render it -> mihomo -t fails
-        with open(P.INBOUNDS, "w") as f:
-            json.dump(inbs, f)
-        self.assertEqual(P.disable_custom_config(), "reset")
-        self.assertEqual(P.validate_config()[0], 0)
+            os.remove(p + ".tplbak")   # e.g. custom mode entered by a version that kept nothing
+        self.assertEqual(self._disable(), "reset")
         self.assertEqual(len(P.read_nodes()), 1)
+        self.assertEqual(P.load_inbounds(), [])   # the custom config's nodes are not carried over
+        self.assertNotIn("only-in-custom", read(P.CONF))
+        self.assertEqual(P.validate_config()[0], 0)
+
+    def test_saved_default_state_refused_gives_a_new_node(self):
+        self._custom_with_extra_node()
+        inbs = json.loads(read(P.INBOUNDS + ".tplbak"))
+        inbs[0]["listener"]["type"] = "no-such-type"   # the template cannot render it -> mihomo -t fails
+        with open(P.INBOUNDS + ".tplbak", "w") as f:
+            json.dump(inbs, f)
+        self.assertEqual(self._disable(), "reset")
+        self.assertEqual(len(P.read_nodes()), 1)
+        self.assertEqual(P.load_inbounds(), [])
+        self.assertEqual(P.validate_config()[0], 0)
 
 
 NODE_NAMES_OK = ["东京", "Tokyo-1", "  hk 01  ", "A" * 15, "节点" * 7 + "x", "日本 🇯🇵", "de.fra_2", "direct-1",
@@ -521,7 +555,7 @@ class CustomInboundOptionsTest(unittest.TestCase):
         tog = st[st.index("async function toggleCustomServer"):]
         tog = tog[:tog.index("\n  }\n")]
         self.assertIn("if (!next) {", tog)   # always asks before turning custom server off
-        self.assertIn("恢复默认服务端模板", tog)
+        self.assertIn("关闭并切回默认模式", tog)   # 1.47: back to the default mode as it was
 
 
 class ClusterTest(unittest.TestCase):
@@ -1196,6 +1230,19 @@ class ClusterTest(unittest.TestCase):
         self.assertIn("selectTab('about')", read(os.path.join(src, "pages/SettingsPage.vue")))
         self.assertIn("<AboutPage v-else-if=\"activeTab === 'about'\"", read(os.path.join(src, "App.vue")))
         self.assertIn('if path == "/about":', read(os.path.join(REPO, "panel/cg_http.py")))
+
+    def test_unapplied_node_is_not_copied(self):
+        """1.47: a node in the draft (added / new password, not applied) is not served yet: the server sends
+        no config for it and leaves it out of 复制全部配置; the page asks to apply first."""
+        h = read(os.path.join(REPO, "panel/cg_http.py"))
+        self.assertEqual(h.count('"single_config": "" if is_pending else'), 2)
+        self.assertEqual(h.count("if not is_pending:\n                all_proxies.append(proxy)"), 2)
+        page = read(os.path.join(REPO, "panel/web/src/pages/InboundsPage.vue"))
+        self.assertIn('@click="copyNodeConfig(item)"', page)
+        self.assertIn('@click="copyAllNodeConfigs"', page)
+        fn = page[page.index("function copyNodeConfig"):page.index("function copyAllNodeConfigs")]
+        self.assertLess(fn.index("item.pending_reload"), fn.index("copyRaw("))
+        self.assertIn("请先点顶部「应用配置」再复制", fn)
 
     def test_ui_polish_146(self):
         """1.46: every busy 「…中…」 button shows CgSpinner; copy buttons show a check; row actions use the
@@ -1905,6 +1952,124 @@ class ManualCertTest(unittest.TestCase):
                    "已切换为手动证书（颁发者：R11，到期：2027-01-01 00:00，剩余 40 天）"):
             for lang in ("en", "ru", "fa"):
                 self.assertNotRegex(i18n_en.tr(zh, lang), r"[\u4e00-\u9fff]", f"{lang}: {zh}")
+
+    def test_token_update_without_new_certificate(self):
+        """1.47: DNS mode, new token: checked against Cloudflare and saved; certctl is not run (no new
+        certificate). /action/cert-mode with the same mode and a new token takes the same path."""
+        env_before = read(P.ENV_FILE)
+        h = object.__new__(P.Panel)
+        h.respond_mutation = lambda s, msg, ok=True, detail="": (ok, msg)
+        g = P.Panel.do_cert_token.__globals__
+        checked = []
+
+        def no_certctl(cmd, **kw):
+            raise AssertionError("certctl must not run for a token update: %r" % (cmd,))
+
+        try:
+            P.write_env_var("CERT_MODE", "dns")
+            P.write_env_var("CF_TOKEN", "old-token")
+            with mock.patch.dict(g, {"run": no_certctl,
+                                     "cf_token_check": lambda tok, dom: checked.append(tok) or ""}):
+                ok, msg = h.do_cert_token({}, {"cf_token": "new-token"})
+                self.assertTrue(ok, msg)
+                self.assertIn("没有重新申请证书", msg)
+                self.assertEqual(P.read_env().get("CF_TOKEN"), "new-token")
+                ok, msg = h.do_cert_mode({}, {"cert_mode": "dns", "cf_token": "newer-token"})
+                self.assertTrue(ok, msg)
+                self.assertEqual(P.read_env().get("CF_TOKEN"), "newer-token")
+                self.assertEqual(checked, ["new-token", "newer-token"])
+                self.assertFalse(h.do_cert_token({}, {"cf_token": "newer-token"})[0])   # unchanged
+                self.assertFalse(h.do_cert_token({}, {"cf_token": "a b"})[0])
+            with mock.patch.dict(g, {"run": no_certctl, "cf_token_check": lambda tok, dom: P.CF_TOKEN_BAD}):
+                ok, msg = h.do_cert_token({}, {"cf_token": "bad-token"})
+                self.assertFalse(ok)
+                self.assertIn("Token 无效", msg)
+                self.assertEqual(P.read_env().get("CF_TOKEN"), "newer-token")   # a refused token is not saved
+            P.write_env_var("CERT_MODE", "port")
+            self.assertFalse(h.do_cert_token({}, {"cf_token": "x-token"})[0])   # not DNS mode: switch instead
+        finally:
+            with open(P.ENV_FILE, "w") as f:
+                f.write(env_before)
+        src = os.path.join(REPO, "panel/web/src")
+        certs = read(os.path.join(src, "composables/useCerts.js"))
+        self.assertIn("postAction('/action/cert-token'", certs)
+        self.assertIn("certModeValue.value === 'dns' &&", certs)
+        self.assertIn("t('更新 Cloudflare API Token')", read(os.path.join(src, "pages/CertsPage.vue")))
+
+    def test_cf_token_check(self):
+        """1.47: the same zone lookup as certctl.sh's cf_zone_check (name, then parents)."""
+        import io
+        import urllib.error
+        g = P.cf_token_check.__globals__
+        asked = []
+
+        def answer(zones, code=200):
+            def fake(req, timeout=0):
+                name = urllib.parse.parse_qs(urllib.parse.urlparse(req.full_url).query)["name"][0]
+                asked.append(name)
+                if code != 200:
+                    raise urllib.error.HTTPError(req.full_url, code, "no", {}, io.BytesIO(b"{}"))
+                body = {"result": [{"name": name}] if name in zones else []}
+                return io.BytesIO(json.dumps(body).encode())
+            return fake
+
+        env_keys = {k: os.environ.pop(k) for k in ("CS_DNS_HOOK", "CS_ACME_SERVER") if k in os.environ}
+        try:
+            with mock.patch.object(g["urllib"].request, "urlopen", answer({"example.com"})):
+                self.assertEqual(P.cf_token_check("t", "*.a.b.example.com"), "")
+            self.assertEqual(asked, ["a.b.example.com", "b.example.com", "example.com"])
+            with mock.patch.object(g["urllib"].request, "urlopen", answer(set())):
+                self.assertEqual(P.cf_token_check("t", "a.example.com"), P.CF_ZONE_MISSING)
+            with mock.patch.object(g["urllib"].request, "urlopen", answer(set(), 403)):
+                self.assertEqual(P.cf_token_check("t", "a.example.com"), P.CF_TOKEN_BAD)
+            with mock.patch.object(g["urllib"].request, "urlopen", answer(set(), 503)):
+                self.assertEqual(P.cf_token_check("t", "a.example.com"), "")   # Cloudflare down: do not block
+        finally:
+            os.environ.update(env_keys)
+
+    def test_last_failure_is_shown(self):
+        """1.47: certctl.sh keeps why the last request failed (timer too) in CERT_FAILED until a request
+        succeeds; the HTTPS page shows the short reason, never for manual certificates."""
+        env_before = read(P.ENV_FILE)
+        try:
+            P.write_env_var("CERT_MODE", "port")
+            with open(P.CERT_FAILED, "w") as f:
+                f.write("1764200000\nport\n2\ncertctl: 80 端口被占用，无法申请证书（端口模式需要临时使用 80 端口）：\n")
+            st = P.cert_failure_state()
+            self.assertEqual((st["at"], st["fails"]), (1764200000, 2))
+            self.assertTrue(st["reason"].startswith("80 端口被占用"), st)
+            self.assertNotIn("重新生成证书失败", st["reason"])
+            with open(P.CERT_FAILED, "w") as f:
+                f.write("1764200000\ndns\n1\nError add txt for domain:_acme-challenge.x\ninvalid domain\n")
+            self.assertIn("找不到该域名", P.cert_failure_state()["reason"])
+            import i18n_en
+            for lang in ("en", "ru", "fa"):
+                self.assertNotRegex(i18n_en.tr(P.cert_failure_state()["reason"], lang), r"[\u4e00-\u9fff]", lang)
+            P.write_env_var("CERT_MODE", "manual")
+            self.assertEqual(P.cert_failure_state(), {})
+            os.remove(P.CERT_FAILED)
+            P.write_env_var("CERT_MODE", "port")
+            self.assertEqual(P.cert_failure_state(), {})
+        finally:
+            if os.path.exists(P.CERT_FAILED):
+                os.remove(P.CERT_FAILED)
+            with open(P.ENV_FILE, "w") as f:
+                f.write(env_before)
+        sh = read(os.path.join(REPO, "scripts/certctl.sh"))
+        self.assertIn("trap 'record_result $?' EXIT", sh)
+        self.assertIn('rm -f "$FAILED_FILE"', sh)
+        self.assertIn('line=${line//"$CF_TOKEN"/***}', sh)   # the token never goes into the file
+        # daily timer with back-off: after n failures in a row wait min(n, 3) days; the panel is never held back
+        self.assertIn("OnCalendar=daily", read(os.path.join(REPO, "scripts/init/clashgate-cert.timer")))
+        self.assertIn("ExecStart=/etc/clashgate/scripts/certctl.sh auto", read(os.path.join(REPO, "scripts/init/clashgate-cert.service")))
+        self.assertIn("wait_days=$((fails < 3 ? fails : 3))", sh)
+        self.assertIn("if ((AUTO)) && [[ -f $FAILED_FILE ]]; then", sh)
+        self.assertLess(sh.index("if ((AUTO)) && [[ -f $FAILED_FILE ]]; then"), sh.index("trap 'record_result $?' EXIT"))
+        self.assertIn("builtin echo $((fails + 1))", sh)
+        self.assertLess(sh.index("trap 'record_result $?' EXIT"), sh.index("ACME=$ACME_HOME/acme.sh"))
+        self.assertGreater(sh.index("trap 'record_result $?' EXIT"), sh.index('if [[ $CERT_MODE == manual ]]; then'))
+        page = read(os.path.join(REPO, "panel/web/src/pages/CertsPage.vue"))
+        self.assertIn('v-if="state.cert_failure && certModeValue !== \'manual\'"', page)
 
     def test_handler_switch_and_revalidate(self):
         """POST /action/cert-mode cert_mode=manual: rejects bad files without touching CERT_MODE,

@@ -366,8 +366,9 @@ class Panel(BaseHTTPRequestHandler):
         all_proxies = []
         for n in nodes:
             proxy = reality_client(n, env)
-            all_proxies.append(proxy)
             is_pending = n["name"] in pending_node_names
+            if not is_pending:
+                all_proxies.append(proxy)
             inbound_items.append({
                 "key": f"node:{n['name']}",
                 "name": n["name"],
@@ -379,14 +380,16 @@ class Panel(BaseHTTPRequestHandler):
                 "can_reset_password": True,
                 "reset_url": f"/nodes/{quote(n['name'])}/reset-password",
                 "delete_url": f"/nodes/{quote(n['name'])}/delete",
-                "single_config": "- " + json.dumps(proxy, ensure_ascii=False),
-                "readable_config": "\n".join(dump_yaml_map(proxy, indent=2, first_dash=True)),
+                # 1.47: a node not applied yet is not served: no config to copy (the page asks to apply)
+                "single_config": "" if is_pending else "- " + json.dumps(proxy, ensure_ascii=False),
+                "readable_config": "" if is_pending else "\n".join(dump_yaml_map(proxy, indent=2, first_dash=True)),
             })
         for i in inbs:
             proxy = i["client"]
-            all_proxies.append(proxy)
             can_reset = can_reset_inbound_password(i)
             is_pending = i["name"] in pending_node_names
+            if not is_pending:
+                all_proxies.append(proxy)
             inbound_items.append({
                 "key": f"inb:{i['id']}",
                 "name": i["name"],
@@ -398,8 +401,8 @@ class Panel(BaseHTTPRequestHandler):
                 "can_reset_password": can_reset,
                 "reset_url": f"/inbounds/{i['id']}/reset-password" if can_reset else "",
                 "delete_url": f"/inbounds/{i['id']}/delete",
-                "single_config": "- " + json.dumps(proxy, ensure_ascii=False),
-                "readable_config": "\n".join(dump_yaml_map(proxy, indent=2, first_dash=True)),
+                "single_config": "" if is_pending else "- " + json.dumps(proxy, ensure_ascii=False),
+                "readable_config": "" if is_pending else "\n".join(dump_yaml_map(proxy, indent=2, first_dash=True)),
             })
 
         # Nodes deleted in the draft are still served until 「应用配置」: keep them in the list, marked.
@@ -465,6 +468,9 @@ class Panel(BaseHTTPRequestHandler):
         cert_mode = env.get("CERT_MODE") or "port"
         domain = env.get("DOMAIN", "")
         cf_token = env.get("CF_TOKEN", "")
+        cert_failure = cert_failure_state(env) if install_mode != "no-cert" else {}
+        if cert_failure:
+            cert_failure["reason"] = _tr_msg(cert_failure["reason"], req_lang)
         cert_issuer = cert.get("issuer", "")
         cert_expires = cert.get("expires", "")
         cert_days = cert.get("days")
@@ -485,6 +491,7 @@ class Panel(BaseHTTPRequestHandler):
             "cert_mode": cert_mode,
             "domain": domain,
             "cf_token": cf_token,
+            "cert_failure": cert_failure or None,   # 1.47: why the last automatic request failed
             "cert_issuer": cert_issuer,
             "cert_expires": cert_expires,
             "cert_days": cert_days,
@@ -821,6 +828,8 @@ class Panel(BaseHTTPRequestHandler):
             return self.do_cert_action(s, form)
         if path == "/action/cert-mode":
             return self.do_cert_mode(s, form)
+        if path == "/action/cert-token":
+            return self.do_cert_token(s, form)
         if path == "/action/reset-secret":
             return self.do_reset_secret(s)
         if path == "/action/reset-sub":
@@ -1457,6 +1466,8 @@ class Panel(BaseHTTPRequestHandler):
             return self.respond_mutation(s, "设置项无效", False)
         with LOCK:
             if updates.get("custom_server_enabled") is False and is_custom_config_mode():
+                # 1.47: two separate modes. The default mode comes back as it was before custom mode;
+                # the custom config is kept and offered again when custom server is turned on.
                 try:
                     used = disable_custom_config()
                     clear_pending_reload()
@@ -1466,8 +1477,10 @@ class Panel(BaseHTTPRequestHandler):
                 updates.pop("custom_server_enabled")
                 if not updates:
                     if used == "reset":
-                        return self.respond_mutation(s, "已关闭自定义服务端。原有节点无法用默认模板生成，已重置为默认服务端模板并生成新的 VlessReality 节点，请在客户端更新订阅。", True)
-                    return self.respond_mutation(s, "已关闭自定义服务端，已切换回默认服务端模板并应用生效。", True)
+                        return self.respond_mutation(s, "已关闭自定义服务端。没有可用的默认模式配置，已生成新的 VlessReality 节点（分流组保持不变），请在客户端更新订阅。", True)
+                    if used == "reset-all":
+                        return self.respond_mutation(s, "已关闭自定义服务端。默认模式配置无法使用，已恢复默认服务端模板并生成新的 VlessReality 节点，请在客户端更新订阅。", True)
+                    return self.respond_mutation(s, "已关闭自定义服务端，默认模式已恢复成开启自定义服务端之前的样子。", True)
             if "update_channel" in updates:
                 apply_update_channel_env(updates["update_channel"])
                 # Keep other toggles if sent together.
@@ -1725,6 +1738,8 @@ class Panel(BaseHTTPRequestHandler):
         prev_token = env.get("CF_TOKEN", "")
         if mode == prev_mode and (mode != "dns" or raw_token == prev_token):
             return self.respond_mutation(s, "未切换证书模式，未重新生成证书。", False)
+        if mode == "dns" and prev_mode == "dns":
+            return self.do_cert_token(s, form)   # 1.47: same mode, new token: no new certificate
 
         def job():
             with LOCK:
@@ -1747,6 +1762,29 @@ class Panel(BaseHTTPRequestHandler):
             return True, "已切换并重新生成证书。", ""
         return self._cert_job(s, form, job)
 
+    def do_cert_token(self, s, form):
+        """1.47: replace the Cloudflare API Token of DNS mode without asking Let's Encrypt for a new
+        certificate. The token is checked against Cloudflare first (it must see the domain's zone);
+        the next renewal, or 「立即申请 / 续期」, uses it."""
+        tok = (form.get("cf_token") or "").strip()
+        if not tok:
+            return self.respond_mutation(s, "请输入 Cloudflare API Token", False)
+        if re.search(r'[\s"\'`$\\]', tok):
+            return self.respond_mutation(s, "API Token 不能包含空格或引号", False)
+        env = read_env()
+        if (env.get("CERT_MODE") or "port").strip() != "dns":
+            return self.respond_mutation(s, "当前不是 Cloudflare DNS 模式，请用「切换并重新生成证书」", False)
+        if tok == env.get("CF_TOKEN", ""):
+            return self.respond_mutation(s, "Cloudflare API Token 没有变化", False)
+        why = cf_token_check(tok, env.get("DOMAIN", ""))   # a network round trip: outside LOCK
+        if why:
+            return self.respond_mutation(s, f"更新 Cloudflare API Token 失败：{why}", False)
+        with LOCK:
+            write_env_var("CF_TOKEN", tok)
+        if cert_failure_state(env):
+            return self.respond_mutation(s, "已更新 Cloudflare API Token，没有重新申请证书。上次申请证书失败了，可以点「立即申请 / 续期」用新 Token 重试。", True)
+        return self.respond_mutation(s, "已更新 Cloudflare API Token，没有重新申请证书，之后的自动续期会使用新 Token。", True)
+
     def do_cert_manual(self, s):
         """Switch to (or re-check) the manual certificate placed in /etc/clashgate/certs/."""
         cert_dir = CS_ROOT + "/certs"
@@ -1765,9 +1803,13 @@ class Panel(BaseHTTPRequestHandler):
                     install_manual_cert(cert_dir, info["crt"], info["key"])
                 except ManualCertError as e:
                     return self.respond_mutation(s, str(e), False)
+                try:
+                    os.remove(CERT_FAILED)   # 1.47: an ACME failure does not concern a manual certificate
+                except FileNotFoundError:
+                    pass
                 if prev_mode != "manual":
                     write_env_var("CERT_MODE", "manual")
-                    # Manual certificates are never renewed by acme.sh; stop the hourly job.
+                    # Manual certificates are never renewed by acme.sh; stop the daily job.
                     run([SYSTEMCTL, "disable", "--now", "clashgate-cert.timer"], timeout=30)
             finally:
                 if lock_fd is not None:
