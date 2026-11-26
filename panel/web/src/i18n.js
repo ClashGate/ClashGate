@@ -63,7 +63,6 @@ export const EN = {
  "改配置改用热重载，不再频繁重启内核；更新时内核下载失败也不影响面板更新": "Config changes hot-reload instead of restarting the core; a failed core download no longer stops a panel update",
  "集群每台服务器只开一个入站，成员再多也只占一个端口": "One cluster inbound per server: one port however many members",
  "服务端配置统一为多行 YAML，更易读；退出集群立即完成": "Server config is multi-line YAML throughout, easier to read; leaving the cluster is instant",
- "集群先交换节点再统一生效；连接失败的成员可以重试，等待互联的记录可以忽略": "Cluster changes are exchanged first and applied together; failed members can be retried, waiting entries dismissed",
  "AEAD 加密": "AEAD cipher",
  "Reality 私钥": "Reality private key",
  "aes-256-gcm（默认）": "aes-256-gcm (default)",
@@ -529,7 +528,8 @@ export const EN = {
  "节点还没有生效，请先点顶部「应用配置」再复制": "This node is not applied yet. Click “Apply config” at the top first, then copy",
  "关闭后会切换回默认模式并立即生效，默认模式恢复成开启自定义服务端之前的样子，自定义模式里的改动不会带过去；自定义配置单独保存，重新开启后可以重新载入。": "Turning it off switches back to the default mode right away, as it was before custom server was turned on; changes made in custom mode are not carried over. The custom config is kept separately and can be loaded again when you turn this back on.",
  "关闭并切回默认模式": "Turn off and switch to default mode",
- "复制还没生效的节点时会提示先应用配置；默认模式和自定义模式的配置分开保存、互不影响；可以只更新 Cloudflare API Token，证书申请失败时显示原因；证书改为每天检查": "Copying a node that is not applied yet asks you to apply first; the default and custom modes keep separate configs that do not affect each other; the Cloudflare API Token can be updated alone, a failed certificate request shows why, and certificates are checked daily"
+ "复制还没生效的节点时会提示先应用配置；默认模式和自定义模式的配置分开保存、互不影响；可以只更新 Cloudflare API Token，证书申请失败时显示原因；证书改为每天检查": "Copying a node that is not applied yet asks you to apply first; the default and custom modes keep separate configs that do not affect each other; the Cloudflare API Token can be updated alone, a failed certificate request shows why, and certificates are checked daily",
+ "不再使用临时证书：域名解析不对或证书申请失败时直接停止安装并说明原因，修好后重新运行安装命令即可": "No more temporary certificates: when the domain record is wrong or the certificate request fails, the install stops and says why; fix it and run the install command again"
 }
 
 export const LANGS = ['zh', 'en', 'ru', 'fa']

@@ -51,16 +51,11 @@ check_dns() {
     info "域名解析正常：$DOMAIN -> $SERVER_IP"; return 0
   fi
   warn "$msg"
-  # 交互安装时让用户决定：现在修 DNS 再装，或先装上（临时证书），解析生效后自动签发
-  if has_tty && [[ $(ask '域名解析不正确，仍要继续安装吗？（继续则先用临时证书，解析生效后每天自动重试签发，也可在面板立即重试）[Y/n]：' y) == [nN]* ]]; then
-    if [[ $SERVER_IP == *:* ]]; then
-      printf '已取消。请先把域名 AAAA 记录指向 %s，再重新运行安装命令。\n' "$SERVER_IP"
-    else
-      printf '已取消。请先把域名 A 记录指向 %s，再重新运行安装命令。\n' "$SERVER_IP"
-    fi
-    exit 0
+  # 1.48: no temporary certificate any more, so a wrong record stops here, before anything is installed
+  if [[ $SERVER_IP == *:* ]]; then
+    die "安装已停止：域名解析不正确。请把域名 AAAA 记录指向 $SERVER_IP，解析生效后重新运行安装命令"
   fi
-  return 0
+  die "安装已停止：域名解析不正确。请把域名 A 记录指向 $SERVER_IP，解析生效后重新运行安装命令"
 }
 
 auto_discover_manual_cert() {
@@ -180,18 +175,17 @@ issue_cert() {
   local out rc=0
   out=$("$LIB_DIR/scripts/certctl.sh" issue 2>&1) || rc=$?
   ( umask 077; printf '%s\n' "$out" > "$CS_ETC/cert-install.log" )
-  if ((rc == 0)); then
-    info "证书已就绪：$CONF_DIR/certs/（$(cert_issuer)，到期 $(cert_enddate)；Mihomo 与面板共用）"
-  else
+  if ((rc != 0)); then
     # 只显示关键信息：certctl 提示 + acme.sh 的错误行（完整输出：/etc/clashgate/cert-install.log）
     printf '%s\n' "$out" | grep -iE '^certctl:|error|invalid|fail|timeout|refused|unauthorized|connection' | tail -n 8 >&2 || true
-    "$LIB_DIR/scripts/certctl.sh" selfsign >/dev/null
+    # 1.48: no temporary self-signed certificate: stop. Nodes are not generated yet (do_install issues the
+    # certificate first), so running the install command again after the fix is a clean install.
     if [[ ${CERT_MODE:-port} == dns ]]; then
-      warn "证书申请失败，已先用临时自签证书启动。请检查 Cloudflare API Token 是否具备 $DOMAIN 的 DNS 编辑权限；系统每天自动重试，也可在面板「HTTPS 证书」页立即重试"
-    else
-      warn "证书申请失败，已先用临时自签证书启动。请检查：域名 A 记录是否指向 $SERVER_IP、80 端口是否放行；系统每天自动重试，也可在面板「HTTPS 证书」页立即重试"
+      die "证书申请失败，安装已停止。请检查 Cloudflare API Token 是否具备 $DOMAIN 的 DNS 编辑权限，修好后重新运行安装命令（完整日志：$CS_ETC/cert-install.log）"
     fi
+    die "证书申请失败，安装已停止。请检查：域名 A 记录是否指向 $SERVER_IP、云防火墙是否放行 TCP 80，修好后重新运行安装命令（完整日志：$CS_ETC/cert-install.log）"
   fi
+  info "证书已就绪：$CONF_DIR/certs/（$(cert_issuer)，到期 $(cert_enddate)；Mihomo 与面板共用）"
   su -s /bin/sh mihomo -c "test -r $CONF_DIR/certs/privkey.pem" || die "mihomo 用户无法读取证书私钥"
   systemctl enable --now clashgate-cert.timer >/dev/null 2>&1
 }
