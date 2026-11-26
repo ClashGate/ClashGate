@@ -293,9 +293,17 @@ ensure_mihomo_secret() {
 render_controller() {
   if [[ $MODE == auto-cert ]]; then
     ensure_mihomo_secret
-    if [[ ${CERT_MODE:-port} != manual ]]; then
+    # 1.48: never a temporary self-signed certificate. Install issues the certificate before this runs;
+    # if the files are gone later, the copy acme.sh keeps is put back, else stop with the reason.
+    if [[ ! -f $CONF_DIR/certs/fullchain.pem || ! -f $CONF_DIR/certs/privkey.pem ]]; then
+      local live=$ACME_HOME/live
+      if [[ ${CERT_MODE:-port} != manual && -s $live/fullchain.pem && -s $live/privkey.pem ]]; then
+        install -d -m 750 -o root -g mihomo "$CONF_DIR/certs"
+        install -m 640 -o root -g mihomo "$live/fullchain.pem" "$CONF_DIR/certs/fullchain.pem"
+        install -m 640 -o root -g mihomo "$live/privkey.pem" "$CONF_DIR/certs/privkey.pem"
+      fi
       [[ -f $CONF_DIR/certs/fullchain.pem && -f $CONF_DIR/certs/privkey.pem ]] \
-        || "$LIB_DIR/scripts/certctl.sh" selfsign >/dev/null
+        || die "证书文件缺失：$CONF_DIR/certs/fullchain.pem。请把证书放回该目录，或运行 clashgate cert 重新申请证书"
     fi
     cat > "$FRAG_CONTROLLER" <<EOF
 external-controller-tls: "0.0.0.0:$CONTROLLER_PORT"

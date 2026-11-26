@@ -85,7 +85,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44", "1.45", "1.46", "1.47"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44", "1.45", "1.46", "1.47", "1.48"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -2070,6 +2070,33 @@ class ManualCertTest(unittest.TestCase):
         self.assertGreater(sh.index("trap 'record_result $?' EXIT"), sh.index('if [[ $CERT_MODE == manual ]]; then'))
         page = read(os.path.join(REPO, "panel/web/src/pages/CertsPage.vue"))
         self.assertIn('v-if="state.cert_failure && certModeValue !== \'manual\'"', page)
+
+    def test_no_temporary_certificate(self):
+        """1.48: no temporary self-signed certificate. A wrong domain record stops the install before
+        anything is installed; a failed request stops it before the nodes exist (a rerun is a clean
+        install); missing files are restored from acme.sh or stop with the reason. A certificate left by
+        an older version is still recognised so it gets replaced."""
+        cert_sh = read(os.path.join(REPO, "scripts/lib/cert.sh"))
+        core_sh = read(os.path.join(REPO, "scripts/lib/core.sh"))
+        cmd_sh = read(os.path.join(REPO, "scripts/cmd/clashgate.sh"))
+        ctl = read(os.path.join(REPO, "scripts/certctl.sh"))
+        for name, src in (("cert.sh", cert_sh), ("core.sh", core_sh), ("clashgate.sh", cmd_sh)):
+            self.assertNotIn("certctl.sh\" selfsign", src, name)
+        self.assertNotIn("  selfsign)", ctl)   # the command is gone (selfsign() stays for TLS=internal only)
+        self.assertIn('selfsign "$d" "clashgate internal CA" 90', ctl)
+        self.assertIn("! is_temp", ctl)   # an old temporary certificate is re-issued
+        dns = cert_sh[cert_sh.index("check_dns() {"):cert_sh.index("\n}\n", cert_sh.index("check_dns() {"))]
+        self.assertNotIn("ask ", dns)   # no "continue anyway?"
+        self.assertIn('die "安装已停止：域名解析不正确', dns)
+        issue = cert_sh[cert_sh.index("issue_cert() {"):cert_sh.index("\n}\n", cert_sh.index("issue_cert() {"))]
+        self.assertIn('die "证书申请失败，安装已停止', issue)
+        inst = cmd_sh[cmd_sh.index("do_install() {"):cmd_sh.index("\n}\n", cmd_sh.index("do_install() {"))]
+        self.assertLess(inst.index("issue_cert"), inst.index("gen_nodes"))
+        self.assertLess(inst.index("setup_manual_cert"), inst.index("gen_nodes"))
+        self.assertLess(inst.index("check_dns"), inst.index("install_core"))
+        ctrl = core_sh[core_sh.index("render_controller() {"):]
+        ctrl = ctrl[:ctrl.index("cat > ")]
+        self.assertIn('die "证书文件缺失', ctrl)
 
     def test_handler_switch_and_revalidate(self):
         """POST /action/cert-mode cert_mode=manual: rejects bad files without touching CERT_MODE,

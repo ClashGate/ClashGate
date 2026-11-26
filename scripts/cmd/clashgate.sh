@@ -203,9 +203,7 @@ print_summary() {
     printf '订阅链接：\033[1;36m%s\033[0m\n' "$(sub_url)"
     printf '面板：%s\n用户名：admin\n' "$(panel_url)"
     [[ -n $PANEL_PASS ]] && printf '密码：%s（仅显示一次）\n' "$PANEL_PASS"
-    if [[ ${CERT_MODE:-port} != manual ]] && cert_is_temp; then
-      printf '\033[1;33m证书尚未签发成功，当前为临时自签证书；系统每天自动重试，也可在面板「HTTPS 证书」页立即重试\033[0m\n'
-    elif [[ ${CERT_MODE:-port} != manual && $TLS != production ]]; then
+    if [[ ${CERT_MODE:-port} != manual && $TLS != production ]]; then
       printf '注意：当前为%s，客户端可能拒绝下载订阅\n' "$(tls_label)"
     fi
   else
@@ -241,11 +239,12 @@ do_install() {
   if [[ $MODE == auto-cert ]]; then ensure_python; fi
   [[ $MODE == auto-cert ]] && preflight_cert
   detect_ip
-  if [[ $MODE == auto-cert ]]; then check_dns; fi   # 尽早检查，解析不对可在装任何东西前退出
+  if [[ $MODE == auto-cert ]]; then check_dns; fi   # 尽早检查：解析不对时在装任何东西前停止（1.48）
   [[ $MODE == auto-cert && -z $MIHOMO_SECRET ]] && MIHOMO_SECRET=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 20)
   save_env
-  install_core; ensure_user; log "安装 ClashGate 文件"; install_files; gen_nodes
-  ensure_geodata || die "地理数据下载失败：$GEO_FAILED（请确认服务器可以访问 jsDelivr 或 GitHub）"
+  install_core; ensure_user; log "安装 ClashGate 文件"; install_files
+  # 1.48: the certificate comes before the nodes. There is no temporary certificate: when it cannot be
+  # issued the install stops here, before $STATE exists, so running the install command again is clean.
   if [[ $MODE == auto-cert ]]; then
     if [[ ${CERT_MODE:-port} == manual ]]; then
       setup_manual_cert
@@ -253,6 +252,8 @@ do_install() {
       install_acme; issue_cert
     fi
   fi
+  gen_nodes
+  ensure_geodata || die "地理数据下载失败：$GEO_FAILED（请确认服务器可以访问 jsDelivr 或 GitHub）"
   render_server; render_client; setup_service
   if [[ $MODE == auto-cert ]]; then
     setup_panel
@@ -353,7 +354,7 @@ do_status() {
     printf '  Zashboard：%s（端口 %s，API 密钥：%s）\n' "$(zashboard_url)" "$(controller_port)" "${MIHOMO_SECRET:-—}"
     printf '  域名：%s（证书：%s）\n' "$DOMAIN" "$(tls_label)"
     if cert_is_temp; then
-      printf '  证书：\033[1;31m尚未签发\033[0m（临时自签证书；可在面板「HTTPS 证书」页重试）\n'
+      printf '  证书：\033[1;31m尚未签发\033[0m（旧版本留下的临时自签证书，客户端无法更新订阅；请在面板「HTTPS 证书」页立即申请）\n'
     elif [[ -f $CONF_DIR/certs/fullchain.pem ]]; then
       local days; days=$(cert_days_left)
       printf '  证书到期：%s（%s，剩余 %s 天）\n' "$(cert_enddate)" "$(cert_issuer)" "$days"

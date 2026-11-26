@@ -78,7 +78,6 @@ ClashGate 已更新到 GitHub %s 最新版（通道：%s）	ClashGate updated to
   面板：%s（%s，端口 %s）    证书自动续期：%s\n	  Panel: %s (%s, port %s)    Auto-renewal: %s\n
   Zashboard：%s（端口 %s，API 密钥：%s）\n	  Zashboard: %s (port %s, API secret: %s)\n
   域名：%s（证书：%s）\n	  Domain: %s (certificate: %s)\n
-  证书：\033[1;31m尚未签发\033[0m（临时自签证书；可在面板「HTTPS 证书」页重试）\n	  Certificate: \033[1;31mnot issued\033[0m (temporary self-signed; retry on the panel's HTTPS certificate page)\n
   证书到期：%s（%s，剩余 %s 天）\n	  Certificate expires: %s (%s, %s days left)\n
   \033[1;33m证书即将到期\033[0m：请在面板「HTTPS 证书」页续期或更新证书\n	  \033[1;33mCertificate expiring soon\033[0m: renew or update it on the panel's HTTPS certificate page\n
   证书：\033[1;31m缺失\033[0m（请在面板「HTTPS 证书」页处理）\n	  Certificate: \033[1;31mmissing\033[0m (fix it on the panel's HTTPS certificate page)\n
@@ -155,8 +154,6 @@ DNS API 模式需要提供 Cloudflare API Token	DNS API mode requires a Cloudfla
 域名 %s 解析到 %s，而不是本机 %s。若是 Cloudflare 橙云请改为灰云，否则端口模式无法申请证书	Domain %s resolves to %s, not this host %s. If it is Cloudflare orange cloud, switch to grey cloud, otherwise port mode cannot obtain a certificate
 域名 %s 有 AAAA 记录 %s，但它不是本机的 IPv6 地址。Let's Encrypt 会优先用 IPv6 验证，请删除该 AAAA 记录（或改为本机 IPv6）	Domain %s has an AAAA record %s that is not this host's IPv6 address. Let's Encrypt prefers IPv6 for validation; delete that AAAA record (or point it to this host's IPv6)
 域名解析正常：%s -> %s	Domain resolves correctly: %s -> %s
-域名解析不正确，仍要继续安装吗？（继续则先用临时证书，解析生效后每天自动重试签发，也可在面板立即重试）[Y/n]：	DNS is not correct. Continue installing anyway? (a temporary certificate is used first, issuance is retried daily once DNS takes effect, or right away from the panel) [Y/n]: 
-已取消。请先把域名 A 记录指向 %s，再重新运行安装命令。\n	Cancelled. Point the domain A record to %s first, then rerun the install command.\n
 未找到有效的证书文件，请将证书放入 %s：\n  - 证书链：%s\n  - 私钥：  %s\n	No valid certificate files found; place them in %s:\n  - Certificate chain: %s\n  - Private key:       %s\n
 证书无效或已过期：%s\n	Certificate invalid or expired: %s\n
 证书不包含域名 %s（请检查证书与所填域名是否一致）：%s\n	The certificate does not cover domain %s (check that the certificate matches the domain): %s\n
@@ -178,8 +175,6 @@ mihomo 用户无法读取证书私钥：%s\n	The mihomo user cannot read the pri
 已安装 acme.sh v%s -> %s（续期由 clashgate-cert.timer 负责）	Installed acme.sh v%s -> %s (renewal is handled by clashgate-cert.timer)
 申请证书（%s，%s，%s）	Requesting certificate (%s, %s, %s)
 证书已就绪：%s/certs/（%s，到期 %s；Mihomo 与面板共用）	Certificate ready: %s/certs/ (%s, expires %s; shared by Mihomo and the panel)
-证书申请失败，已先用临时自签证书启动。请检查 Cloudflare API Token 是否具备 %s 的 DNS 编辑权限；系统每天自动重试，也可在面板「HTTPS 证书」页立即重试	Certificate request failed; started with a temporary self-signed certificate. Check that the Cloudflare API Token has DNS edit permission for %s; the system retries daily, or retry now on the panel's HTTPS certificate page
-证书申请失败，已先用临时自签证书启动。请检查：域名 A 记录是否指向 %s、80 端口是否放行；系统每天自动重试，也可在面板「HTTPS 证书」页立即重试	Certificate request failed; started with a temporary self-signed certificate. Check that the domain A record points to %s and port 80 is open; the system retries daily, or retry now on the panel's HTTPS certificate page
 mihomo 用户无法读取证书私钥	The mihomo user cannot read the private key
 尚未运行	not run yet
 成功（%s）	success (%s)
@@ -215,7 +210,6 @@ Mihomo：%s\n	Mihomo: %s\n
 证书与私钥不匹配：%s	Certificate and private key do not match: %s
 证书已更新 -> %s（到期：%s）	Certificate updated -> %s (expires: %s)
 %s 中没有证书	No certificate in %s
-用法：certctl.sh issue|renew|reissue|deploy|selfsign	Usage: certctl.sh issue|renew|reissue|deploy|selfsign
 另一个证书任务仍在运行	Another certificate job is still running
 手动证书校验正常：%s（到期：%s）	Manual certificate OK: %s (expires: %s)
 未找到 acme.sh，正在安装 v%s	acme.sh not found; installing v%s
@@ -236,7 +230,6 @@ DNS API 模式缺少 Cloudflare API Token	DNS API mode is missing the Cloudflare
 订阅链接：\033[1;36m%s\033[0m\n	Subscription: \033[1;36m%s\033[0m\n
 面板：%s\n用户名：admin\n	Panel: %s\nUsername: admin\n
 密码：%s（仅显示一次）\n	Password: %s (shown once)\n
-\033[1;33m证书尚未签发成功，当前为临时自签证书；系统每天自动重试，也可在面板「HTTPS 证书」页立即重试\033[0m\n	\033[1;33mThe certificate has not been issued yet; a temporary self-signed certificate is in use. It retries daily, or retry now on the panel's HTTPS certificate page\033[0m\n
 注意：当前为%s，客户端可能拒绝下载订阅\n	Note: using %s; clients may refuse to download the subscription\n
 节点配置（粘贴到客户端的 proxies）：\n	Node config (paste into your client under proxies):\n
 运行 \033[1mclashgate\033[0m 打开菜单\n	Run \033[1mclashgate\033[0m to open the menu\n
@@ -244,7 +237,6 @@ DNS API 模式缺少 Cloudflare API Token	DNS API mode is missing the Cloudflare
 旧订阅链接会立即失效，确定更换？[y/N]：	The old subscription link stops working immediately. Change it? [y/N]: 
 确定重置面板密码？[y/N]：	Reset the panel password? [y/N]: 
 域名 %s 没有指向本机 %s 的 AAAA 记录。请添加 AAAA 记录指向本机（Cloudflare 请设为灰云 DNS only）	The domain %s has no AAAA record pointing to this host (%s). Add an AAAA record pointing here (on Cloudflare, use the grey cloud / DNS only)
-已取消。请先把域名 AAAA 记录指向 %s，再重新运行安装命令。\n	Cancelled. Point the domain AAAA record to %s first, then rerun the install command.\n
 \n\033[1;32m✔ 域名已更换为 %s\033[0m\n	\n\033[1;32m✔ Domain changed to %s\033[0m\n
 Cloudflare API Token（回车沿用当前的 Token）：	Cloudflare API Token (Enter = keep the current token): 
 已启用自定义服务端配置，请先在面板「设置」页关闭后再更换域名	A custom server config is on; turn it off on the panel's Settings page before changing the domain
@@ -284,3 +276,10 @@ Mihomo 内核更新失败：无法获取最新版本信息，已跳过内核更�
 Mihomo 内核更新失败：下载的内核无法在这台服务器上运行，已跳过内核更新，面板照常更新（当前内核 %s，最新 %s）	Mihomo core update failed: the downloaded core does not run on this server. The core update was skipped, the panel was updated (current core %s, latest %s)
 Mihomo 内核更新失败：最新版本没有适合这台服务器的内核文件，已跳过内核更新，面板照常更新（当前内核 %s，最新 %s）	Mihomo core update failed: the latest release has no core for this server. The core update was skipped, the panel was updated (current core %s, latest %s)
 Mihomo 内核更新失败：下载失败，已跳过内核更新，面板照常更新（当前内核 %s，最新 %s）	Mihomo core update failed: the download failed. The core update was skipped, the panel was updated (current core %s, latest %s)
+安装已停止：域名解析不正确。请把域名 AAAA 记录指向 %s，解析生效后重新运行安装命令	Installation stopped: the domain record is wrong. Point the domain AAAA record to %s, then rerun the install command once DNS takes effect
+安装已停止：域名解析不正确。请把域名 A 记录指向 %s，解析生效后重新运行安装命令	Installation stopped: the domain record is wrong. Point the domain A record to %s, then rerun the install command once DNS takes effect
+证书申请失败，安装已停止。请检查 Cloudflare API Token 是否具备 %s 的 DNS 编辑权限，修好后重新运行安装命令（完整日志：%s/cert-install.log）	Certificate request failed; installation stopped. Check that the Cloudflare API Token has DNS edit permission for %s, fix it and rerun the install command (full log: %s/cert-install.log)
+证书申请失败，安装已停止。请检查：域名 A 记录是否指向 %s、云防火墙是否放行 TCP 80，修好后重新运行安装命令（完整日志：%s/cert-install.log）	Certificate request failed; installation stopped. Check that the domain A record points to %s and the cloud firewall allows TCP 80, fix it and rerun the install command (full log: %s/cert-install.log)
+证书文件缺失：%s/certs/fullchain.pem。请把证书放回该目录，或运行 clashgate cert 重新申请证书	Certificate files missing: %s/certs/fullchain.pem. Put the certificate back there, or run clashgate cert to request a new one
+  证书：\033[1;31m尚未签发\033[0m（旧版本留下的临时自签证书，客户端无法更新订阅；请在面板「HTTPS 证书」页立即申请）\n	  Certificate: \033[1;31mnot issued\033[0m (a temporary self-signed one left by an old version; clients cannot update the subscription. Request one now on the panel's HTTPS certificate page)\n
+用法：certctl.sh issue|renew|reissue|auto|deploy	Usage: certctl.sh issue|renew|reissue|auto|deploy

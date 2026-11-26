@@ -4,7 +4,6 @@
 #   certctl.sh renew    续期（acme.sh --cron）；首次申请未成功时重新申请（面板调用）
 #   certctl.sh auto     同 renew，由每天一次的 systemd timer 调用；连续失败时逐渐放慢重试（最慢 3 天一次）
 #   certctl.sh deploy   acme.sh 签发 / 续期后的 reloadcmd：复制证书给 Mihomo 与面板，有变化时按需重启 Mihomo
-#   certctl.sh selfsign 写入临时自签证书（正式证书申请失败时兜底，让面板和 Mihomo 先跑起来）
 #
 # 申请方式（CERT_MODE）：
 #   port  端口模式（默认）：申请/续期时临时使用 80 端口
@@ -15,6 +14,8 @@
 #   staging     Let's Encrypt 测试证书
 #   internal    本机自签证书（开发用，不走 ACME）
 # 部署结果：/etc/clashgate/certs/{fullchain,privkey}.pem（root:mihomo 0640），Mihomo 入站与面板共用。
+# 不生成任何临时自签证书（1.48 起）：申请失败就是失败，安装会停止，已安装的服务器保留原来的证书。
+# 1.48 之前的版本在申请失败时会写入临时自签证书（CN 为 TEMP_CN）；遇到它时这里按「尚未签发」处理并重新申请。
 # 退出码：0 = 证书已就绪，1 = 失败。
 # 申请 / 续期失败时把原因写进 /etc/clashgate/cert-failed（面板「HTTPS 证书」页显示），成功后删除；
 # 格式：失败时间（epoch）、证书方式、连续失败次数，之后是提示和 acme.sh 输出。
@@ -32,7 +33,7 @@ LOCK_FILE=/run/clashgate-cert.lock
 # then the Chinese messages and acme.sh output. Removed after a successful run.
 FAILED_FILE=$CS_ROOT/cert-failed
 RUN_LOG=
-TEMP_CN="clashgate temporary certificate"
+TEMP_CN="clashgate temporary certificate"   # only to recognise one left by a version before 1.48
 CA_LE=https://acme-v02.api.letsencrypt.org/directory
 CA_LE_TEST=https://acme-staging-v02.api.letsencrypt.org/directory
 
@@ -110,7 +111,7 @@ deploy_live() { # acme.sh 输出 -> /etc/clashgate/certs；重复调用无副作
   return 0
 }
 
-selfsign() { # selfsign <dir> <CN> <days>
+selfsign() { # selfsign <dir> <CN> <days>：仅供 TLS=internal（开发调试用的本机 CA），正式安装不会用到
   local d=$1 san="DNS:$BASE_DOMAIN"
   [[ $DOMAIN != "$BASE_DOMAIN" ]] && san+=",DNS:$DOMAIN"
   install -d -m 700 "$d"
@@ -123,17 +124,10 @@ selfsign() { # selfsign <dir> <CN> <days>
 is_temp() { [[ -f $DEST/fullchain.pem ]] && openssl x509 -noout -subject -in "$DEST/fullchain.pem" 2>/dev/null | grep -q "$TEMP_CN"; }
 
 case $ACTION in
-  selfsign)
-    is_temp || [[ ! -f $DEST/fullchain.pem ]] || exit 0   # 已有真实证书时不覆盖
-    tmp=$(mktemp -d)
-    selfsign "$tmp" "$TEMP_CN" 30
-    deploy "$tmp/$BASE_DOMAIN.crt" "$tmp/$BASE_DOMAIN.key" || true
-    rm -rf "$tmp"
-    exit 0 ;;
   deploy)   # 由 acme.sh 在持有锁的 issue / renew 过程中调用，这里不能再加锁
     deploy_live; exit $? ;;
   issue|renew|reissue) ;;
-  *) err "用法：certctl.sh issue|renew|reissue|deploy|selfsign"; exit 1 ;;
+  *) err "用法：certctl.sh issue|renew|reissue|auto|deploy"; exit 1 ;;
 esac
 
 # 安装、定时续期和面板可能同时运行：串行化
