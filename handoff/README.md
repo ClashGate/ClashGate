@@ -1,6 +1,6 @@
 # ClashGate Agent Handoff Guide
 
-This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.46**. Next version number: **1.47**. Public repository: https://github.com/ClashGate/ClashGate
+This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.47**. Next version number: **1.48**. Public repository: https://github.com/ClashGate/ClashGate
 
 ---
 
@@ -51,7 +51,7 @@ Inbound protocols the panel can add: VLESS Reality, VLESS Encryption, Shadowsock
 | --- | --- |
 | `mihomo.service` | Core. Runs `mihomo -t -d /etc/clashgate -f /etc/clashgate/config.yaml` before start |
 | `clashgate.service` | Admin panel (certificate modes only). `python3 /etc/clashgate/panel/panel.py serve --config /etc/clashgate/panel.json` |
-| `clashgate-cert.service` / `clashgate-cert.timer` | Calls `certctl.sh renew` hourly |
+| `clashgate-cert.service` / `clashgate-cert.timer` | Calls `certctl.sh auto` daily (renew; after failed requests it backs off: 1, 2, then every 3 days; 1.47) |
 
 ### Repository layout (source)
 
@@ -79,7 +79,7 @@ Inbound protocols the panel can add: VLESS Reality, VLESS Encryption, Shadowsock
 | `panel/cg_qr.py` | QR codes |
 | `panel/routing_mgr.py` | Server-side routing: `/etc/clashgate/routing/` + `routing.json`, assembled into the template |
 | `panel/i18n_en.py` | English translations of server API messages (source strings stay Chinese) |
-| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.46.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
+| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.47.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
 | `panel/dist/` | **Committed build output.** After frontend changes, run `cd panel/web && npm ci && npm run build` and commit the `panel/dist` updates (CI checks `git diff --exit-code -- panel/dist`) |
 | `resources/server.yaml.tpl`, `resources/client.yaml.tpl` | Server / client config templates |
 | `resources/routing/` | Default routing groups (节点选择 / node select, 漏网之鱼 / final / unmatched) |
@@ -96,7 +96,7 @@ Inbound protocols the panel can add: VLESS Reality, VLESS Encryption, Shadowsock
 
 ---
 
-## 3. Current CLI commands (v1.46)
+## 3. Current CLI commands (v1.47)
 
 With no argument: opens the management menu if already installed, otherwise starts install. `clashgate help` lists every subcommand.
 
@@ -145,7 +145,7 @@ The public default branch is `main` (stable). `test` is the test channel.
 2. The project owner verifies on a real machine (the owner clicks 「检查更新」 (Check for updates) in the panel).
 3. **Push to `main` only after the owner explicitly agrees.** A version that fails acceptance is retired and must not be reused.
 
-Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.46`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.39`, `1.40`, and so on.
+Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.47`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.39`, `1.40`, and so on.
 
 Commit messages are in English. **Never force push.**
 
@@ -254,8 +254,9 @@ Tests **must not** re-issue certificates against the Let's Encrypt production en
 
 | 1.45 | New inbound `vless-enc` (VLESS Encryption on plain TCP, the minimal config: one user with `flow: xtls-rprx-vision` and an ML-KEM-768 `decryption` from `mihomo generate vless-mlkem768`; UDP via XUDP inside the TCP stream; firewall TCP only). Custom server only: `vless-xhttp` (VLESS over XHTTP with the certificate and VLESS Encryption; plain optional fields: host (blank = the panel domain), path (blank = random), mode, VLESS Encryption on/off, UUID; the panel does not set up a CDN for the user). `listener_to_inbound` keeps the stored client of an unchanged `vless-enc` / `vless-xhttp` node (the ML-KEM client key cannot be rebuilt from the listener), and `derive_vless_encryption` derives the client key of an ML-KEM seed with `mihomo generate vless-mlkem768 <seed>`. New nodes only: TUIC drops `reduce-rtt`, ShadowQUIC sets `zero-rtt: false` and drops `quic-version-probe` / `max-idle-time` / `disable-mtu-discovery`, HTTP / SOCKS5 default to TLS when a certificate exists, Hysteria2 has no Salamander obfuscation by default (standard HTTP/3 with the real certificate; reset keeps the node's choice). TUIC is labelled without “v5”. The cluster page checks by itself at most every 30 minutes (was 30 s; the time is kept in localStorage). Settings: the 关于 card has no subtitle. Custom-mode add-node form: every select starts on its default option (`advDefaults`; `''` is never sent), and the VLESS encryption switch is labelled 量子加密 so it is not confused with the VLESS Encryption protocol. |
 | 1.46 | UI polish. The add-node card keeps one height in custom server mode too (the invisible copies under `cg-stack` include each protocol's optional fields). Every busy button shows `CgSpinner` (light on primary, inherit on red / amber buttons), the core-update icon turns into the spinner, and copy buttons show a check mark while they say 已复制. Row actions on the outbound, cluster and routing pages use the shared `cg-btn-sm cg-btn-secondary` / `cg-btn-danger` (new `cg-btn-xs` for the rule-provider list) instead of hand-made sky / slate / rose buttons. The protocol tag in the node list is neutral (the status pill is the only colour), and the hidden subscription / Zashboard links show an eye icon. New opt-in skin 玻璃 (`glass`, `theme-glass.css`): frosted translucent cards over a fixed soft colour field (backdrop-filter blur + saturate, white rim and top highlight); only large surfaces blur; no refraction; falls back to near-opaque white without backdrop-filter or with prefers-reduced-transparency. `_THEME_JS` (and so its CSP hash) lists it. 关于: a GitHub link to the project (`REPO_URL`), and the credits show mihomo's and Xray's own logos (`public/assets/mihomo.png`, `xray.png`: the MetaCubeX and XTLS GitHub organisation pictures, bundled because the CSP allows images from the panel only). |
+| 1.47 | Node list: a node in the draft (added / new password, not applied) gets no `single_config` / `readable_config` and is left out of `all_proxies_yaml`; 复制配置 / 复制全部配置 show 「请先点顶部「应用配置」再复制」 instead of copying draft credentials. The default and custom modes are two separate states: entering custom mode (`apply_custom_config`, from the default mode) keeps the default mode's nodes / inbounds / outbounds / providers (`*.tplbak`) and its controller port / secret (`DEFAULT_ENV_BAK`) aside; turning custom server off (`disable_custom_config`) saves the custom config as `custom_config.yaml.saved` and brings the default mode back exactly as it was. Nothing made in custom mode goes into the default mode and nothing of the default mode goes into the custom config. Routing groups are default-mode only (custom mode never touches them). Fallbacks: no saved default state or it fails `mihomo -t` -> one new VlessReality node, routing kept; that fails too -> 恢复默认服务端模板. HTTPS page: in DNS mode a changed token makes the button 「更新 Cloudflare API Token」 (`/action/cert-token`, `do_cert_token`): the token is checked against Cloudflare (`cf_token_check`, the zone lookup of certctl's `cf_zone_check`) and saved, no new certificate; `/action/cert-mode` with the same mode and a new token takes that path too. The certificate timer runs daily (`certctl.sh auto`, was hourly `renew`); after n failed requests in a row it waits min(n, 3) days. `certctl.sh` writes `/etc/clashgate/cert-failed` (epoch, mode, failures in a row, its messages and acme.sh output, token masked) when an issue / renew fails and removes it after a success; the HTTPS page shows the short reason (`cert_failure_state`, `cert_failure_reason`) until then, never for manual certificates. The panel's 立即申请 / 续期 is never held back. |
 
-Next version: **1.47**.
+Next version: **1.48**.
 
 ---
 
@@ -266,6 +267,9 @@ Next version: **1.47**.
 - **VLESS XHTTP stays in the custom server mode, as plain fields.** Do not add CDN wizards, hints or auto-filled CDN settings (owner: advanced users set it up themselves).
 - **Hysteria2 obfuscation stays off by default** (Salamander drops the HTTP/3 cover); it is an option in custom server mode.
 - **Buttons use the shared classes** (`cg-btn-primary`, `cg-btn-sm cg-btn-secondary` / `cg-btn-danger`); a busy button shows `CgSpinner` next to its 「…中…」 text (tests check this).
+- **Default mode and custom mode never mix** (owner decision, 1.47): the default mode is for beginners and must stay stable. Do not carry nodes, outbounds or settings from the custom config into the default mode, or the other way round.
+- **The certificate timer stays daily with back-off** (at most every 3 days after failures); do not make it hourly again.
+- **Changing only the Cloudflare API Token never requests a certificate.** Let's Encrypt allows few certificates per week; the token is checked against Cloudflare and saved, renewals use it.
 - **Do not restart the core to apply a config.** Use `reload_core` (hot reload, waits for the ports). Restart only for a new binary or new certificates.
 - **One cluster inbound per panel.** Do not go back to an inbound per link; a new member is a user in `cg-cluster-in`. Key rotation is not built in (owner: not needed); if it is ever added, rotate the shared keys and send every member its new node with `/api/cluster/node`.
 - **Do not write one-JSON-object-per-line entries into config.yaml or its fragments.** Use `dump_yaml_proxies` / `dump_yaml_map`; tests compare parsed entries (`_section_items`, `_conf_cluster_entries`), not text.

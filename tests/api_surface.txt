@@ -2,8 +2,11 @@ ANYTLS_FP_POOL
 BaseHTTPRequestHandler
 CERT
 CERTCTL
+CERT_FAILED
 CERT_LOCK_FILE
 CERT_TYPES
+CF_TOKEN_BAD
+CF_ZONE_MISSING
 CLASHGATE_BIN
 CLIENT_DIR
 CLUSTER_FLOW
@@ -24,6 +27,8 @@ ClusterCancelled
 ClusterError
 ClusterRemoteError
 ClusterTimeout
+DEFAULT_ENV_BAK
+DEFAULT_ENV_KEYS
 DEFAULT_NODE_NAMES
 DNS_IPV6_ONLY
 ENV_FILE
@@ -200,8 +205,11 @@ build_inbound
 build_proxy_provider
 can_reset_inbound_password
 cert_failure_message
+cert_failure_reason
+cert_failure_state
 cert_task_lock
 certs_present
+cf_token_check
 check_core_update
 check_manual_cert
 check_panel_update

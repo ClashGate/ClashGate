@@ -204,7 +204,7 @@ print_summary() {
     printf '面板：%s\n用户名：admin\n' "$(panel_url)"
     [[ -n $PANEL_PASS ]] && printf '密码：%s（仅显示一次）\n' "$PANEL_PASS"
     if [[ ${CERT_MODE:-port} != manual ]] && cert_is_temp; then
-      printf '\033[1;33m证书尚未签发成功，当前为临时自签证书；系统每小时自动重试，也可在面板「HTTPS 证书」页立即重试\033[0m\n'
+      printf '\033[1;33m证书尚未签发成功，当前为临时自签证书；系统每天自动重试，也可在面板「HTTPS 证书」页立即重试\033[0m\n'
     elif [[ ${CERT_MODE:-port} != manual && $TLS != production ]]; then
       printf '注意：当前为%s，客户端可能拒绝下载订阅\n' "$(tls_label)"
     fi
@@ -662,7 +662,7 @@ do_cert() {
     die "新配置未通过校验（mihomo -t），已恢复原来的域名、证书和节点"
   fi
   STEP=$((STEP + 1))   # render_server ran in a subshell
-  # 证书方式变了：手动证书不续期，其余方式由 clashgate-cert.timer 每小时续期
+  # 证书方式变了：手动证书不续期，其余方式由 clashgate-cert.timer 每天检查续期
   if [[ ${CERT_MODE:-port} == manual && $old_mode != manual ]]; then
     systemctl disable --now clashgate-cert.timer >/dev/null 2>&1 || true
   elif [[ ${CERT_MODE:-port} != manual && $old_mode == manual ]]; then

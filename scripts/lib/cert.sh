@@ -52,7 +52,7 @@ check_dns() {
   fi
   warn "$msg"
   # 交互安装时让用户决定：现在修 DNS 再装，或先装上（临时证书），解析生效后自动签发
-  if has_tty && [[ $(ask '域名解析不正确，仍要继续安装吗？（继续则先用临时证书，解析生效后每小时自动重试签发）[Y/n]：' y) == [nN]* ]]; then
+  if has_tty && [[ $(ask '域名解析不正确，仍要继续安装吗？（继续则先用临时证书，解析生效后每天自动重试签发，也可在面板立即重试）[Y/n]：' y) == [nN]* ]]; then
     if [[ $SERVER_IP == *:* ]]; then
       printf '已取消。请先把域名 AAAA 记录指向 %s，再重新运行安装命令。\n' "$SERVER_IP"
     else
@@ -187,9 +187,9 @@ issue_cert() {
     printf '%s\n' "$out" | grep -iE '^certctl:|error|invalid|fail|timeout|refused|unauthorized|connection' | tail -n 8 >&2 || true
     "$LIB_DIR/scripts/certctl.sh" selfsign >/dev/null
     if [[ ${CERT_MODE:-port} == dns ]]; then
-      warn "证书申请失败，已先用临时自签证书启动。请检查 Cloudflare API Token 是否具备 $DOMAIN 的 DNS 编辑权限；系统每小时自动重试，也可在面板「HTTPS 证书」页立即重试"
+      warn "证书申请失败，已先用临时自签证书启动。请检查 Cloudflare API Token 是否具备 $DOMAIN 的 DNS 编辑权限；系统每天自动重试，也可在面板「HTTPS 证书」页立即重试"
     else
-      warn "证书申请失败，已先用临时自签证书启动。请检查：域名 A 记录是否指向 $SERVER_IP、80 端口是否放行；系统每小时自动重试，也可在面板「HTTPS 证书」页立即重试"
+      warn "证书申请失败，已先用临时自签证书启动。请检查：域名 A 记录是否指向 $SERVER_IP、80 端口是否放行；系统每天自动重试，也可在面板「HTTPS 证书」页立即重试"
     fi
   fi
   su -s /bin/sh mihomo -c "test -r $CONF_DIR/certs/privkey.pem" || die "mihomo 用户无法读取证书私钥"

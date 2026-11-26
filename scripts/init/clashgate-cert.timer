@@ -2,11 +2,13 @@
 Description=clashgate: periodic TLS certificate renewal
 
 [Timer]
-# 每小时检查一次：未到续期时间时 acme.sh 不做任何事；首次申请失败（DNS 未生效等）也会自动重试。
+# 每天检查一次：未到续期时间（剩 30 天以上）时 acme.sh 不做任何事。申请失败时（DNS 未生效等）
+# certctl.sh auto 逐渐放慢重试：连续失败 1 次隔 1 天、2 次隔 2 天、3 次及以上每 3 天一次；
+# 面板「立即申请 / 续期」不受影响。
 # 用日历时间而不是 OnUnitActiveSec：后者在重装 / 服务从未运行时可能没有下一次触发时间。
-OnCalendar=hourly
-OnBootSec=5min
-RandomizedDelaySec=15min
+OnCalendar=daily
+OnBootSec=10min
+RandomizedDelaySec=4h
 Persistent=true
 
 [Install]

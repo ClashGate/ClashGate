@@ -55,6 +55,7 @@ export function usePanel() {
     cert_mode: 'port',
     domain: '',
     cf_token: '',
+    cert_failure: null,
     cert_issuer: '',
     cert_expires: '',
     cert_days: null,
@@ -114,6 +115,7 @@ export function usePanel() {
     cert_mode: boot.cert_mode || (boot.status && boot.status.cert_mode) || 'port',
     domain: boot.domain || (boot.status && boot.status.domain) || '',
     cf_token: boot.cf_token || '',
+    cert_failure: boot.cert_failure || null,
     cert_issuer: boot.cert_issuer || (boot.status && boot.status.cert_issuer) || '',
     cert_expires: boot.cert_expires || (boot.status && boot.status.cert_expires) || '',
     cert_days: boot.cert_days !== undefined ? boot.cert_days : (boot.status ? boot.status.cert_days : null),
@@ -657,6 +659,7 @@ export function usePanel() {
       state.cf_token = newState.cf_token
       if (newState.cf_token) certModeForm.cf_token = newState.cf_token
     }
+    if (newState.cert_failure !== undefined) state.cert_failure = newState.cert_failure || null
     if (newState.cert_issuer !== undefined) state.cert_issuer = newState.cert_issuer
     if (newState.cert_expires !== undefined) state.cert_expires = newState.cert_expires
     if (newState.cert_days !== undefined) state.cert_days = newState.cert_days
@@ -931,6 +934,8 @@ export function usePanel() {
     certBaselineMode,
     certModeDirty,
     certRegenDisabled,
+    certTokenOnly,
+    certFailureTime,
     certTaskElapsed,
     resumeCertTaskIfRunning,
     confirmCertRenew,
@@ -1160,6 +1165,8 @@ export function usePanel() {
     certBaselineMode,
     certModeDirty,
     certRegenDisabled,
+    certTokenOnly,
+    certFailureTime,
     submitCertMode,
     trafficDisplay,
     trafficDetail,

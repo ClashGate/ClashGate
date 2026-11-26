@@ -14,6 +14,8 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 
 from routing_mgr import RoutingManager, parse_yaml_document_factory
@@ -1809,6 +1811,62 @@ def cert_failure_message(out: str, mode: str) -> str:
     return "重新生成证书失败：请确认域名已解析到本机（Cloudflare 需设为灰云）、云防火墙已放行 TCP 80，稍后再试。"
 
 
+def cert_failure_reason(out: str, mode: str) -> str:
+    """cert_failure_message without its 「重新生成证书失败：」 lead: the reason alone (1.47)."""
+    return cert_failure_message(out, mode).split("：", 1)[1]
+
+
+def cert_failure_state(env: dict = None) -> dict:
+    """1.47: the last failed certificate request, for the HTTPS page: {"at": epoch, "fails": n,
+    "reason": ...}, or {}. certctl.sh writes CERT_FAILED (epoch, mode, failures in a row, then its
+    messages and acme.sh output) when issue / renew fails, from the daily timer too, and removes it after
+    a successful run. Manual certificates: none."""
+    if env is None:
+        env = read_env()
+    if (env.get("CERT_MODE") or "port").strip() == "manual":
+        return {}
+    try:
+        with open(CERT_FAILED, encoding="utf-8", errors="replace") as f:
+            head = f.read().split("\n", 3)
+        at = int(head[0].strip())
+    except (OSError, ValueError):
+        return {}
+    mode = head[1].strip() if len(head) > 1 else ""
+    if mode not in ("dns", "port"):
+        mode = (env.get("CERT_MODE") or "port").strip()
+    fails = head[2].strip() if len(head) > 2 else ""
+    log = head[3] if len(head) > 3 else ""
+    if not fails.isdigit():   # no count line: its text is part of the output
+        log, fails = "\n".join(head[2:]), "1"
+    return {"at": at, "fails": int(fails), "reason": cert_failure_reason(log, mode)}
+
+CF_TOKEN_BAD = "Cloudflare API Token 无效或已过期，请重新创建（需要该域名的 Zone.DNS 编辑权限）"
+CF_ZONE_MISSING = "这个 Cloudflare 账号里找不到该域名：请确认域名已添加到该账号、Token 能访问它"
+
+
+def cf_token_check(token: str, domain: str, timeout: float = 15.0) -> str:
+    """1.47: "" when the Cloudflare API Token can see the zone of `domain` (the lookup certctl.sh's
+    cf_zone_check and acme.sh's dns_cf do: the name, then each parent), else the reason. Cloudflare
+    unreachable, or a development DNS hook / ACME server: "" (do not block, like certctl)."""
+    if os.environ.get("CS_DNS_HOOK") or os.environ.get("CS_ACME_SERVER"):
+        return ""
+    d = (domain or "").strip().lower().removeprefix("*.").strip(".")
+    while "." in d:
+        url = "https://api.cloudflare.com/client/v4/zones?" + urllib.parse.urlencode({"name": d, "per_page": 1})
+        req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token, "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                body = json.loads(r.read().decode("utf-8", "replace") or "{}")
+        except urllib.error.HTTPError as e:
+            return CF_TOKEN_BAD if e.code in (400, 401, 403) else ""
+        except (OSError, ValueError):
+            return ""
+        if isinstance(body, dict) and body.get("result"):
+            return ""
+        d = d.split(".", 1)[1]
+    return CF_ZONE_MISSING
+
+
 def raw_detail(out: str, limit: int = 1200) -> str:
     """Raw command output for the collapsed 「详情」 block: ANSI codes stripped, tail kept."""
     text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", out or "").strip()
@@ -1918,7 +1976,7 @@ def restart_mihomo_for_cert():
 
 
 def enable_cert_renew_timer():
-    """After leaving manual mode: install and start the hourly renew timer (manual installs never
+    """After leaving manual mode: install and start the daily renew timer (manual installs never
     got one)."""
     unit_dir = ROOT + "/etc/systemd/system"
     for name in ("clashgate-cert.service", "clashgate-cert.timer"):
@@ -2717,15 +2775,12 @@ def apply_custom_config(raw_yaml: str):
     missing = missing_cert_files(s)
     if missing:
         raise ValueError("证书文件不存在或无法读取：" + ", ".join(missing))
-    was_custom = is_custom_config_mode()
     old_specs = collect_ufw_specs(read_nodes(), load_inbounds())
-    files = (CUSTOM_CONF, CONF, NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON)
+    was_custom = is_custom_config_mode()
+    default_env = {k: read_env().get(k, "") for k in DEFAULT_ENV_KEYS}
+    files = (CUSTOM_CONF, CONF, ENV_FILE, NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON)
     backup = _snapshot_files(files)
     try:
-        if not was_custom:
-            for p in (NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON):
-                if backup[p] is not None:
-                    atomic_write(p + ".tplbak", backup[p], 0o600)
         atomic_write(CUSTOM_CONF, s, 0o640)
         atomic_write(CONF, s, 0o640)
         rc, out = validate_config()
@@ -2741,6 +2796,16 @@ def apply_custom_config(raw_yaml: str):
         rc, out = reload_core({int(i["port"]) for i in new_inbounds} | cluster_ports())
         if rc != 0:
             raise RuntimeError("重载失败：" + out[-800:])
+        if not was_custom:
+            # 1.47: two separate states. The default mode's nodes / inbounds / outbounds / providers and
+            # controller settings are kept aside, untouched while custom mode runs, and come back as they
+            # were when it is turned off (disable_custom_config). Routing is default-mode only already.
+            for p in (NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON):
+                if backup[p] is not None:
+                    atomic_write(p + ".tplbak", backup[p], 0o600)
+                elif os.path.exists(p + ".tplbak"):
+                    os.remove(p + ".tplbak")
+            atomic_write(DEFAULT_ENV_BAK, json.dumps(default_env) + "\n", 0o600)
     except Exception:
         _restore_files(backup)
         run([SYSTEMCTL, "restart", "mihomo"])
@@ -2789,49 +2854,68 @@ def _write_template_state(nodes: list, inbs: list, proxies: list, providers: dic
     atomic_write(CONF, assemble_config(), 0o640)
 
 
+def _saved_default_state():
+    """The default mode's state kept aside when custom mode was turned on (*.tplbak and DEFAULT_ENV_BAK),
+    or None when there is none (custom mode entered before 1.47 kept no controller settings, older
+    versions nothing at all). Returns (nodes, inbounds, outbounds, providers, env values)."""
+    state_files = (NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON)
+    if not any(os.path.exists(p + ".tplbak") for p in state_files):
+        return None
+
+    def bak(p, empty):
+        try:
+            with open(p + ".tplbak") as f:
+                return f.read() or empty
+        except FileNotFoundError:
+            return empty
+    try:
+        nodes = _parse_nodes_tsv(bak(NODES_TSV, ""))
+        inbs = _clean_inbounds(json.loads(bak(INBOUNDS, "[]")))
+        proxies = json.loads(bak(PROXIES_JSON, "[]"))
+        providers = json.loads(bak(PROVIDERS_JSON, "{}"))
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(proxies, list) or not isinstance(providers, dict):
+        return None
+    env_vals = {}
+    try:
+        with open(DEFAULT_ENV_BAK) as f:
+            raw = json.load(f)
+        env_vals = {k: str(raw[k]) for k in DEFAULT_ENV_KEYS if isinstance(raw, dict) and raw.get(k)}
+    except (OSError, ValueError):
+        pass
+    return nodes, inbs, proxies, providers, env_vals
+
+
 def disable_custom_config() -> str:
-    """Leave custom mode: keep the user's file as CUSTOM_SAVED, then rebuild the default template
-    config, validate it and restart Mihomo. Node sources, first that passes `mihomo -t` wins:
-      "restored" - the panel's nodes from before custom mode (*.tplbak);
-      "kept"     - no (usable) backup, e.g. custom mode entered by an older version: the
-                   nodes the panel tracked while in custom mode;
-      "reset"    - neither validates: a fresh default VlessReality node, no outbounds.
-    Returns which one was used. On any other failure everything is rolled back."""
+    """Leave custom mode (Settings, 自定义服务端 off). 1.47: the two modes are separate. The custom config is
+    kept as CUSTOM_SAVED (offered again when custom server is turned on); the default mode comes back as it
+    was before custom mode (nodes, inbounds, outbounds, providers, controller port / secret, kept aside by
+    apply_custom_config; routing is default-mode only). Nothing made in custom mode is carried over.
+      "restored" - the default mode as it was;
+      "reset"    - no saved default state, or it does not pass `mihomo -t` any more (e.g. after a core
+                   update): one new default VlessReality node, no outbounds, routing kept;
+      "reset-all"- that fails too: 恢复默认服务端模板 (reset_to_template_config, routing reset as well).
+    Returns which one was used, or "" when custom mode was not in use. Any other failure rolls back."""
     if not is_custom_config_mode():
         return ""
-    env = read_env()
     old_specs = collect_ufw_specs(read_nodes(), load_inbounds())
     state_files = (NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON)
-    files = (CUSTOM_CONF, CUSTOM_SAVED, CONF) + state_files + (
+    files = (CUSTOM_CONF, CUSTOM_SAVED, CONF, ENV_FILE) + state_files + (
         FRAG_REALITY, FRAG_EXTRA, FRAG_PROXIES, FRAG_PROVIDERS, FRAG_CONTROLLER)
     backup = _snapshot_files(files)
+    saved = _saved_default_state()
+    used, last_err = "", ""
     try:
-        candidates = []
-        if any(os.path.exists(p + ".tplbak") for p in state_files):
-            def bak(p, empty):
-                try:
-                    with open(p + ".tplbak") as f:
-                        raw = f.read()
-                except FileNotFoundError:
-                    return empty
-                return raw
-            nodes_bak = _parse_nodes_tsv(bak(NODES_TSV, ""))
-            try:
-                inbs_bak = _clean_inbounds(json.loads(bak(INBOUNDS, "[]") or "[]"))
-                prox_bak = json.loads(bak(PROXIES_JSON, "[]") or "[]")
-                prov_bak = json.loads(bak(PROVIDERS_JSON, "{}") or "{}")
-                candidates.append(("restored", nodes_bak, inbs_bak, prox_bak, prov_bak))
-            except (ValueError, TypeError):
-                pass
-        candidates.append(("kept", read_nodes(), load_inbounds(), load_server_proxies(), load_proxy_providers()))
-        candidates.append(("reset", [new_default_reality_node(env)], [], [], {}))
-
         atomic_write(CUSTOM_SAVED, backup[CUSTOM_CONF], 0o640)
         os.remove(CUSTOM_CONF)
-        used, last_err = "", ""
+        if saved:
+            for k, v in saved[4].items():   # the custom config's controller settings stay with it
+                write_env_var(k, v)
+        env = read_env()
+        candidates = ([("restored",) + tuple(saved[:4])] if saved else []) + [
+            ("reset", [new_default_reality_node(env)], [], [], {})]
         for name, nodes, inbs, proxies, providers in candidates:
-            if not nodes and not inbs:
-                nodes = [new_default_reality_node(env)]
             _write_template_state(nodes, inbs, proxies, providers, env)
             rc, out = validate_config()
             if rc == 0:
@@ -2839,22 +2923,36 @@ def disable_custom_config() -> str:
                 break
             last_err = out[-800:]
             sys.stderr.write(f"disable_custom_config: {name} state failed mihomo -t, trying next\n")
-        if not used:
-            raise RuntimeError("配置校验失败（mihomo -t）：" + last_err)
-        rc, out = reload_core()
-        if rc != 0:
-            raise RuntimeError("重载失败：" + out[-800:])
-        for p in state_files:
-            bak_p = p + ".tplbak"
-            if os.path.exists(bak_p):
-                os.remove(bak_p)
+        if used:
+            rc, out = reload_core()
+            if rc != 0:
+                raise RuntimeError("重载失败：" + out[-800:])
     except Exception:
         _restore_files(backup)
         run([SYSTEMCTL, "restart", "mihomo"])
         raise
-    sync_client_files()
-    sync_ufw(old_specs, collect_ufw_specs(read_nodes(), load_inbounds()))
-    wait_mihomo_ports()
+    if not used:
+        sys.stderr.write(f"disable_custom_config: default state refused ({last_err[-200:]}), full reset\n")
+        try:
+            reset_to_template_config()   # CUSTOM_CONF is gone already: the saved copy stays as it is
+        except Exception:
+            _restore_files(backup)       # back to custom mode as it was
+            run([SYSTEMCTL, "restart", "mihomo"])
+            raise
+        used = "reset-all"
+    for p in state_files:   # the default state is live again: drop the copies
+        try:
+            os.remove(p + ".tplbak")
+        except FileNotFoundError:
+            pass
+    try:
+        os.remove(DEFAULT_ENV_BAK)
+    except FileNotFoundError:
+        pass
+    if used != "reset-all":   # reset_to_template_config did these itself
+        sync_client_files()
+        sync_ufw(old_specs, collect_ufw_specs(read_nodes(), load_inbounds()))
+        wait_mihomo_ports()
     return used
 
 
@@ -2892,6 +2990,8 @@ def reset_to_template_config():
             bak_p = p + ".tplbak"
             if os.path.exists(bak_p):
                 os.remove(bak_p)
+        if os.path.exists(DEFAULT_ENV_BAK):
+            os.remove(DEFAULT_ENV_BAK)
     except Exception:
         _restore_files(backup)
         run([SYSTEMCTL, "restart", "mihomo"])
