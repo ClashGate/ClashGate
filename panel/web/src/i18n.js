@@ -61,7 +61,6 @@ export const EN = {
  "关于 ClashGate": "About ClashGate",
  "自定义服务端下可以自己填写节点的密码、加密方式等参数；检查集群时也能立即退出；新的加载动画和「关于」页面": "With custom server you can set node passwords, ciphers and other options yourself; leaving the cluster works even during a check; new loading animations and an About page",
  "改配置改用热重载，不再频繁重启内核；更新时内核下载失败也不影响面板更新": "Config changes hot-reload instead of restarting the core; a failed core download no longer stops a panel update",
- "集群每台服务器只开一个入站，成员再多也只占一个端口": "One cluster inbound per server: one port however many members",
  "AEAD 加密": "AEAD cipher",
  "Reality 私钥": "Reality private key",
  "aes-256-gcm（默认）": "aes-256-gcm (default)",
@@ -529,7 +528,8 @@ export const EN = {
  "关闭并切回默认模式": "Turn off and switch to default mode",
  "复制还没生效的节点时会提示先应用配置；默认模式和自定义模式的配置分开保存、互不影响；可以只更新 Cloudflare API Token，证书申请失败时显示原因；证书改为每天检查": "Copying a node that is not applied yet asks you to apply first; the default and custom modes keep separate configs that do not affect each other; the Cloudflare API Token can be updated alone, a failed certificate request shows why, and certificates are checked daily",
  "不再使用临时证书：域名解析不对或证书申请失败时直接停止安装并说明原因，修好后重新运行安装命令即可": "No more temporary certificates: when the domain record is wrong or the certificate request fails, the install stops and says why; fix it and run the install command again",
- "集群成员节点统一命名为「名称|Cluster」：退出或被移出集群时两边的节点都会删干净，成员改名时自定义配置里的代理组和规则跟着改，后台每小时核对一次；修复多处稳定性问题": "Cluster member nodes are now named \"name|Cluster\": leaving or being removed from a cluster cleans up the nodes on both sides, proxy groups and rules in a custom config follow a member's new name, and members are checked about once an hour; several stability fixes"
+ "集群成员节点统一命名为「名称|Cluster」：退出或被移出集群时两边的节点都会删干净，成员改名时自定义配置里的代理组和规则跟着改，后台每小时核对一次；修复多处稳定性问题": "Cluster member nodes are now named \"name|Cluster\": leaving or being removed from a cluster cleans up the nodes on both sides, proxy groups and rules in a custom config follow a member's new name, and members are checked about once an hour; several stability fixes",
+ "自定义服务端的编辑框不再显示集群互联的入站和出站，不会被误改，保存时自动带上；节点端口和集群互联撞了会直接提示": "The custom server editor no longer shows the cluster link inbound and outbounds, so they cannot be changed by mistake; they are added back on save. A node on the cluster link's port is reported right away"
 }
 
 export const LANGS = ['zh', 'en', 'ru', 'fa']

@@ -85,7 +85,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44", "1.45", "1.46", "1.47", "1.48", "1.49"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44", "1.45", "1.46", "1.47", "1.48", "1.49", "1.50"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -806,7 +806,43 @@ class ClusterTest(unittest.TestCase):
         merged = P.custom_conf_with_cluster(conf)
         self.assertFalse(P.has_cluster_entries(merged))
         self.assertEqual([p["name"] for p in P.extract_top_level_yaml_section(merged, "proxies")], ["my-out"])
-        self.assertIn("cur_cfg = strip_cluster_entries(cur_cfg)", read(os.path.join(REPO, "panel/cg_http.py")))
+        self.assertIn("editor_cfg = strip_cluster_entries(cur_cfg, cluster_proxy_names())", read(os.path.join(REPO, "panel/cg_http.py")))
+
+    def test_custom_editor_hides_cluster_entries(self):
+        """1.50: in custom mode too, the editor shows no cluster entries (the cluster inbound and the
+        "|Cluster" member outbounds): the user cannot edit them, saving puts the current ones back, and
+        a node of the user's on the hidden cluster port is refused with a clear message."""
+        st, a, b = self._two_members()
+        st["inbound"] = {"port": 31050, "decryption": "mlkem768x25519plus.native.600s.x", "encryption": "e"}
+        P.save_cluster(st)
+        own = {"name": "my-out", "type": "socks5", "server": "9.9.9.9", "port": 1080}
+        conf = ("listeners:\n" + P.dump_yaml_proxies(
+                    [{"name": "my-in", "type": "socks", "port": 30999, "listen": "0.0.0.0"}] + P.cluster_listeners(st))
+                + "proxies:\n" + P.dump_yaml_proxies([own] + [P.cluster_proxy_from_link(l) for l in st["links"]])
+                + "proxy-groups:\n  - name: pin\n    type: select\n    proxies:\n      - " + P.cluster_outbound_name(a["name"])
+                + "\n      - DIRECT\n")
+        h = read(os.path.join(REPO, "panel/cg_http.py"))
+        self.assertIn('"custom_config_raw": editor_cfg,', h)
+        self.assertNotIn('if not custom_active and not custom_saved:', h)   # no longer only for the default
+        shown = P.strip_cluster_entries(conf, P.cluster_proxy_names())
+        self.assertFalse(P.has_cluster_entries(shown))
+        self.assertEqual([p["name"] for p in P.extract_top_level_yaml_section(shown, "proxies")], ["my-out"])
+        # the user's groups keep naming the member: saving the shown text brings the outbound back
+        groups = P.extract_top_level_yaml_section(shown, "proxy-groups")
+        self.assertEqual(groups[0]["proxies"][0], P.cluster_outbound_name(a["name"]))
+        merged = P.custom_conf_with_cluster(shown)
+        self.assertEqual(P._conf_cluster_entries(merged),
+                         (P.cluster_listeners(st), [P.cluster_proxy_from_link(l) for l in st["links"]]))
+        # an edited member outbound in pasted text is replaced by cluster.json's
+        edited = conf.replace(str(P.cluster_proxy_from_link(a)["port"]), "1", 1)
+        self.assertEqual(P._conf_cluster_entries(P.custom_conf_with_cluster(edited))[1],
+                         [P.cluster_proxy_from_link(l) for l in st["links"]])
+        # a node of the user's on the cluster port: refused before anything is written
+        clash = shown.replace("port: 30999", "port: 31050")
+        with self.assertRaises(ValueError) as cm:
+            P.apply_custom_config(clash)
+        self.assertIn("已被集群互联使用", str(cm.exception))
+        self.assertIn("31050", str(cm.exception))
 
     def test_waiting_entries_go_with_the_members_that_reported_them(self):
         """1.40: a 等待互联 entry stayed forever after the member that reported it was removed (and had
