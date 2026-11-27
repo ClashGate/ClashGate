@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClashGate v1.48 - admin console (Vue 3 + Tailwind CSS).
+"""ClashGate v1.49 - admin console (Vue 3 + Tailwind CSS).
 
 Stdlib only (Python 3). Serves HTTPS itself with the same certificate
 Mihomo uses (/etc/clashgate/certs); no reverse proxy.
@@ -209,8 +209,27 @@ from cg_cluster import (  # noqa: E402
     cluster_ufw_specs,
     vless_mlkem768_pair,
     used_proxy_names,
+    CLUSTER_OUTBOUND_SUFFIX,
+    cluster_outbound_name,
+    is_cluster_outbound,
+    cluster_name_taken,
+    _controller,
+    _group_selections,
+    _select_in_group,
     _live_conf_with_cluster,
     custom_conf_with_cluster,
+    has_cluster_entries,
+    _drop_stray_member_outbounds,
+    CLUSTER_WATCH_EVERY,
+    CLUSTER_WATCH_SPREAD,
+    _WATCH,
+    cluster_watch_once,
+    start_cluster_watch,
+    rename_cluster_refs,
+    drop_group_refs,
+    cluster_ref_problems,
+    _rule_fields,
+    strip_cluster_entries,
     refresh_cluster_fragments,
     apply_cluster_live,
     ClusterError,
@@ -251,9 +270,9 @@ from cg_qr import (  # noqa: E402
     qr_png_data_url,
 )
 
-# Versions compare as integer tuples (parse_version_tuple): 1.48 > 1.47 > 1.46 > 1.45 > 1.44 > 1.43 > 1.42 > 1.41 > 1.40 > 1.39 > 1.38 > 1.37 > 1.36 > 1.35 > 1.34 > 1.33 > 1.32 > 1.31 > 1.30 > 1.29 > 1.28 > 1.27 > 1.26 > 1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
+# Versions compare as integer tuples (parse_version_tuple): 1.49 > 1.48 > 1.47 > 1.46 > 1.45 > 1.44 > 1.43 > 1.42 > 1.41 > 1.40 > 1.39 > 1.38 > 1.37 > 1.36 > 1.35 > 1.34 > 1.33 > 1.32 > 1.31 > 1.30 > 1.29 > 1.28 > 1.27 > 1.26 > 1.25 > 1.24 > 1.23 > 1.22 > 1.21 > 1.20 > 1.19 > 1.18 > 1.17 > 1.16 > 1.15 > 1.14 > 1.13 > 1.12 > 1.11 > 1.10 > 1.09. Never publish "1.1"/"1.2" (they
 # would sort below 1.09 on every installed panel); the next releases are 1.45, 1.46, ...
-VERSION = "1.48"
+VERSION = "1.49"
 
 # CLASHGATE_ROOT lets the panel run against a fake tree for local testing.
 ROOT = os.environ.get("CLASHGATE_ROOT", "")

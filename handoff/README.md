@@ -1,6 +1,6 @@
 # ClashGate Agent Handoff Guide
 
-This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.48**. Next version number: **1.49**. Public repository: https://github.com/ClashGate/ClashGate
+This document is for agents taking over ClashGate development. It covers product principles, repository layout, the release process, and rules you must follow, so later versions can be handed off seamlessly. Current version: **1.49**. Next version number: **1.50**. Public repository: https://github.com/ClashGate/ClashGate
 
 ---
 
@@ -79,7 +79,7 @@ Inbound protocols the panel can add: VLESS Reality, VLESS Encryption, Shadowsock
 | `panel/cg_qr.py` | QR codes |
 | `panel/routing_mgr.py` | Server-side routing: `/etc/clashgate/routing/` + `routing.json`, assembled into the template |
 | `panel/i18n_en.py` | English translations of server API messages (source strings stay Chinese) |
-| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.48.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
+| `panel/web/` | Vue 3 + Tailwind frontend source (`package.json` version is `1.49.0`). `src/composables/usePanel.js` holds the shared core (boot data, toast, dialogs, `postAction`, server-state sync, tabs); each page's state and actions are in `src/composables/use*.js` and receive the core through one `shared` object |
 | `panel/dist/` | **Committed build output.** After frontend changes, run `cd panel/web && npm ci && npm run build` and commit the `panel/dist` updates (CI checks `git diff --exit-code -- panel/dist`) |
 | `resources/server.yaml.tpl`, `resources/client.yaml.tpl` | Server / client config templates |
 | `resources/routing/` | Default routing groups (节点选择 / node select, 漏网之鱼 / final / unmatched) |
@@ -96,7 +96,7 @@ Inbound protocols the panel can add: VLESS Reality, VLESS Encryption, Shadowsock
 
 ---
 
-## 3. Current CLI commands (v1.48)
+## 3. Current CLI commands (v1.49)
 
 With no argument: opens the management menu if already installed, otherwise starts install. `clashgate help` lists every subcommand.
 
@@ -145,7 +145,7 @@ The public default branch is `main` (stable). `test` is the test channel.
 2. The project owner verifies on a real machine (the owner clicks 「检查更新」 (Check for updates) in the panel).
 3. **Push to `main` only after the owner explicitly agrees.** A version that fails acceptance is retired and must not be reused.
 
-Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.48`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.39`, `1.40`, and so on.
+Version numbers are compared as **integers per segment** (`parse_version_tuple`): `1.09 < 1.10 < 1.49`. **Never write `1.1` or `1.2`** (they sort before `1.09`). The next numbers are `1.39`, `1.40`, and so on.
 
 Commit messages are in English. **Never force push.**
 
@@ -256,8 +256,9 @@ Tests **must not** re-issue certificates against the Let's Encrypt production en
 | 1.46 | UI polish. The add-node card keeps one height in custom server mode too (the invisible copies under `cg-stack` include each protocol's optional fields). Every busy button shows `CgSpinner` (light on primary, inherit on red / amber buttons), the core-update icon turns into the spinner, and copy buttons show a check mark while they say 已复制. Row actions on the outbound, cluster and routing pages use the shared `cg-btn-sm cg-btn-secondary` / `cg-btn-danger` (new `cg-btn-xs` for the rule-provider list) instead of hand-made sky / slate / rose buttons. The protocol tag in the node list is neutral (the status pill is the only colour), and the hidden subscription / Zashboard links show an eye icon. New opt-in skin 玻璃 (`glass`, `theme-glass.css`): frosted translucent cards over a fixed soft colour field (backdrop-filter blur + saturate, white rim and top highlight); only large surfaces blur; no refraction; falls back to near-opaque white without backdrop-filter or with prefers-reduced-transparency. `_THEME_JS` (and so its CSP hash) lists it. 关于: a GitHub link to the project (`REPO_URL`), and the credits show mihomo's and Xray's own logos (`public/assets/mihomo.png`, `xray.png`: the MetaCubeX and XTLS GitHub organisation pictures, bundled because the CSP allows images from the panel only). |
 | 1.47 | Node list: a node in the draft (added / new password, not applied) gets no `single_config` / `readable_config` and is left out of `all_proxies_yaml`; 复制配置 / 复制全部配置 show 「请先点顶部「应用配置」再复制」 instead of copying draft credentials. The default and custom modes are two separate states: entering custom mode (`apply_custom_config`, from the default mode) keeps the default mode's nodes / inbounds / outbounds / providers (`*.tplbak`) and its controller port / secret (`DEFAULT_ENV_BAK`) aside; turning custom server off (`disable_custom_config`) saves the custom config as `custom_config.yaml.saved` and brings the default mode back exactly as it was. Nothing made in custom mode goes into the default mode and nothing of the default mode goes into the custom config. Routing groups are default-mode only (custom mode never touches them). Fallbacks: no saved default state or it fails `mihomo -t` -> one new VlessReality node, routing kept; that fails too -> 恢复默认服务端模板. HTTPS page: in DNS mode a changed token makes the button 「更新 Cloudflare API Token」 (`/action/cert-token`, `do_cert_token`): the token is checked against Cloudflare (`cf_token_check`, the zone lookup of certctl's `cf_zone_check`) and saved, no new certificate; `/action/cert-mode` with the same mode and a new token takes that path too. The certificate timer runs daily (`certctl.sh auto`, was hourly `renew`); after n failed requests in a row it waits min(n, 3) days. `certctl.sh` writes `/etc/clashgate/cert-failed` (epoch, mode, failures in a row, its messages and acme.sh output, token masked) when an issue / renew fails and removes it after a success; the HTTPS page shows the short reason (`cert_failure_state`, `cert_failure_reason`) until then, never for manual certificates. The panel's 立即申请 / 续期 is never held back. |
 | 1.48 | No temporary certificate any more (it trained users to click through browser warnings). Install: a wrong domain record (`check_dns`, port mode) stops before anything is installed (no "continue anyway?"); the certificate is requested right after `install_files`, before `gen_nodes`, and a failed request stops the install with the reason (`issue_cert` dies), so `$STATE` does not exist yet and rerunning the install command is a clean install. `certctl.sh selfsign` is gone (`selfsign()` stays for `TLS=internal`, development only). `render_controller` never creates one: missing files are put back from acme.sh's `live/` copy, else it stops with the reason. A temporary certificate left by an older version is still recognised (`is_temp`, panel `certIsTemp`) and replaced by the daily renewal or 立即申请 / 续期. |
+| 1.49 | Cluster member outbounds are named `<name>|Cluster` (`CLUSTER_OUTBOUND_SUFFIX`, `cluster_outbound_name`, `is_cluster_outbound`); the suffix is reserved (server outbounds and routing names may not end with it), plain names are free for the user. `cluster.json` carries `names_v` (missing/1 = 1.48 names): the first `_cluster_commit` (start-up `refresh_cluster_fragments` triggers it) renames them once and passes `renames` to `apply_cluster_live`, which rewrites the custom config's proxy-groups / rules (`rename_cluster_refs`) and keeps Zashboard selections (`_group_selections` / `_select_in_group`); staged batches keep their renames (`_STAGED["renames"]`), chained renames compose. A member's rename (`_update_link`) does the same. Leaving / removal: `drop_group_refs` removes departed `|Cluster` names from custom proxy-groups' `proxies` only (no DIRECT added, a group that would become empty is left, rules untouched); a refusing `mihomo -t` raises `ClusterError` naming the groups / rules (`cluster_ref_problems`). `CUSTOM_SAVED` and the editor's start text have no cluster entries (`strip_cluster_entries`). Background check `start_cluster_watch`: every `CLUSTER_WATCH_EVERY` (3600 s) + up to `CLUSTER_WATCH_SPREAD` (900 s), first 5–20 min after start; `refresh_cluster_fragments` (stray `|Cluster` entries count, `_drop_stray_member_outbounds`), then a status call per member: `bad_token` drops the link, a new name is followed, offline is only marked; one member's failure is recorded on its link and the rest are still checked. A user's cluster job takes over (`_WATCH["on"]` → `_CLUSTER_CANCEL`, waits up to 40 s for the lock). 恢复默认服务端模板 from custom mode restores the default mode's controller port / secret (`_saved_default_env`, `ENV_FILE` in the rollback). |
 
-Next version: **1.49**.
+Next version: **1.50**.
 
 ---
 
@@ -271,6 +272,8 @@ Next version: **1.49**.
 - **Default mode and custom mode never mix** (owner decision, 1.47): the default mode is for beginners and must stay stable. Do not carry nodes, outbounds or settings from the custom config into the default mode, or the other way round.
 - **The certificate timer stays daily with back-off** (at most every 3 days after failures); do not make it hourly again.
 - **Changing only the Cloudflare API Token never requests a certificate.** Let's Encrypt allows few certificates per week; the token is checked against Cloudflare and saved, renewals use it.
+- **Cluster member outbounds always end in `|Cluster`** (owner decision, 1.49) and nothing else may. On leaving, only remove the departed names from custom proxy-groups' `proxies`: never add DIRECT, never edit rules, say what still refers to them. Default mode needs nothing (include-all).
+- **The background cluster check stays light** (owner: many VPS): about hourly, status calls only, never new links; it gives way to the user's cluster jobs.
 - **Never fall back to a temporary or self-signed certificate** (owner decision, 1.48). The three certificate setups are: no certificate (no-cert mode), a certificate the script requests (port / DNS API), or the user's own (manual). If a certificate cannot be had, stop and say why.
 - **Do not restart the core to apply a config.** Use `reload_core` (hot reload, waits for the ports). Restart only for a new binary or new certificates.
 - **One cluster inbound per panel.** Do not go back to an inbound per link; a new member is a user in `cg-cluster-in`. Key rotation is not built in (owner: not needed); if it is ever added, rotate the shared keys and send every member its new node with `/api/cluster/node`.

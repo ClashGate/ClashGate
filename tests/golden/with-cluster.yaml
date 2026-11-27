@@ -89,7 +89,7 @@ proxies:
     server: 9.9.9.9
     port: 1080
     udp: true
-  - name: Tokyo-1
+  - name: "Tokyo-1|Cluster"
     type: vless
     server: tokyo.example.com
     port: 31000

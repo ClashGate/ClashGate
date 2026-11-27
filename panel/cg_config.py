@@ -991,8 +991,8 @@ def parse_custom_config_state(raw_yaml: str, env: dict = None) -> tuple:
     if isinstance(raw_proxies, list):
         for p in raw_proxies:
             if isinstance(p, dict) and p.get("name") and p.get("type"):
-                if str(p["name"]) in cluster_names:
-                    continue   # cluster member outbound: managed by cluster.json
+                if str(p["name"]) in cluster_names or is_cluster_outbound(p["name"]):
+                    continue   # cluster member outbound (1.49: or a leftover one): managed by cluster.json
                 node = dict(p)
                 if "udp" not in node or node["udp"] is None:
                     node["udp"] = True
@@ -2768,8 +2768,9 @@ def apply_custom_config(raw_yaml: str):
         raise ValueError("请输入完整的 Mihomo 服务端配置内容")
     s = sanitize_doh_url_line(s) + "\n"
     # Cluster links stay as they are: their listeners / outbounds come from cluster.json, whatever the
-    # pasted text has for them (missing, edited or stale).
-    if load_cluster()["links"]:
+    # pasted text has for them (missing, edited or stale). 1.49: also with no members, when the text
+    # still has cluster entries (a config from when this panel was in a cluster): they are dropped.
+    if load_cluster()["links"] or has_cluster_entries(s):
         s = custom_conf_with_cluster(s)
     # mihomo -t does not open TLS files, so a wrong path would "pass" and fail only at runtime.
     missing = missing_cert_files(s)
@@ -2854,6 +2855,16 @@ def _write_template_state(nodes: list, inbs: list, proxies: list, providers: dic
     atomic_write(CONF, assemble_config(), 0o640)
 
 
+def _saved_default_env() -> dict:
+    """1.49: the default mode's controller settings kept aside while custom mode runs (DEFAULT_ENV_BAK)."""
+    try:
+        with open(DEFAULT_ENV_BAK) as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return {k: str(raw[k]) for k in DEFAULT_ENV_KEYS if isinstance(raw, dict) and raw.get(k)}
+
+
 def _saved_default_state():
     """The default mode's state kept aside when custom mode was turned on (*.tplbak and DEFAULT_ENV_BAK),
     or None when there is none (custom mode entered before 1.47 kept no controller settings, older
@@ -2877,14 +2888,7 @@ def _saved_default_state():
         return None
     if not isinstance(proxies, list) or not isinstance(providers, dict):
         return None
-    env_vals = {}
-    try:
-        with open(DEFAULT_ENV_BAK) as f:
-            raw = json.load(f)
-        env_vals = {k: str(raw[k]) for k in DEFAULT_ENV_KEYS if isinstance(raw, dict) and raw.get(k)}
-    except (OSError, ValueError):
-        pass
-    return nodes, inbs, proxies, providers, env_vals
+    return nodes, inbs, proxies, providers, _saved_default_env()
 
 
 def disable_custom_config() -> str:
@@ -2907,7 +2911,9 @@ def disable_custom_config() -> str:
     saved = _saved_default_state()
     used, last_err = "", ""
     try:
-        atomic_write(CUSTOM_SAVED, backup[CUSTOM_CONF], 0o640)
+        # 1.49: set aside without the cluster entries (they belong to cluster.json and are put back,
+        # current, when the file is loaded again), so a member that leaves in the meantime does not return
+        atomic_write(CUSTOM_SAVED, strip_cluster_entries(backup[CUSTOM_CONF]), 0o640)
         os.remove(CUSTOM_CONF)
         if saved:
             for k, v in saved[4].items():   # the custom config's controller settings stay with it
@@ -2960,14 +2966,20 @@ def reset_to_template_config():
     """Restore server config to clean default template and generate a default VlessReality node."""
     env = read_env()
     old_specs = collect_ufw_specs(read_nodes(), load_inbounds())
-    files = (CUSTOM_CONF, CUSTOM_SAVED, CONF, NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON,
+    files = (CUSTOM_CONF, CUSTOM_SAVED, CONF, ENV_FILE, NODES_TSV, INBOUNDS, PROXIES_JSON, PROVIDERS_JSON,
              FRAG_REALITY, FRAG_EXTRA, FRAG_PROXIES, FRAG_PROVIDERS, FRAG_CONTROLLER)
     backup = _snapshot_files(files)
     try:
+        if os.path.exists(CUSTOM_CONF):
+            # 1.49: the custom config's controller port / secret stay with it (modes never mix)
+            for k, v in _saved_default_env().items():
+                write_env_var(k, v)
+            env = read_env()
         default_node = new_default_reality_node(env)
         if os.path.exists(CUSTOM_CONF):
             # 1.41: keep the user's file like 关闭自定义服务端 does; turning custom mode on again offers it
-            atomic_write(CUSTOM_SAVED, backup[CUSTOM_CONF], 0o640)
+            # (1.49: without the cluster entries, see disable_custom_config)
+            atomic_write(CUSTOM_SAVED, strip_cluster_entries(backup[CUSTOM_CONF]), 0o640)
             os.remove(CUSTOM_CONF)
         atomic_write(NODES_TSV, render_nodes_tsv([default_node]), 0o640)
         atomic_write(INBOUNDS, "[]\n", 0o600)
