@@ -2772,6 +2772,19 @@ def apply_custom_config(raw_yaml: str):
     # still has cluster entries (a config from when this panel was in a cluster): they are dropped.
     if load_cluster()["links"] or has_cluster_entries(s):
         s = custom_conf_with_cluster(s)
+    # 1.50: the cluster inbound is not shown in the editor, so say clearly when a node of the user's
+    # takes its port (otherwise the reload fails with a bind error)
+    held = cluster_reserved_ports() | set(_CLUSTER_PORT_HOLD)
+    lst = extract_top_level_yaml_section(s, "listeners")
+    for x in (lst if isinstance(lst, list) else []):
+        if not isinstance(x, dict) or str(x.get("name") or "").startswith(CLUSTER_LISTENER_PREFIX):
+            continue
+        try:
+            port = int(x.get("port"))
+        except (TypeError, ValueError):
+            continue
+        if port in held:
+            raise ValueError(f"节点「{x.get('name') or ''}」的端口 {port} 已被集群互联使用，请换一个端口")
     # mihomo -t does not open TLS files, so a wrong path would "pass" and fail only at runtime.
     missing = missing_cert_files(s)
     if missing:

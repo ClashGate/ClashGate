@@ -8,6 +8,7 @@ const { state, selectTab } = usePanel()
 
 // Newest first; one line each. The current version is marked.
 const CHANGELOG = [
+  { v: '1.50', desc: '自定义服务端的编辑框不再显示集群互联的入站和出站，不会被误改，保存时自动带上；节点端口和集群互联撞了会直接提示' },
   { v: '1.49', desc: '集群成员节点统一命名为「名称|Cluster」：退出或被移出集群时两边的节点都会删干净，成员改名时自定义配置里的代理组和规则跟着改，后台每小时核对一次；修复多处稳定性问题' },
   { v: '1.48', desc: '不再使用临时证书：域名解析不对或证书申请失败时直接停止安装并说明原因，修好后重新运行安装命令即可' },
   { v: '1.47', desc: '复制还没生效的节点时会提示先应用配置；默认模式和自定义模式的配置分开保存、互不影响；可以只更新 Cloudflare API Token，证书申请失败时显示原因；证书改为每天检查' },
@@ -15,7 +16,6 @@ const CHANGELOG = [
   { v: '1.45', desc: '新增 VLESS Encryption 节点（替代 SS 的裸奔协议），自定义服务端下可添加 VLESS XHTTP；Hysteria2 默认不混淆，TUIC、ShadowQUIC 关闭 0-RTT，HTTP / SOCKS5 有证书时默认开启 TLS' },
   { v: '1.44', desc: '自定义服务端下可以自己填写节点的密码、加密方式等参数；检查集群时也能立即退出；新的加载动画和「关于」页面' },
   { v: '1.43', desc: '改配置改用热重载，不再频繁重启内核；更新时内核下载失败也不影响面板更新' },
-  { v: '1.42', desc: '集群每台服务器只开一个入站，成员再多也只占一个端口' },
 ]
 
 // Bundled under /assets: the page's CSP only loads images from this panel.

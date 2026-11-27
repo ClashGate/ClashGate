@@ -451,10 +451,10 @@ class Panel(BaseHTTPRequestHandler):
                 cur_cfg = f.read()
         except FileNotFoundError:
             cur_cfg = assemble_config()
-        if not custom_active and not custom_saved:
-            # 1.49: the default config as a starting point, without the cluster entries (cluster.json
-            # puts the current ones in when it is applied)
-            cur_cfg = strip_cluster_entries(cur_cfg)
+        # 1.50: the editor never shows the cluster entries (cluster inbound, "|Cluster" member
+        # outbounds), in custom mode too: cluster.json manages them and saving puts the current ones
+        # back (apply_custom_config), so the user cannot edit or break them. Routing reads the full file.
+        editor_cfg = strip_cluster_entries(cur_cfg, cluster_proxy_names())
 
         cport = get_controller_port(env)
         traffic = get_traffic_stats(env)
@@ -505,7 +505,7 @@ class Panel(BaseHTTPRequestHandler):
             "custom_server_enabled": bool(load_panel_settings().get("custom_server_enabled")),
             "auto_update": bool(load_panel_settings().get("auto_update")),
             **(lambda t: {"update_channel": t["channel"], "update_channel_label": t["label"]})(resolve_update_target()),
-            "custom_config_raw": cur_cfg,
+            "custom_config_raw": editor_cfg,
             "masque": _localize_fields(load_masque_state(), ("error",), req_lang),
             "update_check": public_update_check(mver),
             "pending_reload_count": len(localized_pending_items),

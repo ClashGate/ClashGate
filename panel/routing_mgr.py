@@ -1,4 +1,4 @@
-"""ClashGate 1.49 server-side routing (服务端分流).
+"""ClashGate 1.50 server-side routing (服务端分流).
 
 Groups live as separate YAML files under /etc/clashgate/routing/, indexed by
 routing.json. Assemble merges them into rule-providers / proxy-groups / rules
