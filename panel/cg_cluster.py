@@ -33,7 +33,8 @@ def bind():
 # Panels that know each other form one cluster. Every pair of panels in the cluster has one *link*.
 # Since 1.42 each panel runs ONE cluster inbound (`cg-cluster-in`, one port, VLESS with post-quantum
 # VLESS Encryption mlkem768x25519plus) for all members; every member is one user (its own UUID) in it.
-# Each side has an outbound to the other side's cluster inbound, named after the other side's 本机名称.
+# Each side has an outbound to the other side's cluster inbound, named after the other side's 本机名称
+# plus CLUSTER_OUTBOUND_SUFFIX (1.49).
 # Adding a member adds a user, removing one deletes that user: the port and the keys never change.
 # Links made before 1.42 had a dedicated inbound each (link["in"] has a port); they keep it until
 # cluster_migrate_links moves them over (the member must be 1.42 too). Links live in cluster.json and their own fragments, never in inbounds.json /
@@ -49,6 +50,20 @@ CLUSTER_PROTOCOL = 2          # 2: two-way links and full mesh (1 was the one-wa
 CLUSTER_MIN_VERSION = "1.15"
 CLUSTER_LISTENER_PREFIX = "cg-cluster-"
 CLUSTER_SHARED_LISTENER = CLUSTER_LISTENER_PREFIX + "in"   # the one inbound for every member (1.42)
+# 1.49: every member outbound is named "<member name>|Cluster", so cluster entries are known by name alone:
+# a name with this suffix belongs to the cluster (never to the user), and one that is not a current
+# member is a leftover the panel removes. The member list keeps showing the plain name.
+CLUSTER_OUTBOUND_SUFFIX = "|Cluster"
+
+
+def cluster_outbound_name(name: str) -> str:
+    return f"{name}{CLUSTER_OUTBOUND_SUFFIX}"
+
+
+def is_cluster_outbound(name) -> bool:
+    return str(name or "").endswith(CLUSTER_OUTBOUND_SUFFIX)
+
+
 CLUSTER_FLOW = "xtls-rprx-vision"
 CLUSTER_TICKET_TTL = 300
 CLUSTER_TOMBSTONE_TTL = 30 * 86400
@@ -61,7 +76,9 @@ _ENC_RE = re.compile(r"mlkem768x25519plus\.[A-Za-z0-9._=-]+")
 
 
 def load_cluster() -> dict:
-    out = {"instance": "", "links": [], "pending": [], "removed": {}, "inbound": None}
+    # names_v 2 (1.49): member outbounds carry CLUSTER_OUTBOUND_SUFFIX. A cluster.json written before
+    # has none (1) until refresh_cluster_fragments renames them once.
+    out = {"instance": "", "links": [], "pending": [], "removed": {}, "inbound": None, "names_v": 2}
     try:
         with open(CLUSTER_JSON) as f:
             raw = json.load(f)
@@ -70,6 +87,8 @@ def load_cluster() -> dict:
             out["links"] = [l for l in (raw.get("links") or []) if isinstance(l, dict) and l.get("id")
                             and isinstance(l.get("in"), dict) and isinstance(l.get("out"), dict)]
             out["pending"] = [p for p in (raw.get("pending") or []) if isinstance(p, dict)]
+            # nothing to rename when there are no links
+            out["names_v"] = 2 if raw.get("names_v") == 2 or not out["links"] else 1
             _prune_pending(out)
             inb = raw.get("inbound")
             if (isinstance(inb, dict) and isinstance(inb.get("port"), int) and 1 <= inb["port"] <= 65535
@@ -119,7 +138,7 @@ def cluster_proxy_from_link(l: dict) -> dict:
     """Outbound to the other panel (Mihomo docs: config/proxies/vless, `encryption`)."""
     out = l.get("out") or {}
     return {
-        "name": str(l.get("name") or ""),
+        "name": cluster_outbound_name(str(l.get("name") or "")),
         "type": "vless",
         "server": str(out.get("server") or ""),
         "port": int(out.get("port") or 0),
@@ -185,14 +204,15 @@ def _frag_items(text: str) -> list:
 
 
 def _conf_cluster_entries(raw: str) -> tuple:
-    """(cluster listeners, member outbounds) as written in a full config, in file order."""
+    """(cluster listeners, member outbounds) as written in a full config, in file order. 1.49: every
+    "|Cluster" outbound counts, so one of a former member makes the config differ from cluster.json."""
     names = cluster_proxy_names()
     lst = extract_top_level_yaml_section(raw, "listeners")
     prox = extract_top_level_yaml_section(raw, "proxies")
     return ([x for x in (lst if isinstance(lst, list) else [])
              if isinstance(x, dict) and str(x.get("name") or "").startswith(CLUSTER_LISTENER_PREFIX)],
             [p for p in (prox if isinstance(prox, list) else [])
-             if isinstance(p, dict) and str(p.get("name") or "") in names])
+             if isinstance(p, dict) and (str(p.get("name") or "") in names or is_cluster_outbound(p.get("name")))])
 
 
 def save_cluster(st: dict):
@@ -201,6 +221,7 @@ def save_cluster(st: dict):
             "pending": st.get("pending") or [], "removed": st.get("removed") or {}}
     if st.get("inbound"):
         data["inbound"] = st["inbound"]
+    data["names_v"] = 2 if st.get("names_v", 2) == 2 else 1
     atomic_write(CLUSTER_JSON, json.dumps(data, indent=2, ensure_ascii=False) + "\n", 0o600)
     atomic_write(FRAG_CLUSTER_PROXIES, render_cluster_proxies(data), 0o640)
     atomic_write(FRAG_CLUSTER_LISTENERS, render_cluster_listeners(data), 0o640)
@@ -216,8 +237,9 @@ def _read_frag(path: str, files: dict = None) -> str:
         return ""
 
 
-def cluster_proxy_names() -> set:
-    return {str(l.get("name") or "") for l in load_cluster()["links"]}
+def cluster_proxy_names(st: dict = None) -> set:
+    """The member outbound names ("<name>|Cluster") of the current links."""
+    return {cluster_outbound_name(str(l.get("name") or "")) for l in (st or load_cluster())["links"]}
 
 
 def cluster_ports(st: dict = None) -> set:
@@ -248,9 +270,9 @@ def vless_mlkem768_pair() -> tuple:
 
 
 def used_proxy_names() -> set:
-    """Names a new outbound must not take: server outbounds, cluster members, proxy groups, built-ins."""
-    names = {str(p.get("name") or "") for p in load_server_proxies()} | cluster_proxy_names()
-    names |= RESERVED_PROXY_NAMES
+    """Names a new outbound must not take: server outbounds, cluster members, proxy groups, built-ins.
+    1.49: names with CLUSTER_OUTBOUND_SUFFIX found outside cluster.json are cluster leftovers, not taken."""
+    names = {str(p.get("name") or "") for p in load_server_proxies()}
     try:
         _, pg_block, _ = get_routing().read_frags()
         for m in re.finditer(r"^\s*-\s*name:\s*(.+?)\s*$", pg_block, re.M):
@@ -269,12 +291,19 @@ def used_proxy_names() -> set:
             for sec in ("proxy-groups", "proxies"):
                 items = extract_top_level_yaml_section(raw, sec)
                 for g in items if isinstance(items, list) else []:
-                    if isinstance(g, dict) and g.get("name") and str(g["name"]) not in cluster_proxy_names():
+                    if isinstance(g, dict) and g.get("name"):
                         names.add(str(g["name"]))
         except Exception as e:
             sys.stderr.write(f"custom config names unavailable: {e}\n")
-    return {n for n in names if n}
+    names = {n for n in names if n and not is_cluster_outbound(n)}
+    return names | cluster_proxy_names() | RESERVED_PROXY_NAMES
 
+
+def cluster_name_taken(name: str, keep=()) -> bool:
+    """1.49: a member called `name` would clash here: its outbound name ("<name>|Cluster") is already
+    another member's (keep: names that may be reused, e.g. the member's own current name). A leftover
+    "|Cluster" outbound of a former member never clashes: it is replaced."""
+    return cluster_outbound_name(name) in (used_proxy_names() - {cluster_outbound_name(k) for k in keep if k})
 
 def _live_conf_with_cluster() -> str:
     """The running config with only the cluster entries changed.
@@ -315,29 +344,186 @@ def _wait_cluster_ports(want: set, timeout: float = 8.0) -> bool:
         time.sleep(0.15)
 
 
-def custom_conf_with_cluster(raw: str, old_names: set = None) -> str:
+def has_cluster_entries(raw: str) -> bool:
+    """True when a full config has a cluster inbound (CLUSTER_LISTENER_PREFIX) or a member outbound
+    (CLUSTER_OUTBOUND_SUFFIX)."""
+    lst = extract_top_level_yaml_section(raw or "", "listeners")
+    prox = extract_top_level_yaml_section(raw or "", "proxies")
+    return (any(isinstance(x, dict) and str(x.get("name") or "").startswith(CLUSTER_LISTENER_PREFIX)
+                for x in (lst if isinstance(lst, list) else []))
+            or any(isinstance(p, dict) and is_cluster_outbound(p.get("name"))
+                   for p in (prox if isinstance(prox, list) else [])))
+
+def strip_cluster_entries(raw: str, names: set = None) -> str:
+    """1.49: a full config without any cluster entry: the cluster inbounds (CLUSTER_LISTENER_PREFIX) and
+    the member outbounds (CLUSTER_OUTBOUND_SUFFIX, plus `names` given). For a custom config that is set
+    aside (CUSTOM_SAVED): the cluster entries live in cluster.json and are put back, current, when the
+    file is used again (custom_conf_with_cluster), so a member that left in the meantime never comes back."""
+    names = set(names or ())
+    lst = extract_top_level_yaml_section(raw or "", "listeners")
+    prox = extract_top_level_yaml_section(raw or "", "proxies")
+    lst = lst if isinstance(lst, list) else []
+    prox = prox if isinstance(prox, list) else []
+    keep_l = [x for x in lst if not (isinstance(x, dict) and str(x.get("name") or "").startswith(CLUSTER_LISTENER_PREFIX))]
+    keep_p = [p for p in prox if not (isinstance(p, dict) and (is_cluster_outbound(p.get("name"))
+                                                              or str(p.get("name") or "") in names))]
+    if len(keep_l) == len(lst) and len(keep_p) == len(prox):
+        return raw   # nothing to drop: keep the user's text as written
+    l_body, p_body = dump_yaml_proxies(keep_l), dump_yaml_proxies(keep_p)
+    raw = replace_top_level_yaml_section(raw, "listeners", ("listeners:\n" + l_body) if l_body.strip() else "listeners: []\n")
+    return replace_top_level_yaml_section(raw, "proxies", ("proxies:\n" + p_body) if p_body.strip() else "proxies: []\n")
+
+
+def _rule_fields(rule) -> list:
+    return [f.strip() for f in str(rule).split(",")]
+
+
+def rename_cluster_refs(raw: str, renames: dict) -> str:
+    """1.49: a member outbound got a new name (old -> new: the "|Cluster" rename of 1.49, or the member
+    changed its name): the user's proxy-groups and rules that name it follow. Same outbound, same
+    meaning. Unchanged text when nothing names an old one."""
+    renames = {o: n for o, n in (renames or {}).items() if o and n and o != n}
+    if not renames:
+        return raw
+    groups = extract_top_level_yaml_section(raw or "", "proxy-groups")
+    rules = extract_top_level_yaml_section(raw or "", "rules")
+    g_changed = r_changed = False
+    for g in groups if isinstance(groups, list) else []:
+        if isinstance(g, dict) and isinstance(g.get("proxies"), list):
+            new = [renames.get(str(x), x) for x in g["proxies"]]
+            if new != g["proxies"]:
+                g["proxies"], g_changed = new, True
+    new_rules = []
+    for r in rules if isinstance(rules, list) else []:
+        f = _rule_fields(r)
+        if any(x in renames for x in f):
+            r, r_changed = ",".join(renames.get(x, x) for x in f), True
+        new_rules.append(r)
+    if g_changed:
+        raw = replace_top_level_yaml_section(raw, "proxy-groups", "proxy-groups:\n" + dump_yaml_proxies(groups))
+    if r_changed:
+        raw = replace_top_level_yaml_section(
+            raw, "rules", "rules:\n" + "".join("  - " + yaml_scalar(str(r), "rule") + "\n" for r in new_rules))
+    return raw
+
+
+def drop_group_refs(raw: str, gone: set) -> str:
+    """1.49: the user's proxy-groups no longer list member outbounds that are gone: every name in `gone`
+    and every "|Cluster" name not in cluster.json is taken out of each group's `proxies`. A group that
+    would be left empty is not touched (nothing is invented for it): `mihomo -t` then refuses it and the
+    message names it (cluster_ref_problems) for the user to fix. Unchanged text when nothing changes."""
+    current = cluster_proxy_names()
+    groups = extract_top_level_yaml_section(raw or "", "proxy-groups")
+    if not isinstance(groups, list):
+        return raw
+
+    def gone_name(x) -> bool:
+        x = str(x)
+        return x not in current and (x in gone or is_cluster_outbound(x))
+    changed = False
+    for g in groups:
+        if not isinstance(g, dict) or not isinstance(g.get("proxies"), list):
+            continue
+        keep = [x for x in g["proxies"] if not gone_name(x)]
+        if len(keep) == len(g["proxies"]):
+            continue
+        has_source = g.get("include-all") or g.get("include-all-proxies") or g.get("use")
+        if keep:
+            g["proxies"] = keep
+        elif has_source:
+            del g["proxies"]   # the group still gets its proxies from those
+        else:
+            continue           # left as it is: the user decides (cluster_ref_problems)
+        changed = True
+    if not changed:
+        return raw
+    return replace_top_level_yaml_section(raw, "proxy-groups", "proxy-groups:\n" + dump_yaml_proxies(groups))
+
+
+def cluster_ref_problems(raw: str) -> list:
+    """1.49: what in a custom config still names a member outbound that is not in cluster.json: the names
+    of the groups the panel did not empty, then the rules, for the message when `mihomo -t` refuses it."""
+    current = cluster_proxy_names()
+    out = []
+    groups = extract_top_level_yaml_section(raw or "", "proxy-groups")
+    for g in groups if isinstance(groups, list) else []:
+        if isinstance(g, dict) and isinstance(g.get("proxies"), list):
+            if any(is_cluster_outbound(x) and str(x) not in current for x in g["proxies"]):
+                out.append(str(g.get("name", "")))
+    rules = extract_top_level_yaml_section(raw or "", "rules")
+    for r in rules if isinstance(rules, list) else []:
+        if any(is_cluster_outbound(x) and x not in current for x in _rule_fields(r)):
+            out.append(str(r))
+    return out
+
+
+def custom_conf_with_cluster(raw: str, old_names: set = None, renames: dict = None) -> str:
     """A user's full server config (custom mode) with the cluster entries replaced by cluster.json:
-    cluster listeners (CLUSTER_LISTENER_PREFIX) and member outbounds (names in old_names, default the
-    current members) are dropped, the current ones appended. The user's own entries and every other
-    section stay as written; the user's proxy-groups choose whether to use the members (e.g. include-all)."""
+    cluster listeners (CLUSTER_LISTENER_PREFIX) and member outbounds (CLUSTER_OUTBOUND_SUFFIX, and the
+    names in old_names / renames) are dropped, the current ones appended. 1.49: renamed members are
+    renamed in the user's groups and rules (rename_cluster_refs); members that left are taken out of the
+    groups' proxies (drop_group_refs). Everything else stays as written; the user's proxy-groups choose
+    whether to use the members (e.g. include-all)."""
     st = load_cluster()
-    old = set(old_names if old_names is not None else cluster_proxy_names())
+    old = set(old_names if old_names is not None else cluster_proxy_names(st))
+    raw = rename_cluster_refs(raw, renames)
+    raw = drop_group_refs(raw, old)
+    drop = old | set(renames or ()) | cluster_proxy_names(st)
     lst = extract_top_level_yaml_section(raw, "listeners")
     prox = extract_top_level_yaml_section(raw, "proxies")
     lst = [x for x in (lst if isinstance(lst, list) else [])
            if not (isinstance(x, dict) and str(x.get("name") or "").startswith(CLUSTER_LISTENER_PREFIX))]
     prox = [p for p in (prox if isinstance(prox, list) else [])
-            if not (isinstance(p, dict) and str(p.get("name") or "") in old)]
+            if not (isinstance(p, dict) and (str(p.get("name") or "") in drop or is_cluster_outbound(p.get("name"))))]
     l_body = dump_yaml_proxies(lst + cluster_listeners(st))
     p_body = dump_yaml_proxies(prox + [cluster_proxy_from_link(l) for l in st["links"]])
     raw = replace_top_level_yaml_section(raw, "listeners", ("listeners:\n" + l_body) if l_body.strip() else "listeners: []\n")
     return replace_top_level_yaml_section(raw, "proxies", ("proxies:\n" + p_body) if p_body.strip() else "proxies: []\n")
 
+def _controller(method: str, path: str, body: dict = None):
+    """The running core's API on this server (same access as the panel's traffic counter). None on error."""
+    env = read_env()
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    secret = get_mihomo_secret(env)
+    if secret:
+        headers["Authorization"] = f"Bearer {secret}"
+    data = json.dumps(body).encode() if body is not None else None
+    for scheme in (("https", "http") if _controller_uses_tls(env) else ("http", "https")):
+        req = urllib.request.Request(f"{scheme}://127.0.0.1:{get_controller_port(env)}{path}", data=data,
+                                     headers=headers, method=method)
+        try:
+            ctx = ssl._create_unverified_context() if scheme == "https" else None   # loopback only
+            with urllib.request.urlopen(req, context=ctx, timeout=3) as r:
+                raw = r.read().decode("utf-8", "replace")
+            return json.loads(raw) if raw.strip() else {}
+        except Exception:
+            continue
+    return None
 
-def apply_cluster_live(old_specs: set, old_names: set = None):
+
+def _group_selections(renames: dict) -> dict:
+    """1.49: {group: selected proxy} for the groups whose selection is one of the renamed outbounds."""
+    data = _controller("GET", "/proxies") or {}
+    out = {}
+    for name, p in (data.get("proxies") or {}).items():
+        if isinstance(p, dict) and p.get("now") in renames and str(p.get("type") or "").lower() == "selector":
+            out[name] = p["now"]
+    return out
+
+
+def _select_in_group(group: str, proxy: str):
+    """Select `proxy` in the selector `group` (kept across restarts by profile.store-selected)."""
+    from urllib.parse import quote as _q
+    if _controller("PUT", "/proxies/" + _q(group, safe=""), {"name": proxy}) is None:
+        sys.stderr.write(f"cluster: could not select '{proxy}' in '{group}' again\n")
+
+
+def apply_cluster_live(old_specs: set, old_names: set = None, renames: dict = None):
     """Write the cluster change into config.yaml, validate, reload the core, update the firewall.
     In custom mode the user's file gets only the cluster entries replaced (custom_conf_with_cluster).
-    Caller holds LOCK and has already saved cluster.json; raises (config restored) on failure."""
+    renames (1.49): member outbounds that get a new name; groups that had one selected (Zashboard) keep
+    it under the new name. Caller holds LOCK and has already saved cluster.json; raises (config
+    restored) on failure."""
     custom = is_custom_config_mode()
     try:
         with open(CONF) as f:
@@ -348,7 +534,7 @@ def apply_cluster_live(old_specs: set, old_names: set = None):
     if custom:
         with open(CUSTOM_CONF) as f:
             custom_backup = f.read()
-        new_conf = custom_conf_with_cluster(custom_backup, old_names)
+        new_conf = custom_conf_with_cluster(custom_backup, old_names, renames)
         atomic_write(CUSTOM_CONF, new_conf, 0o640)
     else:
         new_conf = _live_conf_with_cluster()
@@ -363,8 +549,12 @@ def apply_cluster_live(old_specs: set, old_names: set = None):
     rc, out = validate_config()
     if rc != 0:
         restore()
+        refs = cluster_ref_problems(new_conf) if custom else []
+        if refs:   # 1.49: say what in the user's config still names a member that is gone
+            raise ClusterError("自定义服务端配置里的代理组或规则还在使用已不在集群里的成员（{}），请在「自定义服务端」页改掉后再试".format(" / ".join(refs[:5]) + (" …" if len(refs) > 5 else "")))
         raise RuntimeError("配置校验失败（mihomo -t）：" + out[-300:])
     st = load_cluster()
+    selected = _group_selections(renames) if renames else {}
     # Hot reload; the cluster ports are awaited (reload returns before they are bound), and only if
     # they never come up the core is restarted once (reload_core).
     rc, out = reload_core(cluster_ports(st), wait=_wait_cluster_ports)
@@ -372,6 +562,8 @@ def apply_cluster_live(old_specs: set, old_names: set = None):
         restore()
         run([SYSTEMCTL, "restart", "mihomo"])
         raise RuntimeError("重载 Mihomo 失败：" + out[-300:])
+    for group, now in selected.items():
+        _select_in_group(group, renames[now])
     # Keep "discard drafts" working: the baseline must describe the config that is live now.
     if os.path.isfile(PENDING_BASELINE_JSON):
         try:
@@ -613,16 +805,17 @@ def cluster_apply_staged() -> bool:
         if s.get("timer"):
             s["timer"].cancel()
         try:
-            apply_cluster_live(s["specs"], s["names"])
+            apply_cluster_live(s["specs"], s["names"], s.get("renames") or None)
         except Exception:
             _restore_files(s["backup"])
             raise
         return True
 
 
-def _cluster_commit(mutate) -> dict:
+def _cluster_commit(mutate, renames: dict = None) -> dict:
     """Under LOCK: load, mutate(st) (may raise), save, apply live; restore everything on failure.
-    While deferring (cluster_batch, or a join / connect with defer=1) the change is only saved and staged."""
+    While deferring (cluster_batch, or a join / connect with defer=1) the change is only saved and staged.
+    renames (1.49): member outbounds that get a new name (old -> new), see apply_cluster_live."""
     _cancel_check()
     with LOCK:
         _cancel_check()
@@ -632,18 +825,32 @@ def _cluster_commit(mutate) -> dict:
             old_specs, old_names = _STAGED["specs"], _STAGED["names"]
         else:
             old_specs = cluster_ufw_specs(st)
-            old_names = {str(l.get("name") or "") for l in st["links"]}
+            old_names = cluster_proxy_names(st)
+        renames = dict(renames or {})
+        if st.get("names_v", 2) < 2:
+            # 1.49: whichever change comes first moves a 1.48 cluster.json to the "|Cluster" names (not
+            # only refresh_cluster_fragments: it may have failed at start), so the user's groups / rules
+            # always follow; a rename in this same change is chained (old plain name -> newest name).
+            for l in st["links"]:
+                n = str(l.get("name") or "")
+                if n:
+                    renames.setdefault(n, renames.get(cluster_outbound_name(n), cluster_outbound_name(n)))
+            st["names_v"] = 2
+        if _STAGED["on"]:   # several staged renames: keep them all for the single apply
+            prev = _STAGED.get("renames") or {}
+            renames = {**{k: renames.get(v, v) for k, v in prev.items()}, **renames}
         try:
             res = mutate(st)
             save_cluster(st)
             if not _deferring():
-                apply_cluster_live(old_specs, old_names)
+                apply_cluster_live(old_specs, old_names, renames or None)
         except Exception:
             _restore_files(backup)
             raise
         if _deferring():
             if not _STAGED["on"]:
                 _STAGED.update(on=True, backup=backup, specs=old_specs, names=old_names)
+            _STAGED["renames"] = renames
             _arm_stage_timer()
         elif _STAGED["on"]:   # applied together with this change
             if _STAGED.get("timer"):
@@ -736,15 +943,58 @@ def cluster_batch_text(b) -> str:
     return "；".join(parts)
 
 
+def _drop_stray_member_outbounds() -> bool:
+    """1.49: a "|Cluster" outbound never belongs in the server outbound list (proxies.json, where the
+    template takes the user's outbounds from): the cluster writes its own. One found there is removed
+    (and from the draft baseline), so it cannot keep coming back into the live config."""
+    cur = load_server_proxies()
+    keep = [p for p in cur if not is_cluster_outbound(p.get("name"))]
+    if len(keep) == len(cur):
+        return False
+    with LOCK:
+        atomic_write(PROXIES_JSON, json.dumps(keep, indent=2, ensure_ascii=False), 0o600)
+        atomic_write(FRAG_PROXIES, dump_yaml_proxies(keep), 0o640)
+        if os.path.isfile(PENDING_BASELINE_JSON):
+            try:
+                with open(PENDING_BASELINE_JSON) as f:
+                    snap = json.load(f)
+                files = snap.get("files") if isinstance(snap, dict) else None
+                if isinstance(files, dict) and files.get(PROXIES_JSON):
+                    base = [p for p in json.loads(files[PROXIES_JSON]) if not is_cluster_outbound(p.get("name"))]
+                    files[PROXIES_JSON] = json.dumps(base, indent=2, ensure_ascii=False)
+                    files[FRAG_PROXIES] = dump_yaml_proxies(base)
+                    atomic_write(PENDING_BASELINE_JSON, json.dumps(snap, ensure_ascii=False) + "\n", 0o600)
+            except (OSError, ValueError, TypeError, AttributeError) as e:
+                sys.stderr.write(f"cluster: baseline not cleaned: {e}\n")
+    sys.stderr.write("cluster: removed member outbounds from the server outbound list\n")
+    return True
+
+
 def refresh_cluster_fragments() -> bool:
     """After an update or a restart, bring the running config in line with cluster.json: the current
     listener shape (1.38: exit only) and links saved but never applied (1.40: staged when the panel
     restarted). Compares the entries, not the text: fragments that only differ in format (1.41:
     multi-line YAML instead of one JSON object per line) are rewritten without reloading the core.
     True when the core was reloaded."""
+    _drop_stray_member_outbounds()
     st = load_cluster()
     if not st["links"]:
+        # 1.49: no members, yet the live config still has cluster entries (a member that left while this
+        # panel was offline, a custom config loaded again from a copy saved in a cluster): drop them.
+        try:
+            with open(CUSTOM_CONF if is_custom_config_mode() else CONF) as f:
+                stale = has_cluster_entries(f.read())
+        except OSError:
+            stale = False
+        if stale:
+            _cluster_commit(lambda s: None)
+            return True
         return False
+    if st.get("names_v", 2) < 2:
+        # 1.49, once: the member outbounds get CLUSTER_OUTBOUND_SUFFIX. The user's groups / rules that
+        # name one follow it (custom mode) and a member selected in Zashboard stays selected.
+        _cluster_commit(lambda s: None)   # _cluster_commit renames them (and the references) itself
+        return True
     want = (cluster_listeners(st), [cluster_proxy_from_link(l) for l in st["links"]])
     stale = (_frag_items(_read_frag(FRAG_CLUSTER_LISTENERS)), _frag_items(_read_frag(FRAG_CLUSTER_PROXIES))) != want
     if not stale:
@@ -831,7 +1081,7 @@ def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
         raise ClusterError("对方面板的本机名称无效，请先在对方面板的集群页重新填写")
     if _link_by(load_cluster(), instance=r_inst):
         raise ClusterError(f"「{rname}」已经在集群里了")
-    if rname in used_proxy_names():
+    if cluster_name_taken(rname):
         raise ClusterError(f"对方的本机名称「{rname}」和本机已有的出站或分流组重名，请先在对方面板的集群页改个名字")
     self_url = local_cluster_url()
     if not self_url:
@@ -860,7 +1110,7 @@ def cluster_pair(base: str, auth: dict, expect_instance: str = "") -> tuple:
         def add(st):
             if _link_by(st, instance=r_inst):
                 raise ClusterError(f"「{rname}」已经在集群里了")
-            if rname in used_proxy_names():
+            if cluster_name_taken(rname):
                 raise ClusterError(f"对方的本机名称「{rname}」和本机已有的出站或分流组重名，请先在对方面板的集群页改个名字")
             st["links"].append(link)
             st["pending"] = [p for p in st["pending"] if p.get("instance") != r_inst]
@@ -963,17 +1213,20 @@ def _update_link(instance: str, **fields):
             return
         new_name = fields.pop("name", None)
         l.update(fields)
-        rename = bool(new_name) and new_name != l.get("name") and new_name not in (used_proxy_names() - {l.get("name")})
+        rename = bool(new_name) and new_name != l.get("name") and not cluster_name_taken(new_name, keep={l.get("name")})
         if not rename:
             save_cluster(st)
             return
+    old_name = l.get("name") or ""
+
     def ren(st2):
         x = _link_by(st2, instance=instance)
         if x:
             x.update(fields)
             x["name"] = new_name
     try:
-        _cluster_commit(ren)
+        # 1.49: the user's groups / rules and Zashboard selections follow the new outbound name
+        _cluster_commit(ren, renames={cluster_outbound_name(old_name): cluster_outbound_name(new_name)})
     except Exception as e:
         sys.stderr.write(f"cluster rename failed: {e}\n")
 
@@ -1197,6 +1450,89 @@ def cluster_report_text(rep: dict) -> str:
     if rep["failed"]:
         parts.append(f"有 {len(rep['failed'])} 条互联没有完成，原因见成员列表，恢复后点「检查」重试")
     return "；".join(parts)
+
+
+CLUSTER_WATCH_EVERY = 3600        # 1.49: seconds between two background checks of the members
+_WATCH = {"on": False}            # the background check holds _CLUSTER_OP_LOCK (a user job takes over)
+CLUSTER_WATCH_SPREAD = 900        # plus up to this many seconds at random, so panels do not all ask at once
+
+
+def cluster_watch_once() -> dict:
+    """1.49: the background check (call with _CLUSTER_OP_LOCK held). Light, no new links:
+      1. this panel: the live config's cluster entries match cluster.json (refresh_cluster_fragments):
+         a "|Cluster" outbound of a member that is gone is removed, a renamed one follows;
+      2. every member: ask it (also tells it our name); it no longer knows us (it left, or removed us,
+         while one side was offline) -> drop the link here, so both sides end up without each other;
+         it has a new name -> rename its outbound. An offline member is only marked, never dropped.
+    A user's cluster job takes over: the round stops before the next member (_CLUSTER_CANCEL). One
+    member's failure (e.g. the user's custom config refuses the change) is recorded on its link and
+    does not stop the others. Returns {"dropped", "renamed", "offline", "failed"} (names)."""
+    rep = {"dropped": [], "renamed": [], "offline": [], "failed": []}
+    try:
+        refresh_cluster_fragments()
+    except Exception as e:
+        sys.stderr.write(f"cluster watch: refresh failed: {e}\n")
+    for l in list(load_cluster()["links"]):
+        if _CLUSTER_CANCEL.is_set():
+            break
+        try:
+            try:
+                obj = cluster_call(l, "/api/cluster/status",
+                                   {"name": local_node_name(), "url": local_cluster_url(), "version": VERSION}, timeout=15)
+            except ClusterRemoteError as e:
+                if e.code == "bad_token":   # the other side has no link with us any more
+                    _drop_links({l["instance"]})
+                    rep["dropped"].append(l.get("name", ""))
+                    continue
+                _update_link(l["instance"], ok=False, error=str(e))
+                rep["offline"].append(l.get("name", ""))
+                continue
+            except ClusterError as e:
+                _update_link(l["instance"], ok=False, error=str(e))
+                rep["offline"].append(l.get("name", ""))
+                continue
+            try:
+                name = validate_peer_name(obj.get("name"))
+            except ValueError:
+                name = None
+            if name and name != l.get("name"):
+                rep["renamed"].append(name)
+            _update_link(l["instance"], ok=True, error="", seen=int(time.time()),
+                         version=str(obj.get("version") or ""), **({"name": name} if name else {}))
+        except Exception as e:   # this member only (e.g. the custom config refuses dropping it)
+            rep["failed"].append(l.get("name", ""))
+            sys.stderr.write(f"cluster watch: '{l.get('name')}': {e}\n")
+            try:
+                _update_link(l["instance"], ok=False, error=str(e)[:300])
+            except Exception:
+                pass
+    return rep
+
+
+def start_cluster_watch(delay: float = 300, every: float = CLUSTER_WATCH_EVERY):
+    """1.49: on panel start, run cluster_watch_once about once an hour (every + a random part of
+    CLUSTER_WATCH_SPREAD, so the members of a big cluster spread out) whenever no other cluster job runs
+    (a 检查 / add / leave in progress is never disturbed: that round is skipped). Each round is one small
+    HTTPS request per member; the core is reloaded only when something was dropped or renamed."""
+    def loop():
+        time.sleep(delay + secrets.randbelow(CLUSTER_WATCH_SPREAD + 1))
+        while True:
+            if _CLUSTER_OP_LOCK.acquire(blocking=False):
+                _WATCH["on"] = True
+                try:
+                    rep = cluster_watch_once()
+                    if rep["dropped"] or rep["renamed"]:
+                        sys.stderr.write("cluster watch: dropped {}; renamed {}\n".format(
+                            ", ".join(rep["dropped"]) or "-", ", ".join(rep["renamed"]) or "-"))
+                except Exception as e:
+                    sys.stderr.write(f"cluster watch failed: {e}\n")
+                finally:
+                    _WATCH["on"] = False
+                    _CLUSTER_OP_LOCK.release()
+            time.sleep(every + secrets.randbelow(CLUSTER_WATCH_SPREAD + 1))
+    t = threading.Thread(target=loop, name="cluster-watch", daemon=True)
+    t.start()
+    return t
 
 
 def cluster_push_name_async():

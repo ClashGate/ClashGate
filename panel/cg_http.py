@@ -451,6 +451,10 @@ class Panel(BaseHTTPRequestHandler):
                 cur_cfg = f.read()
         except FileNotFoundError:
             cur_cfg = assemble_config()
+        if not custom_active and not custom_saved:
+            # 1.49: the default config as a starting point, without the cluster entries (cluster.json
+            # puts the current ones in when it is applied)
+            cur_cfg = strip_cluster_entries(cur_cfg)
 
         cport = get_controller_port(env)
         traffic = get_traffic_stats(env)
@@ -1071,7 +1075,7 @@ class Panel(BaseHTTPRequestHandler):
 
         def add(st):
             old = _link_by(st, instance=inst)   # the same panel joining again replaces its old link
-            if peer_name in (used_proxy_names() - ({old.get("name")} if old else set())):
+            if cluster_name_taken(peer_name, keep={old.get("name")} if old else set()):
                 raise ClusterError(f"名称「{peer_name}」在对方面板上已被出站或分流组使用，请换一个本机名称")
             st["links"] = [l for l in st["links"] if l.get("instance") != inst] + [link]
             st["pending"] = [p for p in st["pending"] if p.get("instance") != inst]
@@ -1266,6 +1270,12 @@ class Panel(BaseHTTPRequestHandler):
         1.44: 退出集群 does not wait for a running 检查 / 重试: it tells that one to stop (_CLUSTER_CANCEL,
         honoured at its next step) and leaves at once; the check releases the lock when it stops."""
         locked = _CLUSTER_OP_LOCK.acquire(blocking=False)
+        if not locked and _WATCH["on"]:
+            # 1.49: the background check gives way: it stops before its next member (at most one
+            # status call, 15 s), then this job runs as usual
+            _CLUSTER_CANCEL.set()
+            locked = _CLUSTER_OP_LOCK.acquire(timeout=40)
+            _CLUSTER_CANCEL.clear()
         if not locked:
             with _CLUSTER_TASK_LOCK:
                 busy_kind = _CLUSTER_TASK["kind"] if _CLUSTER_TASK["running"] else ""
@@ -2064,7 +2074,8 @@ class Panel(BaseHTTPRequestHandler):
                 added = parse_mihomo_proxies(raw)
                 taken = cluster_proxy_names()
                 for p in added:
-                    if p["name"] in taken:
+                    if p["name"] in taken or is_cluster_outbound(p["name"]):
+                        # 1.49: names ending in |Cluster are the cluster's
                         raise ValueError(f"名称「{p['name']}」已被集群成员使用，请换一个名字")
                 cur = load_server_proxies()
                 by_name = {p["name"]: i for i, p in enumerate(cur)}
@@ -2439,6 +2450,10 @@ def serve(cfg_path):
         start_cluster_migration()   # 1.42: links with their own inbound move to the shared one
     except Exception as e:
         sys.stderr.write(f"cluster migration not started: {e}\n")
+    try:
+        start_cluster_watch()   # 1.49: members checked about hourly (gone -> dropped, renamed -> follows)
+    except Exception as e:
+        sys.stderr.write(f"cluster watch not started: {e}\n")
     start_traffic_poller(30)
     refresh_update_check_for_version()
     start_weekly_update_check()

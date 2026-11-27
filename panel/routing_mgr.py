@@ -1,4 +1,4 @@
-"""ClashGate 1.48 server-side routing (服务端分流).
+"""ClashGate 1.49 server-side routing (服务端分流).
 
 Groups live as separate YAML files under /etc/clashgate/routing/, indexed by
 routing.json. Assemble merges them into rule-providers / proxy-groups / rules
@@ -613,6 +613,8 @@ class RoutingManager:
             raise ValueError("分流组名称不能为空")
         if len(name) > 64:
             raise ValueError("分流组名称过长")
+        if name.endswith("|Cluster"):   # 1.49: the suffix names the cluster's member outbounds
+            raise ValueError("名称不能以 |Cluster 结尾，它留给集群成员使用")
         return name
 
     def _unique_id(self, meta: dict, base: str) -> str:

@@ -85,7 +85,7 @@ def write_default_state(extra_kinds=()):
 
 class VersionTest(unittest.TestCase):
     def test_order(self):
-        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44", "1.45", "1.46", "1.47", "1.48"]
+        order = ["1.07.9", "1.08", "1.09", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16", "1.17", "1.18", "1.19", "1.20", "1.21", "1.22", "1.23", "1.24", "1.25", "1.26", "1.27", "1.28", "1.29", "1.30", "1.31", "1.32", "1.33", "1.34", "1.35", "1.36", "1.37", "1.38", "1.39", "1.40", "1.41", "1.42", "1.43", "1.44", "1.45", "1.46", "1.47", "1.48", "1.49"]
         tuples = [P.parse_version_tuple(v) for v in order]
         self.assertEqual(tuples, sorted(tuples))
         self.assertEqual(len(set(tuples)), len(tuples))
@@ -276,6 +276,18 @@ class CustomModeTest(unittest.TestCase):
         self.assertEqual(P.disable_custom_config(), "")   # not in custom mode: nothing to do
         page = read(os.path.join(REPO, "panel/web/src/composables/useSettings.js"))
         self.assertIn("自定义模式里的改动不会带过去", page)
+
+    def test_reset_template_keeps_custom_controller_settings_out(self):
+        """1.49: 恢复默认服务端模板 from custom mode gives the default mode its own controller port and
+        secret back (the custom config's stay with it)."""
+        before = P.read_env()
+        P.apply_custom_config(self.base_conf)
+        P.write_env_var("MIHOMO_SECRET", "custom-secret")   # as a custom config's `secret:` would
+        with mock.patch.dict(P.reset_to_template_config.__globals__, {"wait_mihomo_ports": lambda *a, **k: True}):
+            P.reset_to_template_config()
+        self.assertEqual(P.read_env().get("MIHOMO_SECRET", ""), before.get("MIHOMO_SECRET", ""))
+        self.assertFalse(os.path.exists(P.DEFAULT_ENV_BAK))
+        self.assertFalse(P.is_custom_config_mode())
 
     def test_no_saved_default_state_gives_a_new_node(self):
         self._custom_with_extra_node()
@@ -586,6 +598,215 @@ class ClusterTest(unittest.TestCase):
         b["in"]["port"] = 31002
         st["links"].append(b)
         return st, a, b
+
+    def test_leaving_takes_members_out_of_custom_proxy_groups(self):
+        """1.49: members that left ("|Cluster" names not in cluster.json) are taken out of the user's
+        proxy-groups. Nothing is invented: a group left with nothing is not touched, so mihomo -t refuses
+        it and the message names it; a group with include-all / use just loses its proxies list. Rules
+        are never changed, only reported."""
+        P.save_cluster({"instance": "c" * 32, "links": [], "pending": [], "removed": {}})
+        conf = ("proxies:\n  - name: my-out\n    type: socks5\n    server: 9.9.9.9\n    port: 1080\n"
+                "proxy-groups:\n"
+                "  - name: g1\n    type: select\n    proxies:\n      - 硅谷|Cluster\n      - DIRECT\n"
+                "  - name: g2\n    type: select\n    proxies:\n      - 硅谷|Cluster\n"
+                "  - name: g3\n    type: select\n    include-all: true\n    proxies:\n      - 硅谷|Cluster\n"
+                "  - name: g4\n    type: select\n    proxies: [my-out, DIRECT]\n"
+                "rules:\n  - DOMAIN-SUFFIX,google.com,硅谷|Cluster\n  - MATCH,g1\n")
+        out = P.drop_group_refs(conf, {"硅谷|Cluster"})
+        groups = {g["name"]: g for g in P.extract_top_level_yaml_section(out, "proxy-groups")}
+        self.assertEqual(groups["g1"]["proxies"], ["DIRECT"])          # what was there, nothing added
+        self.assertEqual(groups["g2"]["proxies"], ["硅谷|Cluster"])    # left for the user
+        self.assertNotIn("proxies", groups["g3"])
+        self.assertTrue(groups["g3"]["include-all"])
+        self.assertEqual(groups["g4"]["proxies"], ["my-out", "DIRECT"])
+        self.assertIn("DOMAIN-SUFFIX,google.com,硅谷|Cluster", out)    # rules: unchanged
+        self.assertEqual(P.cluster_ref_problems(out), ["g2", "DOMAIN-SUFFIX,google.com,硅谷|Cluster"])
+        clean = conf.replace("      - 硅谷|Cluster\n      - DIRECT\n", "      - DIRECT\n")
+        clean = clean.split("  - name: g2")[0] + "  - name: g4\n    type: select\n    proxies: [my-out, DIRECT]\nrules:\n  - MATCH,g1\n"
+        self.assertEqual(P.drop_group_refs(clean, set()), clean)   # nothing named: text as written
+        self.assertEqual(P.cluster_ref_problems(clean), [])
+
+    def test_member_outbounds_carry_the_cluster_suffix(self):
+        """1.49: member outbounds are "<name>|Cluster": known by name, so a former member's leftover is
+        replaced instead of refused, and the plain name is free for the user's own outbounds."""
+        st, a, b = self._two_members()
+        self.assertEqual(P.cluster_proxy_from_link(a)["name"], a["name"] + "|Cluster")
+        P.save_cluster({"instance": st["instance"], "links": [a], "pending": [], "removed": {}})
+        saved = {p: (read(p) if os.path.exists(p) else None) for p in (P.PROXIES_JSON, P.FRAG_PROXIES)}
+        try:
+            mine = {"name": b["name"], "type": "socks5", "server": "9.9.9.9", "port": 1080, "udp": True}
+            leftover = P.cluster_proxy_from_link(b)   # 大阪 left long ago, its outbound stayed behind
+            P.atomic_write(P.PROXIES_JSON, json.dumps([mine, leftover]), 0o600)
+            self.assertFalse(P.cluster_name_taken(b["name"]))    # neither the leftover nor 大阪 itself
+            self.assertTrue(P.cluster_name_taken(a["name"]))     # a current member
+            self.assertFalse(P.cluster_name_taken(a["name"], keep={a["name"]}))   # its own name
+            self.assertNotIn(leftover["name"], P.used_proxy_names())
+            self.assertIn(b["name"], P.used_proxy_names())
+        finally:
+            for p, data in saved.items():
+                if data is None:
+                    if os.path.exists(p):
+                        os.remove(p)
+                else:
+                    P.atomic_write(p, data, 0o600 if p.endswith(".json") else 0o640)
+        h = read(os.path.join(REPO, "panel/cg_http.py"))
+        self.assertIn("is_cluster_outbound(p[\"name\"])", h)   # a server outbound cannot take the suffix
+        with self.assertRaises(ValueError):
+            P.get_routing()._validate_name("我的组|Cluster")   # nor a routing group
+
+    def test_old_member_names_are_renamed_once(self):
+        """1.49: a cluster.json written before keeps names_v 1; the first start renames the member
+        outbounds once, with the user's groups and rules (same outbound, same meaning)."""
+        st, a, _ = self._state()
+        raw = {"instance": st["instance"], "links": st["links"], "pending": [], "removed": {}}
+        with open(P.CLUSTER_JSON, "w") as f:
+            json.dump(raw, f)
+        self.assertEqual(P.load_cluster()["names_v"], 1)
+        old = a["name"]
+        conf = ("proxies:\n  - name: mine\n    type: socks5\n    server: 9.9.9.9\n    port: 1080\n"
+                + P.dump_yaml_proxies([dict(P.cluster_proxy_from_link(a), name=old)])
+                + "proxy-groups:\n  - name: pin\n    type: select\n    proxies:\n      - " + old + "\n      - DIRECT\n"
+                "rules:\n  - DOMAIN-SUFFIX,google.com," + old + "\n  - MATCH,pin\n")
+        out = P.custom_conf_with_cluster(conf, renames={old: old + "|Cluster"})
+        prox = [p["name"] for p in P.extract_top_level_yaml_section(out, "proxies")]
+        self.assertEqual(prox, ["mine", old + "|Cluster"])
+        groups = {g["name"]: g for g in P.extract_top_level_yaml_section(out, "proxy-groups")}
+        self.assertEqual(groups["pin"]["proxies"], [old + "|Cluster", "DIRECT"])
+        self.assertIn("DOMAIN-SUFFIX,google.com," + old + "|Cluster", out)
+        P.save_cluster(P.load_cluster())
+        self.assertEqual(P.load_cluster()["names_v"], 1)      # kept until the rename is done
+        P.save_cluster({**P.load_cluster(), "names_v": 2})
+        self.assertEqual(P.load_cluster()["names_v"], 2)
+        with open(P.CLUSTER_JSON, "w") as f:
+            json.dump({**raw, "links": []}, f)
+        self.assertEqual(P.load_cluster()["names_v"], 2)      # nothing to rename without links
+        cl = read(os.path.join(REPO, "panel/cg_cluster.py"))
+        # any first change does it (_cluster_commit), the start-up refresh only triggers it
+        self.assertIn('if st.get("names_v", 2) < 2:', cl)
+        self.assertIn('_STAGED["renames"] = renames', cl)
+        self.assertIn('apply_cluster_live(s["specs"], s["names"], s.get("renames") or None)', cl)
+        # behaviour: the first commit on an old cluster.json carries the rename (and chains a new name)
+        with open(P.CLUSTER_JSON, "w") as f:
+            json.dump(raw, f)
+        got = {}
+        with mock.patch.dict(P._cluster_commit.__globals__,
+                             {"apply_cluster_live": lambda specs, names, renames=None: got.update(renames or {})}):
+            P._cluster_commit(lambda s: None, renames={old + "|Cluster": "New|Cluster"})
+        self.assertEqual(got.get(old), "New|Cluster")
+        self.assertEqual(P.load_cluster()["names_v"], 2)
+
+    def test_background_watch_drops_and_renames(self):
+        """1.49: the background check asks every member: one that no longer knows us (it left or removed
+        us while one side was offline) is dropped here too; a renamed one is renamed; an offline one is
+        only marked. A "|Cluster" outbound of a member that is gone is removed from the live config."""
+        st, a, b = self._two_members()
+        P.save_cluster(st)
+        g = P.cluster_watch_once.__globals__
+        asked = []
+
+        def fake_call(l, path, extra=None, timeout=30, fallback=""):
+            asked.append((l["name"], path))
+            if l["instance"] == a["instance"]:
+                raise P.ClusterRemoteError("对方面板已不认这条集群连接（可能已在对方那边删除）", "bad_token")
+            return {"ok": True, "name": "大阪-新", "version": P.VERSION, "members": []}
+
+        with mock.patch.dict(g, {"cluster_call": fake_call, "refresh_cluster_fragments": lambda: False}), \
+                mock.patch.dict(P._cluster_commit.__globals__, {"apply_cluster_live": lambda *x, **k: None}):
+            rep = P.cluster_watch_once()
+        self.assertEqual(rep["dropped"], [a["name"]])
+        self.assertEqual(rep["renamed"], ["大阪-新"])
+        self.assertEqual([l["name"] for l in P.load_cluster()["links"]], ["大阪-新"])
+        self.assertEqual({p for _, p in asked}, {"/api/cluster/status"})
+
+        def offline(l, path, extra=None, timeout=30, fallback=""):
+            raise P.ClusterTimeout("连接对方面板超时")
+        with mock.patch.dict(g, {"cluster_call": offline, "refresh_cluster_fragments": lambda: False}):
+            rep = P.cluster_watch_once()
+        self.assertEqual((rep["offline"], rep["dropped"]), (["大阪-新"], []))
+        self.assertEqual(len(P.load_cluster()["links"]), 1)   # offline is never a reason to drop
+        # a stray "|Cluster" outbound in the server outbound list is removed and never comes back
+        saved = {p: (read(p) if os.path.exists(p) else None) for p in (P.PROXIES_JSON, P.FRAG_PROXIES)}
+        try:
+            stray = dict(P.cluster_proxy_from_link(a))
+            P.atomic_write(P.PROXIES_JSON, json.dumps([{"name": "mine", "type": "socks5", "server": "9.9.9.9",
+                                                        "port": 1080}, stray]), 0o600)
+            self.assertTrue(P._drop_stray_member_outbounds())
+            self.assertEqual([p["name"] for p in P.load_server_proxies()], ["mine"])
+            self.assertFalse(P._drop_stray_member_outbounds())
+        finally:
+            for p, data in saved.items():
+                if data is None:
+                    if os.path.exists(p):
+                        os.remove(p)
+                else:
+                    P.atomic_write(p, data, 0o600 if p.endswith(".json") else 0o640)
+        live = "proxies:\n" + P.dump_yaml_proxies([P.cluster_proxy_from_link(a), P.cluster_proxy_from_link(b)])
+        names = [p["name"] for p in P._conf_cluster_entries(live)[1]]
+        self.assertEqual(names, [a["name"] + "|Cluster", b["name"] + "|Cluster"])   # the gone one counts too
+        self.assertIn("start_cluster_watch()", read(os.path.join(REPO, "panel/cg_http.py")))
+
+    def test_background_watch_gives_way_and_keeps_going(self):
+        """1.49: a user's cluster job takes over from the background check (it stops before its next
+        member); one member's failure is recorded on its link and the others are still checked."""
+        st, a, b = self._two_members()
+        P.save_cluster(st)
+        g = P.cluster_watch_once.__globals__
+        seen = []
+
+        def fake_call(l, path, extra=None, timeout=30, fallback=""):
+            seen.append(l["name"])
+            if l["instance"] == a["instance"]:
+                raise P.ClusterRemoteError("x", "bad_token")
+            return {"ok": True, "name": l["name"], "version": P.VERSION}
+
+        def refusing_drop(instances, tombstone=False):
+            raise P.ClusterError("自定义服务端配置里的代理组或规则还在使用已不在集群里的成员（pin），请在「自定义服务端」页改掉后再试")
+
+        with mock.patch.dict(g, {"cluster_call": fake_call, "_drop_links": refusing_drop,
+                                 "refresh_cluster_fragments": lambda: False}):
+            rep = P.cluster_watch_once()
+        self.assertEqual(rep["failed"], [a["name"]])
+        self.assertEqual(seen, [a["name"], b["name"]])   # the second member was still checked
+        link_a = [l for l in P.load_cluster()["links"] if l["instance"] == a["instance"]][0]
+        self.assertFalse(link_a["ok"])
+        self.assertIn("pin", link_a["error"])
+        seen.clear()
+        P._CLUSTER_CANCEL.set()
+        try:
+            with mock.patch.dict(g, {"cluster_call": fake_call, "refresh_cluster_fragments": lambda: False}):
+                P.cluster_watch_once()
+        finally:
+            P._CLUSTER_CANCEL.clear()
+        self.assertEqual(seen, [])   # a user job wants the lock: the round stops at once
+        h = read(os.path.join(REPO, "panel/cg_http.py"))
+        self.assertIn('if not locked and _WATCH["on"]:', h)
+
+    def test_left_members_do_not_come_back_from_a_saved_custom_config(self):
+        """1.49: the custom config set aside (CUSTOM_SAVED) used to keep the member outbounds and the
+        cluster inbound; after 退出集群, loading it again put the old members back into proxies:. It is
+        now saved without cluster entries, and applying a config with stale ones drops them."""
+        st, a, b = self._two_members()
+        st["inbound"] = {"port": 31050, "decryption": "mlkem768x25519plus.native.600s.x", "encryption": "e"}
+        P.save_cluster(st)
+        own = {"name": "my-out", "type": "socks5", "server": "9.9.9.9", "port": 1080}
+        conf = ("listeners:\n" + P.dump_yaml_proxies(
+                    [{"name": "my-in", "type": "socks", "port": 30999, "listen": "0.0.0.0"}] + P.cluster_listeners(st))
+                + "proxies:\n" + P.dump_yaml_proxies([own] + [P.cluster_proxy_from_link(l) for l in st["links"]]))
+        self.assertTrue(P.has_cluster_entries(conf))
+        clean = P.strip_cluster_entries(conf)
+        self.assertFalse(P.has_cluster_entries(clean))
+        self.assertEqual([p["name"] for p in P.extract_top_level_yaml_section(clean, "proxies")], ["my-out"])
+        self.assertEqual([x["name"] for x in P.extract_top_level_yaml_section(clean, "listeners")], ["my-in"])
+        self.assertEqual(P.strip_cluster_entries(clean), clean)   # nothing to drop: text kept as written
+        cfg = read(os.path.join(REPO, "panel/cg_config.py"))
+        self.assertEqual(cfg.count("atomic_write(CUSTOM_SAVED, strip_cluster_entries(backup[CUSTOM_CONF]), 0o640)"), 2)
+        self.assertIn('if load_cluster()["links"] or has_cluster_entries(s):', cfg)
+        # after leaving: no members, the stale entries in a pasted config are dropped by the merge
+        P.save_cluster({"instance": st["instance"], "links": [], "pending": [], "removed": {}})
+        merged = P.custom_conf_with_cluster(conf)
+        self.assertFalse(P.has_cluster_entries(merged))
+        self.assertEqual([p["name"] for p in P.extract_top_level_yaml_section(merged, "proxies")], ["my-out"])
+        self.assertIn("cur_cfg = strip_cluster_entries(cur_cfg)", read(os.path.join(REPO, "panel/cg_http.py")))
 
     def test_waiting_entries_go_with_the_members_that_reported_them(self):
         """1.40: a 等待互联 entry stayed forever after the member that reported it was removed (and had
@@ -1373,18 +1594,19 @@ class ClusterTest(unittest.TestCase):
         rc, out = P.validate_config()
         self.assertEqual(rc, 0, out)
         members = {p.get("name") for p in P._section_items(conf, "proxies")}
-        for name in SYMBOL_NAMES:
+        outs = {P.cluster_outbound_name(n) for n in SYMBOL_NAMES}   # 1.49: "<name>|Cluster"
+        for name in outs:
             self.assertIn(name, members)
             self.assertIn("  - name: " + P.yaml_scalar(name, "name") + "\n", conf)
-        self.assertEqual(P.cluster_proxy_names(), set(SYMBOL_NAMES))
-        self.assertTrue(set(SYMBOL_NAMES) <= P.used_proxy_names())
+        self.assertEqual(P.cluster_proxy_names(), outs)
+        self.assertTrue(outs <= P.used_proxy_names())
         # hidden from the subscription and the outbound list, in both template and custom mode
         sub = P.render_subscription(P.read_env(), live=False)
         for name in SYMBOL_NAMES:
             self.assertNotIn(name, sub)
-        self.assertFalse(set(SYMBOL_NAMES) & {p.get("name") for p in P.load_server_proxies()})
+        self.assertFalse(outs & {p.get("name") for p in P.load_server_proxies()})
         inbs, proxies, _ = P.parse_custom_config_state(conf)
-        self.assertFalse(set(SYMBOL_NAMES) & {p.get("name") for p in proxies})
+        self.assertFalse(outs & {p.get("name") for p in proxies})
         self.assertFalse([i for i in inbs if i["name"].startswith(P.CLUSTER_LISTENER_PREFIX)])
         names = [m["name"] for m in P.public_cluster_state(False)["members"]]
         self.assertEqual(sorted(names), sorted(SYMBOL_NAMES))
@@ -1421,7 +1643,7 @@ class ClusterTest(unittest.TestCase):
         # one link = one outbound to the other panel + one dedicated inbound for it
         lst, prox = P._conf_cluster_entries(conf)
         self.assertEqual([(p["name"], p["server"], p["encryption"], p["flow"]) for p in prox],
-                         [("东京-1", "tokyo.example.com", enc, "xtls-rprx-vision")])
+                         [("东京-1|Cluster", "tokyo.example.com", enc, "xtls-rprx-vision")])
         self.assertEqual([(x["name"], x["decryption"], x["users"][0]["flow"]) for x in lst],
                          [("cg-cluster-abc123", dec, "xtls-rprx-vision")])
         self.assertNotRegex(conf, r"(?m)^\s*- \{")   # 1.41: multi-line YAML, no one-line JSON entries
@@ -1430,7 +1652,8 @@ class ClusterTest(unittest.TestCase):
         self.assertIn("include-all: true", read(P.FRAG_PROXY_GROUPS) if os.path.exists(P.FRAG_PROXY_GROUPS) else conf)
         self.assertIn(31001, P.used_ports(P.read_env()))
         self.assertEqual(P.cluster_ufw_specs(), {"31001/tcp"})
-        self.assertIn("东京-1", P.used_proxy_names())
+        self.assertIn("东京-1|Cluster", P.used_proxy_names())
+        self.assertNotIn("东京-1", P.used_proxy_names())   # 1.49: the plain name is free for the user
 
     def test_cluster_hidden_from_subscription_and_ui(self):
         st, dec, enc = self._state()
@@ -1455,7 +1678,7 @@ class ClusterTest(unittest.TestCase):
         P.save_cluster(st)
         inbs, proxies, _ = P.parse_custom_config_state(P.assemble_config())
         self.assertFalse([i for i in inbs if i["name"].startswith(P.CLUSTER_LISTENER_PREFIX)])
-        self.assertNotIn("东京-1", [p.get("name") for p in proxies])
+        self.assertNotIn("东京-1|Cluster", [p.get("name") for p in proxies])
         self.assertIn("shadowsocks-t", [i["name"] for i in inbs])
 
     def test_custom_mode_cluster_entries_follow_cluster_json(self):
@@ -1468,22 +1691,25 @@ class ClusterTest(unittest.TestCase):
                 "    password: pw-12345678\n    cipher: aes-256-gcm\n"
                 "  - name: cg-cluster-stale\n    type: vless\n    port: 39999\n"
                 "proxies:\n  - name: mine\n    type: socks5\n    server: 1.1.1.1\n    port: 1080\n"
-                "  - name: 东京-1\n    type: socks5\n    server: 9.9.9.9\n    port: 1\n"
+                "  - name: 东京-1|Cluster\n    type: socks5\n    server: 9.9.9.9\n    port: 1\n"
+                "  - name: 旧成员|Cluster\n    type: socks5\n    server: 9.9.9.9\n    port: 2\n"
+                "  - name: 东京-1\n    type: socks5\n    server: 8.8.8.8\n    port: 3\n"
                 "proxy-groups:\n  - name: G\n    type: select\n    include-all: true\n"
                 "rules:\n  - MATCH,G\n")
         out = P.custom_conf_with_cluster(user)
         lst = P.extract_top_level_yaml_section(out, "listeners")
         prox = P.extract_top_level_yaml_section(out, "proxies")
         self.assertEqual([l["name"] for l in lst], ["my-ss", P.CLUSTER_LISTENER_PREFIX + "abc123"])
-        self.assertEqual([p["name"] for p in prox], ["mine", "东京-1"])
-        self.assertEqual(prox[1]["server"], "tokyo.example.com")   # from cluster.json, not the pasted text
+        # 1.49: "|Cluster" entries are the cluster's (a leftover one goes); the plain name is the user's
+        self.assertEqual([p["name"] for p in prox], ["mine", "东京-1", "东京-1|Cluster"])
+        self.assertEqual(prox[2]["server"], "tokyo.example.com")   # from cluster.json, not the pasted text
         self.assertEqual(lst[1].get("proxy"), "DIRECT")   # exit only in custom mode too (no loops)
         self.assertIn("include-all: true", out)
         self.assertIn("MATCH,G", out)
-        # A member that left: its outbound is dropped when it is named in old_names.
+        # A member that left: its outbound goes.
         P.save_cluster({**st, "links": []})
-        out2 = P.custom_conf_with_cluster(out, old_names={"东京-1"})
-        self.assertEqual([p["name"] for p in P.extract_top_level_yaml_section(out2, "proxies")], ["mine"])
+        out2 = P.custom_conf_with_cluster(out, old_names={"东京-1|Cluster"})
+        self.assertEqual([p["name"] for p in P.extract_top_level_yaml_section(out2, "proxies")], ["mine", "东京-1"])
         self.assertFalse([l for l in P.extract_top_level_yaml_section(out2, "listeners")
                           if l["name"].startswith(P.CLUSTER_LISTENER_PREFIX)])
         self.assertEqual(P.custom_conf_with_cluster(out2), out2)   # nothing to change: idempotent
@@ -1503,9 +1729,10 @@ class ClusterTest(unittest.TestCase):
             self.assertIn("tokyo.example.com", live)
             rc, out = P.validate_config()
             self.assertEqual(rc, 0, out)
-            # A failed check (here: a group naming a member that is being renamed away) restores everything.
+            # A group naming only a member that goes is not emptied: the check fails, everything is
+            # restored, and the message names the group (1.49).
             self.assertIn("\nproxy-groups:\n", live)
-            pinned = live.replace("\nproxy-groups:\n", "\nproxy-groups:\n  - name: pin\n    type: select\n    proxies:\n      - 东京-1\n", 1)
+            pinned = live.replace("\nproxy-groups:\n", "\nproxy-groups:\n  - name: pin\n    type: select\n    proxies:\n      - 东京-1|Cluster\n", 1)
             P.atomic_write(P.CUSTOM_CONF, pinned, 0o640)
             P.atomic_write(P.CONF, pinned, 0o640)
             self.assertEqual(P.validate_config()[0], 0)   # valid while the member is called 东京-1
@@ -1514,10 +1741,17 @@ class ClusterTest(unittest.TestCase):
             def rename(s):
                 s["links"][0]["name"] = "大阪-2"
             with mock.patch.dict(g, {"_wait_cluster_ports": lambda want, timeout=8.0: True}):
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(P.ClusterError) as cm:
                     P._cluster_commit(rename)
+            self.assertIn("（pin）", str(cm.exception))
             self.assertEqual(read(P.CUSTOM_CONF), before)
             self.assertEqual(P.load_cluster()["links"][0]["name"], "东京-1")
+            # the same rename as a rename (the member changed its name): the group follows it
+            with mock.patch.dict(g, {"_wait_cluster_ports": lambda want, timeout=8.0: True}):
+                P._cluster_commit(rename, renames={"东京-1|Cluster": "大阪-2|Cluster"})
+            groups = {x["name"]: x for x in P.extract_top_level_yaml_section(read(P.CUSTOM_CONF), "proxy-groups")}
+            self.assertEqual(groups["pin"]["proxies"], ["大阪-2|Cluster"])
+            self.assertEqual(P.validate_config()[0], 0)
         finally:
             if os.path.exists(P.CUSTOM_CONF):
                 os.remove(P.CUSTOM_CONF)

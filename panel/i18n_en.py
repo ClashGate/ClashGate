@@ -410,6 +410,8 @@ TABLE = [
     ("已关闭自定义服务端，默认模式已恢复成开启自定义服务端之前的样子。", "Custom server turned off: the default mode is back as it was before custom server was turned on."),
     ("已关闭自定义服务端。没有可用的默认模式配置，已生成新的 VlessReality 节点（分流组保持不变），请在客户端更新订阅。", "Custom server turned off. No usable default-mode config was found, so a new VlessReality node was created (routing groups are unchanged). Update the subscription in your clients."),
     ("已关闭自定义服务端。默认模式配置无法使用，已恢复默认服务端模板并生成新的 VlessReality 节点，请在客户端更新订阅。", "Custom server turned off. The default-mode config could not be used, so the default server template was restored with a new VlessReality node. Update the subscription in your clients."),
+    ("自定义服务端配置里的代理组或规则还在使用已不在集群里的成员（{}），请在「自定义服务端」页改掉后再试", "Proxy groups or rules in the custom server config still use members that are no longer in the cluster ({}). Change them on the Custom server page and try again"),
+    ("名称不能以 |Cluster 结尾，它留给集群成员使用", "A name cannot end in |Cluster; that suffix is reserved for cluster members"),
 ]
 
 _COMPILED = []
